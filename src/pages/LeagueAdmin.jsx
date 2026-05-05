@@ -1,3 +1,4 @@
+import ScheduleGenerator from "./ScheduleGenerator";
 import { useState, useEffect } from "react";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
@@ -209,7 +210,7 @@ export default function LeagueAdmin({ session, userRole }) {
         <>
           {/* TABS */}
           <div style={s.tabs}>
-            {[["equipos","👕","Equipos"],["jugadores","👥","Jugadores"],].map(([key, icon, label]) => (
+            {[["equipos","👕","Equipos"],["jugadores","👥","Jugadores"],["calendario","📅","Calendario"],].map(([key, icon, label]) => (
               <button key={key} onClick={() => { setSeccion(key); setEquipoDetalle(null); }}
                 style={{ ...s.tab, ...(seccion === key || (seccion === "detalle" && key === "equipos") ? s.tabActive : {}) }}>
                 {icon} {label}
@@ -353,6 +354,15 @@ export default function LeagueAdmin({ session, userRole }) {
               )}
             </div>
           )}
+
+{seccion === "calendario" && (
+  <ScheduleGenerator
+    session={session}
+    liga={ligaSeleccionada}
+    cancha={null}
+  />
+)}
+
         </>
       )}
 
