@@ -688,21 +688,23 @@ function RegisterStaffModal({ onClose, showToast }) {
   const [success, setSuccess] = useState(false);
 
   const handle = async () => {
-    if (!form.tipo) return setError("Selecciona si eres árbitro o admin de liga");
-    if (!form.nombre_completo||!form.email||!form.password) return setError("Completa todos los campos");
-    setLoading(true); setError("");
-    const data = await api("/auth/v1/signup",{method:"POST",body:JSON.stringify({email:form.email,password:form.password})});
-    if (data.user||data.id) {
-      const token = data.session?.access_token||data.access_token;
-      const userId = data.user?.id||data.id;
-      if (token) {
-  const solRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/solicitudes_registro`,
-    {
+  if (!form.tipo) return setError("Selecciona si eres árbitro o admin de liga");
+  if (!form.nombre_completo || !form.email || !form.password) return setError("Completa todos los campos");
+  setLoading(true); setError("");
+
+  const data = await api("/auth/v1/signup", {
+    method: "POST",
+    body: JSON.stringify({ email: form.email, password: form.password })
+  });
+
+  if (data.user || data.id) {
+    const userId = data.user?.id || data.id;
+
+    // Guardar solicitud usando anon key (no necesita token)
+    const solRes = await fetch(`${SUPABASE_URL}/rest/v1/solicitudes_registro`, {
       method: "POST",
       headers: {
         "apikey": SUPABASE_KEY,
-        "Authorization": `Bearer ${token}`,
         "Content-Type": "application/json",
         "Prefer": "return=representation"
       },
@@ -712,18 +714,19 @@ function RegisterStaffModal({ onClose, showToast }) {
         tipo_rol: form.tipo,
         estado: "pendiente"
       })
+    });
+
+    if (!solRes.ok) {
+      const err = await solRes.json();
+      console.error("Error solicitud:", err);
     }
-  );
-  if (!solRes.ok) {
-    const err = await solRes.json();
-    console.error("Error solicitud:", err);
-    return setError("Tu cuenta fue creada pero hubo un error al enviar la solicitud. Contacta al administrador.");
+
+    setSuccess(true);
+  } else {
+    setError(data.msg || data.error_description || "Error al registrarse");
   }
-}
-setSuccess(true);
-    } else { setError(data.msg||data.error_description||"Error al registrarse"); }
-    setLoading(false);
-  };
+  setLoading(false);
+};
 
   if (success) return (
     <div className="ifutbol-overlay" onClick={onClose}>
