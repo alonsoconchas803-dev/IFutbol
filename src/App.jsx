@@ -696,9 +696,31 @@ function RegisterStaffModal({ onClose, showToast }) {
       const token = data.session?.access_token||data.access_token;
       const userId = data.user?.id||data.id;
       if (token) {
-        await fetch(`${SUPABASE_URL}/rest/v1/solicitudes_registro`,{method:"POST",headers:{"apikey":SUPABASE_KEY,"Authorization":`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({user_id:userId,nombre_completo:form.nombre_completo,tipo_rol:form.tipo,estado:"pendiente"})}).catch(()=>{});
-      }
-      setSuccess(true);
+  const solRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/solicitudes_registro`,
+    {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        nombre_completo: form.nombre_completo,
+        tipo_rol: form.tipo,
+        estado: "pendiente"
+      })
+    }
+  );
+  if (!solRes.ok) {
+    const err = await solRes.json();
+    console.error("Error solicitud:", err);
+    return setError("Tu cuenta fue creada pero hubo un error al enviar la solicitud. Contacta al administrador.");
+  }
+}
+setSuccess(true);
     } else { setError(data.msg||data.error_description||"Error al registrarse"); }
     setLoading(false);
   };
