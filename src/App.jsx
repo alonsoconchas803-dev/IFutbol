@@ -80,7 +80,9 @@ export default function App() {
 
   const loadUserRole = async (token, userId) => {
     try {
+      console.log("Buscando rol para:", userId); 
       const roles = await dbAuth(`/user_roles?user_id=eq.${userId}&select=rol,liga_id&limit=1`, token);
+       console.log("Roles encontrados:", roles);
       if (Array.isArray(roles) && roles.length > 0) {
         setUserRole(roles[0]);
         setScreen("dashboard");
