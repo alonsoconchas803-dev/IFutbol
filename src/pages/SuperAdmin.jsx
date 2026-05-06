@@ -1,3 +1,4 @@
+import Solicitudes from "./Solicitudes";
 import { useState, useEffect } from "react";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
@@ -159,7 +160,7 @@ export default function SuperAdmin({ session }) {
 
       {/* TABS */}
       <div style={s.tabs}>
-        {[["canchas","🏟️","Canchas"],["ligas","🏆","Ligas"],["stats","📊","Resumen"]].map(([key, icon, label]) => (
+        {[["canchas","🏟️","Canchas"],["ligas","🏆","Ligas"],["stats","📊","Resumen"],["solicitudes","📋","Solicitudes"]].map(([key, icon, label]) => (
           <button key={key} onClick={() => setSeccion(key)}
             style={{ ...s.tab, ...(seccion === key ? s.tabActive : {}) }}>
             {icon} {label}
@@ -287,6 +288,10 @@ export default function SuperAdmin({ session }) {
           </div>
         </div>
       )}
+
+      {seccion === "solicitudes" && (
+  <Solicitudes session={session} />
+)}
 
       {/* ── MODAL CANCHA ── */}
       {modal === "cancha" && (
