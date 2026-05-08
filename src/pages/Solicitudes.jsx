@@ -268,7 +268,7 @@ if (modalSolicitud.tipo_rol === "referee") {
               </div>
             )}
 
-            {modalSolicitud.tipo_rol === "referee" && (
+           {modalSolicitud.tipo_rol === "referee" && (<>
   <div style={{ marginBottom:20 }}>
     <label className="form-label">Asignar a unidades deportivas *</label>
     <p style={{ fontSize:12, color:"var(--text-muted)", marginBottom:10 }}>
@@ -295,7 +295,7 @@ if (modalSolicitud.tipo_rol === "referee") {
       ))}
     </div>
   </div>
-)}
+</>)}
 
             <div style={{ display:"flex", gap:10, marginTop:20 }}>
               <button className="btn btn-ghost" style={{ flex:1 }} onClick={() => setModalSolicitud(null)}>
