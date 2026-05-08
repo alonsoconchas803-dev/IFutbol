@@ -40,6 +40,10 @@ export default function Solicitudes({ session }) {
   const [toast, setToast] = useState(null);
   const [modalSolicitud, setModalSolicitud] = useState(null);
   const [ligaSeleccionada, setLigaSeleccionada] = useState("");
+  
+  const [canchasSeleccionadas, setCanchasSeleccionadas] = useState([]);
+  const [canchas, setCanchas] = useState([]);
+
   const [procesando, setProcesando] = useState(false);
 
   const token = session?.access_token;
@@ -50,17 +54,19 @@ export default function Solicitudes({ session }) {
   };
 
   const cargarDatos = async () => {
-    setLoading(true);
-    try {
-      const [sols, ligs] = await Promise.all([
-        db("/solicitudes_registro?select=*&order=created_at.desc", token),
-        db("/ligas?activa=eq.true&select=*&order=nombre", token),
-      ]);
-      setSolicitudes(sols || []);
-      setLigas(ligs || []);
-    } catch (e) { showToast(e.message, "err"); }
-    setLoading(false);
-  };
+  setLoading(true);
+  try {
+    const [sols, ligs, canchasData] = await Promise.all([
+      db("/solicitudes_registro?select=*&order=created_at.desc", token),
+      db("/ligas?activa=eq.true&select=*&order=nombre", token),
+      db("/canchas?select=*&order=nombre", token),  // ← agrega esta línea
+    ]);
+    setSolicitudes(sols || []);
+    setLigas(ligs || []);
+    setCanchas(canchasData || []);  // ← y esta
+  } catch (e) { showToast(e.message, "err"); }
+  setLoading(false);
+};
 
   useEffect(() => { cargarDatos(); }, []);
 
@@ -75,6 +81,19 @@ export default function Solicitudes({ session }) {
     }
     setProcesando(true);
     try {
+// Guardar relación árbitro-cancha
+if (modalSolicitud.tipo_rol === "referee") {
+  for (const canchaId of canchasSeleccionadas) {
+    await db("/arbitro_cancha", token, {
+      method: "POST",
+      body: JSON.stringify({
+        user_id: modalSolicitud.user_id,
+        cancha_id: canchaId,
+      })
+    }).catch(() => {});
+  }
+}
+
       // Asignar rol
       await db("/user_roles", token, {
         method: "POST",
@@ -94,6 +113,7 @@ export default function Solicitudes({ session }) {
       showToast(`✅ ${modalSolicitud.nombre_completo} aprobado como ${ROLES_LABEL[modalSolicitud.tipo_rol]?.label}`);
       setModalSolicitud(null);
       setLigaSeleccionada("");
+      setCanchasSeleccionadas([]);
       cargarDatos();
     } catch (e) { showToast(e.message, "err"); }
     setProcesando(false);
@@ -249,10 +269,33 @@ export default function Solicitudes({ session }) {
             )}
 
             {modalSolicitud.tipo_rol === "referee" && (
-              <div style={s.infoBox}>
-                🟡 El árbitro podrá registrar fichas de partido en todos los torneos donde sea asignado
-              </div>
-            )}
+  <div style={{ marginBottom:20 }}>
+    <label className="form-label">Asignar a unidades deportivas *</label>
+    <p style={{ fontSize:12, color:"var(--text-muted)", marginBottom:10 }}>
+      El árbitro podrá registrar fichas en los torneos de estas canchas
+    </p>
+    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+      {canchas.map(c => (
+        <div key={c.id}
+          onClick={() => {
+            const sel = canchasSeleccionadas.includes(c.id)
+              ? canchasSeleccionadas.filter(id => id !== c.id)
+              : [...canchasSeleccionadas, c.id];
+            setCanchasSeleccionadas(sel);
+          }}
+          style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 16px", borderRadius:10, border:`2px solid ${canchasSeleccionadas.includes(c.id) ? "var(--green)" : "var(--border)"}`, background: canchasSeleccionadas.includes(c.id) ? "var(--green-light)" : "white", cursor:"pointer", transition:"all 0.2s" }}>
+          <div style={{ width:20, height:20, borderRadius:6, border:`2px solid ${canchasSeleccionadas.includes(c.id) ? "var(--green)" : "var(--border)"}`, background: canchasSeleccionadas.includes(c.id) ? "var(--green)" : "white", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+            {canchasSeleccionadas.includes(c.id) && <span style={{ color:"white", fontSize:12, fontWeight:800 }}>✓</span>}
+          </div>
+          <div>
+            <div style={{ fontWeight:700, fontSize:14 }}>🏟️ {c.nombre}</div>
+            <div style={{ fontSize:12, color:"var(--text-muted)" }}>{c.direccion}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
 
             <div style={{ display:"flex", gap:10, marginTop:20 }}>
               <button className="btn btn-ghost" style={{ flex:1 }} onClick={() => setModalSolicitud(null)}>
