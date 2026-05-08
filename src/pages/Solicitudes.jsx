@@ -22,29 +22,27 @@ const db = async (path, token, options = {}) => {
 };
 
 const ROLES_LABEL = {
-  referee: { label: "Árbitro", icon: "🟡", color: "#f59e0b", bg: "#fffbeb", border: "#fde68a" },
-  league_admin: { label: "Admin de Liga", icon: "🏟️", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
+  referee:      { label: "Árbitro",        icon: "🟡", color: "#f59e0b", bg: "#fffbeb", border: "#fde68a" },
+  league_admin: { label: "Admin de Liga",  icon: "🏟️", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
 };
 
 const ESTADO_LABEL = {
-  pendiente: { label: "Pendiente", color: "#f59e0b", bg: "#fffbeb" },
-  aprobado: { label: "Aprobado", color: "#16a34a", bg: "#f0fdf4" },
-  rechazado: { label: "Rechazado", color: "#dc2626", bg: "#fef2f2" },
+  pendiente:  { label: "Pendiente",  color: "#f59e0b", bg: "#fffbeb" },
+  aprobado:   { label: "Aprobado",   color: "#16a34a", bg: "#f0fdf4" },
+  rechazado:  { label: "Rechazado",  color: "#dc2626", bg: "#fef2f2" },
 };
 
 export default function Solicitudes({ session }) {
-  const [solicitudes, setSolicitudes] = useState([]);
-  const [ligas, setLigas] = useState([]);
-  const [filtro, setFiltro] = useState("pendiente");
-  const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState(null);
-  const [modalSolicitud, setModalSolicitud] = useState(null);
-  const [ligaSeleccionada, setLigaSeleccionada] = useState("");
-  
+  const [solicitudes, setSolicitudes]               = useState([]);
+  const [ligas, setLigas]                           = useState([]);
+  const [canchas, setCanchas]                       = useState([]);
+  const [filtro, setFiltro]                         = useState("pendiente");
+  const [loading, setLoading]                       = useState(true);
+  const [toast, setToast]                           = useState(null);
+  const [modalSolicitud, setModalSolicitud]         = useState(null);
+  const [ligaSeleccionada, setLigaSeleccionada]     = useState("");
   const [canchasSeleccionadas, setCanchasSeleccionadas] = useState([]);
-  const [canchas, setCanchas] = useState([]);
-
-  const [procesando, setProcesando] = useState(false);
+  const [procesando, setProcesando]                 = useState(false);
 
   const token = session?.access_token;
 
@@ -54,47 +52,48 @@ export default function Solicitudes({ session }) {
   };
 
   const cargarDatos = async () => {
-  setLoading(true);
-  try {
-    const [sols, ligs, canchasData] = await Promise.all([
-      db("/solicitudes_registro?select=*&order=created_at.desc", token),
-      db("/ligas?activa=eq.true&select=*&order=nombre", token),
-      db("/canchas?select=*&order=nombre", token),  // ← agrega esta línea
-    ]);
-    setSolicitudes(sols || []);
-    setLigas(ligs || []);
-    setCanchas(canchasData || []);  // ← y esta
-  } catch (e) { showToast(e.message, "err"); }
-  setLoading(false);
-};
+    setLoading(true);
+    try {
+      const [sols, ligs, canchasData] = await Promise.all([
+        db("/solicitudes_registro?select=*&order=created_at.desc", token),
+        db("/ligas?activa=eq.true&select=*&order=nombre", token),
+        db("/canchas?select=*&order=nombre", token),
+      ]);
+      setSolicitudes(sols || []);
+      setLigas(ligs || []);
+      setCanchas(canchasData || []);
+    } catch (e) { showToast(e.message, "err"); }
+    setLoading(false);
+  };
 
   useEffect(() => { cargarDatos(); }, []);
 
   const filtradas = solicitudes.filter(s => filtro === "todas" ? true : s.estado === filtro);
-
   const pendientes = solicitudes.filter(s => s.estado === "pendiente").length;
+
+  const abrirModal = (sol) => {
+    setModalSolicitud(sol);
+    setLigaSeleccionada("");
+    setCanchasSeleccionadas([]);
+  };
+
+  const toggleCancha = (id) => {
+    setCanchasSeleccionadas(prev =>
+      prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
+    );
+  };
 
   const handleAprobar = async () => {
     if (!modalSolicitud) return;
     if (modalSolicitud.tipo_rol === "league_admin" && !ligaSeleccionada) {
       return showToast("Selecciona la liga que administrará", "err");
     }
+    if (modalSolicitud.tipo_rol === "referee" && canchasSeleccionadas.length === 0) {
+      return showToast("Selecciona al menos una unidad deportiva", "err");
+    }
     setProcesando(true);
     try {
-// Guardar relación árbitro-cancha
-if (modalSolicitud.tipo_rol === "referee") {
-  for (const canchaId of canchasSeleccionadas) {
-    await db("/arbitro_cancha", token, {
-      method: "POST",
-      body: JSON.stringify({
-        user_id: modalSolicitud.user_id,
-        cancha_id: canchaId,
-      })
-    }).catch(() => {});
-  }
-}
-
-      // Asignar rol
+      // 1. Asignar rol
       await db("/user_roles", token, {
         method: "POST",
         body: JSON.stringify({
@@ -104,13 +103,29 @@ if (modalSolicitud.tipo_rol === "referee") {
         })
       });
 
-      // Actualizar estado de solicitud
+      // 2. Si es árbitro, guardar canchas asignadas
+      if (modalSolicitud.tipo_rol === "referee") {
+        for (const canchaId of canchasSeleccionadas) {
+          await db("/arbitro_cancha", token, {
+            method: "POST",
+            body: JSON.stringify({
+              user_id: modalSolicitud.user_id,
+              cancha_id: canchaId,
+            })
+          });
+        }
+      }
+
+      // 3. Actualizar estado de solicitud
       await db(`/solicitudes_registro?id=eq.${modalSolicitud.id}`, token, {
         method: "PATCH",
-        body: JSON.stringify({ estado: "aprobado", liga_id: ligaSeleccionada || null })
+        body: JSON.stringify({
+          estado: "aprobado",
+          liga_id: ligaSeleccionada || null
+        })
       });
 
-      showToast(`✅ ${modalSolicitud.nombre_completo} aprobado como ${ROLES_LABEL[modalSolicitud.tipo_rol]?.label}`);
+      showToast(`✅ ${modalSolicitud.nombre_completo} aprobado correctamente`);
       setModalSolicitud(null);
       setLigaSeleccionada("");
       setCanchasSeleccionadas([]);
@@ -119,15 +134,15 @@ if (modalSolicitud.tipo_rol === "referee") {
     setProcesando(false);
   };
 
-  const handleRechazar = async (solicitud) => {
-    if (!confirm(`¿Rechazar la solicitud de ${solicitud.nombre_completo}?`)) return;
+  const handleRechazar = async (sol) => {
+    if (!confirm(`¿Rechazar la solicitud de ${sol.nombre_completo}?`)) return;
     setProcesando(true);
     try {
-      await db(`/solicitudes_registro?id=eq.${solicitud.id}`, token, {
+      await db(`/solicitudes_registro?id=eq.${sol.id}`, token, {
         method: "PATCH",
         body: JSON.stringify({ estado: "rechazado" })
       });
-      showToast(`Solicitud de ${solicitud.nombre_completo} rechazada`);
+      showToast(`Solicitud rechazada`);
       cargarDatos();
     } catch (e) { showToast(e.message, "err"); }
     setProcesando(false);
@@ -169,7 +184,7 @@ if (modalSolicitud.tipo_rol === "referee") {
         ))}
       </div>
 
-      {/* CONTENIDO */}
+      {/* LISTA */}
       {loading ? (
         <div style={{ padding:60, textAlign:"center" }}><div className="spinner"/></div>
       ) : filtradas.length === 0 ? (
@@ -186,12 +201,9 @@ if (modalSolicitud.tipo_rol === "referee") {
             return (
               <div key={sol.id} style={s.card}>
                 <div style={s.cardLeft}>
-                  {/* AVATAR */}
                   <div style={{ ...s.avatar, background: rolInfo.bg, border: `2px solid ${rolInfo.border}` }}>
                     <span style={{ fontSize:22 }}>{rolInfo.icon}</span>
                   </div>
-
-                  {/* INFO */}
                   <div style={s.info}>
                     <div style={s.nombre}>{sol.nombre_completo}</div>
                     <div style={s.meta}>
@@ -200,25 +212,16 @@ if (modalSolicitud.tipo_rol === "referee") {
                       </span>
                       <span style={s.fecha}>{formatFecha(sol.created_at)}</span>
                     </div>
-                    {sol.liga_id && ligas.find(l => l.id === sol.liga_id) && (
-                      <div style={s.ligaTag}>
-                        🏆 {ligas.find(l => l.id === sol.liga_id)?.nombre}
-                      </div>
-                    )}
                   </div>
                 </div>
-
                 <div style={s.cardRight}>
-                  {/* ESTADO */}
                   <span style={{ ...s.estadoBadge, background: estadoInfo.bg, color: estadoInfo.color }}>
                     {estadoInfo.label}
                   </span>
-
-                  {/* ACCIONES */}
                   {sol.estado === "pendiente" && (
                     <div style={s.acciones}>
                       <button className="btn btn-primary" style={{ fontSize:13, padding:"8px 18px" }}
-                        onClick={() => { setModalSolicitud(sol); setLigaSeleccionada(""); }}>
+                        onClick={() => abrirModal(sol)}>
                         ✅ Aprobar
                       </button>
                       <button className="btn btn-danger" style={{ fontSize:13, padding:"8px 18px" }}
@@ -237,7 +240,9 @@ if (modalSolicitud.tipo_rol === "referee") {
       {/* MODAL APROBAR */}
       {modalSolicitud && (
         <div className="ifutbol-overlay" onClick={() => setModalSolicitud(null)}>
-          <div className="ifutbol-modal" onClick={e => e.stopPropagation()} style={{ maxWidth:440 }}>
+          <div className="ifutbol-modal" onClick={e => e.stopPropagation()} style={{ maxWidth:460 }}>
+
+            {/* HEADER MODAL */}
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
               <h3 style={{ fontSize:20, fontWeight:800 }}>Aprobar solicitud ✅</h3>
               <button style={s.closeBtn} onClick={() => setModalSolicitud(null)}>✕</button>
@@ -246,13 +251,13 @@ if (modalSolicitud.tipo_rol === "referee") {
             {/* INFO SOLICITANTE */}
             <div style={s.solicitanteCard}>
               <div style={{ fontSize:32, marginBottom:8 }}>{ROLES_LABEL[modalSolicitud.tipo_rol]?.icon}</div>
-              <div style={{ fontSize:18, fontWeight:800, marginBottom:4 }}>{modalSolicitud.nombre_completo}</div>
-              <div style={{ ...s.rolPill, display:"inline-flex", background:ROLES_LABEL[modalSolicitud.tipo_rol]?.bg, color:ROLES_LABEL[modalSolicitud.tipo_rol]?.color, border:`1px solid ${ROLES_LABEL[modalSolicitud.tipo_rol]?.border}` }}>
+              <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>{modalSolicitud.nombre_completo}</div>
+              <span style={{ ...s.rolPill, background:ROLES_LABEL[modalSolicitud.tipo_rol]?.bg, color:ROLES_LABEL[modalSolicitud.tipo_rol]?.color, border:`1px solid ${ROLES_LABEL[modalSolicitud.tipo_rol]?.border}` }}>
                 {ROLES_LABEL[modalSolicitud.tipo_rol]?.icon} {ROLES_LABEL[modalSolicitud.tipo_rol]?.label}
-              </div>
+              </span>
             </div>
 
-            {/* SI ES ADMIN DE LIGA, SELECCIONAR LIGA */}
+            {/* SI ES ADMIN DE LIGA → selector de liga */}
             {modalSolicitud.tipo_rol === "league_admin" && (
               <div style={{ marginBottom:20 }}>
                 <label className="form-label">Asignar a liga *</label>
@@ -268,41 +273,64 @@ if (modalSolicitud.tipo_rol === "referee") {
               </div>
             )}
 
-           {modalSolicitud.tipo_rol === "referee" && (<>
-  <div style={{ marginBottom:20 }}>
-    <label className="form-label">Asignar a unidades deportivas *</label>
-    <p style={{ fontSize:12, color:"var(--text-muted)", marginBottom:10 }}>
-      El árbitro podrá registrar fichas en los torneos de estas canchas
-    </p>
-    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-      {canchas.map(c => (
-        <div key={c.id}
-          onClick={() => {
-            const sel = canchasSeleccionadas.includes(c.id)
-              ? canchasSeleccionadas.filter(id => id !== c.id)
-              : [...canchasSeleccionadas, c.id];
-            setCanchasSeleccionadas(sel);
-          }}
-          style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 16px", borderRadius:10, border:`2px solid ${canchasSeleccionadas.includes(c.id) ? "var(--green)" : "var(--border)"}`, background: canchasSeleccionadas.includes(c.id) ? "var(--green-light)" : "white", cursor:"pointer", transition:"all 0.2s" }}>
-          <div style={{ width:20, height:20, borderRadius:6, border:`2px solid ${canchasSeleccionadas.includes(c.id) ? "var(--green)" : "var(--border)"}`, background: canchasSeleccionadas.includes(c.id) ? "var(--green)" : "white", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-            {canchasSeleccionadas.includes(c.id) && <span style={{ color:"white", fontSize:12, fontWeight:800 }}>✓</span>}
-          </div>
-          <div>
-            <div style={{ fontWeight:700, fontSize:14 }}>🏟️ {c.nombre}</div>
-            <div style={{ fontSize:12, color:"var(--text-muted)" }}>{c.direccion}</div>
-          </div>
-        </div>
-      ))}
-    </div>
-  </div>
-</>)}
+            {/* SI ES ÁRBITRO → selector de canchas */}
+            {modalSolicitud.tipo_rol === "referee" && (
+              <div style={{ marginBottom:20 }}>
+                <label className="form-label">Asignar a unidades deportivas *</label>
+                <p style={{ fontSize:12, color:"var(--text-muted)", marginBottom:12 }}>
+                  El árbitro podrá registrar fichas en los torneos de estas unidades
+                </p>
+                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                  {canchas.length === 0 ? (
+                    <div style={{ fontSize:13, color:"var(--text-muted)", fontStyle:"italic" }}>
+                      No hay unidades deportivas registradas
+                    </div>
+                  ) : canchas.map(c => {
+                    const seleccionada = canchasSeleccionadas.includes(c.id);
+                    return (
+                      <div key={c.id}
+                        onClick={() => toggleCancha(c.id)}
+                        style={{
+                          display:"flex", alignItems:"center", gap:12,
+                          padding:"12px 16px", borderRadius:10, cursor:"pointer",
+                          border:`2px solid ${seleccionada ? "var(--green)" : "var(--border)"}`,
+                          background: seleccionada ? "var(--green-light)" : "white",
+                          transition:"all 0.2s"
+                        }}>
+                        {/* CHECKBOX */}
+                        <div style={{
+                          width:20, height:20, borderRadius:6, flexShrink:0,
+                          border:`2px solid ${seleccionada ? "var(--green)" : "var(--border)"}`,
+                          background: seleccionada ? "var(--green)" : "white",
+                          display:"flex", alignItems:"center", justifyContent:"center",
+                          transition:"all 0.2s"
+                        }}>
+                          {seleccionada && <span style={{ color:"white", fontSize:12, fontWeight:900 }}>✓</span>}
+                        </div>
+                        {/* INFO CANCHA */}
+                        <div>
+                          <div style={{ fontWeight:700, fontSize:14, color:"var(--text)" }}>🏟️ {c.nombre}</div>
+                          {c.direccion && <div style={{ fontSize:12, color:"var(--text-muted)" }}>{c.direccion}</div>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {canchasSeleccionadas.length > 0 && (
+                  <div style={{ marginTop:10, fontSize:12, color:"var(--green)", fontWeight:600 }}>
+                    ✓ {canchasSeleccionadas.length} {canchasSeleccionadas.length === 1 ? "unidad seleccionada" : "unidades seleccionadas"}
+                  </div>
+                )}
+              </div>
+            )}
 
-            <div style={{ display:"flex", gap:10, marginTop:20 }}>
+            {/* BOTONES */}
+            <div style={{ display:"flex", gap:10, marginTop:8 }}>
               <button className="btn btn-ghost" style={{ flex:1 }} onClick={() => setModalSolicitud(null)}>
                 Cancelar
               </button>
               <button className="btn btn-premium" style={{ flex:2 }} onClick={handleAprobar} disabled={procesando}>
-                {procesando ? "Aprobando..." : `✅ Confirmar aprobación`}
+                {procesando ? "Aprobando..." : "✅ Confirmar aprobación"}
               </button>
             </div>
           </div>
@@ -329,12 +357,10 @@ const s = {
   meta: { display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" },
   rolPill: { padding:"3px 10px", borderRadius:"var(--radius-full)", fontSize:12, fontWeight:600 },
   fecha: { fontSize:12, color:"var(--text-muted)" },
-  ligaTag: { fontSize:12, color:"var(--green)", fontWeight:600, marginTop:6 },
   cardRight: { display:"flex", alignItems:"center", gap:12, flexShrink:0 },
   estadoBadge: { padding:"5px 14px", borderRadius:"var(--radius-full)", fontSize:12, fontWeight:700 },
   acciones: { display:"flex", gap:8 },
-  solicitanteCard: { background:"var(--bg)", borderRadius:"var(--radius-md)", padding:"20px", textAlign:"center", marginBottom:20 },
-  infoBox: { background:"#fffbeb", border:"1px solid #fde68a", borderRadius:10, padding:"12px 16px", color:"#92400e", fontSize:13 },
+  solicitanteCard: { background:"var(--bg)", borderRadius:"var(--radius-md)", padding:"18px", textAlign:"center", marginBottom:20 },
   closeBtn: { background:"var(--bg)", border:"1px solid var(--border)", borderRadius:8, width:30, height:30, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", color:"var(--text-sub)" },
 };
 
@@ -342,5 +368,4 @@ const css = `
   .filtro-btn { display:inline-flex; align-items:center; padding:8px 16px; border-radius:var(--radius-full); border:1.5px solid var(--border); background:white; color:var(--text-sub); font-size:13px; font-weight:600; cursor:pointer; transition:all 0.15s; font-family:'DM Sans',sans-serif; }
   .filtro-btn:hover { border-color:var(--green); color:var(--green); }
   .filtro-btn.active { background:var(--green); border-color:var(--green); color:white; }
-  .filtro-btn.active .count { background:rgba(255,255,255,0.25); }
 `;
