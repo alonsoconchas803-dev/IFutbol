@@ -22,27 +22,27 @@ const db = async (path, token, options = {}) => {
 };
 
 const ROLES_LABEL = {
-  referee:      { label: "Árbitro",        icon: "🟡", color: "#f59e0b", bg: "#fffbeb", border: "#fde68a" },
-  league_admin: { label: "Admin de Liga",  icon: "🏟️", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
+  referee:      { label: "Árbitro",       icon: "🟡", color: "#f59e0b", bg: "#fffbeb", border: "#fde68a" },
+  league_admin: { label: "Admin de Liga", icon: "🏟️", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
 };
 
 const ESTADO_LABEL = {
-  pendiente:  { label: "Pendiente",  color: "#f59e0b", bg: "#fffbeb" },
-  aprobado:   { label: "Aprobado",   color: "#16a34a", bg: "#f0fdf4" },
-  rechazado:  { label: "Rechazado",  color: "#dc2626", bg: "#fef2f2" },
+  pendiente: { label: "Pendiente", color: "#f59e0b", bg: "#fffbeb" },
+  aprobado:  { label: "Aprobado",  color: "#16a34a", bg: "#f0fdf4" },
+  rechazado: { label: "Rechazado", color: "#dc2626", bg: "#fef2f2" },
 };
 
 export default function Solicitudes({ session }) {
-  const [solicitudes, setSolicitudes]               = useState([]);
-  const [ligas, setLigas]                           = useState([]);
-  const [canchas, setCanchas]                       = useState([]);
-  const [filtro, setFiltro]                         = useState("pendiente");
-  const [loading, setLoading]                       = useState(true);
-  const [toast, setToast]                           = useState(null);
-  const [modalSolicitud, setModalSolicitud]         = useState(null);
-  const [ligaSeleccionada, setLigaSeleccionada]     = useState("");
+  const [solicitudes, setSolicitudes]                   = useState([]);
+  const [ligas, setLigas]                               = useState([]);
+  const [canchas, setCanchas]                           = useState([]);
+  const [filtro, setFiltro]                             = useState("pendiente");
+  const [loading, setLoading]                           = useState(true);
+  const [toast, setToast]                               = useState(null);
+  const [modalSolicitud, setModalSolicitud]             = useState(null);
+  const [ligaSeleccionada, setLigaSeleccionada]         = useState("");
   const [canchasSeleccionadas, setCanchasSeleccionadas] = useState([]);
-  const [procesando, setProcesando]                 = useState(false);
+  const [procesando, setProcesando]                     = useState(false);
 
   const token = session?.access_token;
 
@@ -85,15 +85,13 @@ export default function Solicitudes({ session }) {
 
   const handleAprobar = async () => {
     if (!modalSolicitud) return;
-    if (modalSolicitud.tipo_rol === "league_admin" && !ligaSeleccionada) {
+    if (modalSolicitud.tipo_rol === "league_admin" && !ligaSeleccionada)
       return showToast("Selecciona la liga que administrará", "err");
-    }
-    if (modalSolicitud.tipo_rol === "referee" && canchasSeleccionadas.length === 0) {
+    if (modalSolicitud.tipo_rol === "referee" && canchasSeleccionadas.length === 0)
       return showToast("Selecciona al menos una unidad deportiva", "err");
-    }
+
     setProcesando(true);
     try {
-      // 1. Asignar rol
       await db("/user_roles", token, {
         method: "POST",
         body: JSON.stringify({
@@ -103,26 +101,24 @@ export default function Solicitudes({ session }) {
         })
       });
 
-      // 2. Si es árbitro, guardar canchas asignadas
       if (modalSolicitud.tipo_rol === "referee") {
         for (const canchaId of canchasSeleccionadas) {
-          await db("/arbitro_cancha", token, {
+          await fetch(`${SUPABASE_URL}/rest/v1/arbitro_cancha`, {
             method: "POST",
-            body: JSON.stringify({
-              user_id: modalSolicitud.user_id,
-              cancha_id: canchaId,
-            })
+            headers: {
+              "apikey": SUPABASE_KEY,
+              "Authorization": `Bearer ${token}`,
+              "Content-Type": "application/json",
+              "Prefer": "return=representation"
+            },
+            body: JSON.stringify({ user_id: modalSolicitud.user_id, cancha_id: canchaId })
           });
         }
       }
 
-      // 3. Actualizar estado de solicitud
       await db(`/solicitudes_registro?id=eq.${modalSolicitud.id}`, token, {
         method: "PATCH",
-        body: JSON.stringify({
-          estado: "aprobado",
-          liga_id: ligaSeleccionada || null
-        })
+        body: JSON.stringify({ estado: "aprobado", liga_id: ligaSeleccionada || null })
       });
 
       showToast(`✅ ${modalSolicitud.nombre_completo} aprobado correctamente`);
@@ -142,7 +138,7 @@ export default function Solicitudes({ session }) {
         method: "PATCH",
         body: JSON.stringify({ estado: "rechazado" })
       });
-      showToast(`Solicitud rechazada`);
+      showToast("Solicitud rechazada");
       cargarDatos();
     } catch (e) { showToast(e.message, "err"); }
     setProcesando(false);
@@ -150,8 +146,10 @@ export default function Solicitudes({ session }) {
 
   const formatFecha = (fecha) => {
     if (!fecha) return "—";
-    const d = new Date(fecha);
-    return d.toLocaleDateString("es-MX", { day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit" });
+    return new Date(fecha).toLocaleDateString("es-MX", {
+      day: "2-digit", month: "short", year: "numeric",
+      hour: "2-digit", minute: "2-digit"
+    });
   };
 
   return (
@@ -167,7 +165,7 @@ export default function Solicitudes({ session }) {
         </div>
         {pendientes > 0 && (
           <div style={s.pendienteBadge}>
-            {pendientes} {pendientes === 1 ? "solicitud pendiente" : "solicitudes pendientes"}
+            {pendientes} {pendientes === 1 ? "pendiente" : "pendientes"}
           </div>
         )}
       </div>
@@ -177,9 +175,7 @@ export default function Solicitudes({ session }) {
         {[["pendiente","⏳ Pendientes"],["aprobado","✅ Aprobadas"],["rechazado","❌ Rechazadas"],["todas","📋 Todas"]].map(([key, label]) => (
           <button key={key} className={`filtro-btn ${filtro === key ? "active" : ""}`} onClick={() => setFiltro(key)}>
             {label}
-            {key !== "todas" && (
-              <span style={s.count}>{solicitudes.filter(s => s.estado === key).length}</span>
-            )}
+            {key !== "todas" && <span style={s.count}>{solicitudes.filter(s => s.estado === key).length}</span>}
           </button>
         ))}
       </div>
@@ -220,12 +216,10 @@ export default function Solicitudes({ session }) {
                   </span>
                   {sol.estado === "pendiente" && (
                     <div style={s.acciones}>
-                      <button className="btn btn-primary" style={{ fontSize:13, padding:"8px 18px" }}
-                        onClick={() => abrirModal(sol)}>
+                      <button className="btn btn-primary" style={{ fontSize:13, padding:"8px 16px" }} onClick={() => abrirModal(sol)}>
                         ✅ Aprobar
                       </button>
-                      <button className="btn btn-danger" style={{ fontSize:13, padding:"8px 18px" }}
-                        onClick={() => handleRechazar(sol)} disabled={procesando}>
+                      <button className="btn btn-danger" style={{ fontSize:13, padding:"8px 16px" }} onClick={() => handleRechazar(sol)} disabled={procesando}>
                         ❌ Rechazar
                       </button>
                     </div>
@@ -237,100 +231,90 @@ export default function Solicitudes({ session }) {
         </div>
       )}
 
-      {/* MODAL APROBAR */}
+      {/* MODAL */}
       {modalSolicitud && (
         <div className="ifutbol-overlay" onClick={() => setModalSolicitud(null)}>
-          <div className="ifutbol-modal" onClick={e => e.stopPropagation()} style={{ maxWidth:460 }}>
+          <div onClick={e => e.stopPropagation()} style={s.modal}>
 
-            {/* HEADER MODAL */}
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
-              <h3 style={{ fontSize:20, fontWeight:800 }}>Aprobar solicitud ✅</h3>
+            {/* HEADER COMPACTO */}
+            <div style={s.modalHeader}>
+              <div style={s.modalHeaderLeft}>
+                <span style={{ fontSize:20 }}>{ROLES_LABEL[modalSolicitud.tipo_rol]?.icon}</span>
+                <div>
+                  <div style={{ fontWeight:800, fontSize:16, color:"var(--text)" }}>{modalSolicitud.nombre_completo}</div>
+                  <span style={{ ...s.rolPill, background:ROLES_LABEL[modalSolicitud.tipo_rol]?.bg, color:ROLES_LABEL[modalSolicitud.tipo_rol]?.color, border:`1px solid ${ROLES_LABEL[modalSolicitud.tipo_rol]?.border}`, fontSize:11 }}>
+                    {ROLES_LABEL[modalSolicitud.tipo_rol]?.label}
+                  </span>
+                </div>
+              </div>
               <button style={s.closeBtn} onClick={() => setModalSolicitud(null)}>✕</button>
             </div>
 
-            {/* INFO SOLICITANTE */}
-            <div style={s.solicitanteCard}>
-              <div style={{ fontSize:32, marginBottom:8 }}>{ROLES_LABEL[modalSolicitud.tipo_rol]?.icon}</div>
-              <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>{modalSolicitud.nombre_completo}</div>
-              <span style={{ ...s.rolPill, background:ROLES_LABEL[modalSolicitud.tipo_rol]?.bg, color:ROLES_LABEL[modalSolicitud.tipo_rol]?.color, border:`1px solid ${ROLES_LABEL[modalSolicitud.tipo_rol]?.border}` }}>
-                {ROLES_LABEL[modalSolicitud.tipo_rol]?.icon} {ROLES_LABEL[modalSolicitud.tipo_rol]?.label}
-              </span>
+            {/* CUERPO SCROLLEABLE */}
+            <div style={s.modalBody}>
+
+              {/* ADMIN DE LIGA → selector liga */}
+              {modalSolicitud.tipo_rol === "league_admin" && (
+                <div style={{ marginBottom:16 }}>
+                  <label className="form-label">Asignar a liga *</label>
+                  <select className="form-input" value={ligaSeleccionada} onChange={e => setLigaSeleccionada(e.target.value)}>
+                    <option value="">Selecciona una liga...</option>
+                    {ligas.map(l => <option key={l.id} value={l.id}>🏆 {l.nombre} · {l.dia} {l.turno}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {/* ÁRBITRO → checkboxes canchas */}
+              {modalSolicitud.tipo_rol === "referee" && (
+                <div>
+                  <label className="form-label">Asignar a unidades deportivas *</label>
+                  <p style={{ fontSize:12, color:"var(--text-muted)", marginBottom:10 }}>
+                    El árbitro podrá registrar fichas en estas unidades
+                  </p>
+                  <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                    {canchas.map(c => {
+                      const sel = canchasSeleccionadas.includes(c.id);
+                      return (
+                        <div key={c.id} onClick={() => toggleCancha(c.id)} style={{
+                          display:"flex", alignItems:"center", gap:10,
+                          padding:"10px 14px", borderRadius:10, cursor:"pointer",
+                          border:`2px solid ${sel ? "var(--green)" : "var(--border)"}`,
+                          background: sel ? "var(--green-light)" : "white",
+                          transition:"all 0.15s"
+                        }}>
+                          <div style={{
+                            width:18, height:18, borderRadius:5, flexShrink:0,
+                            border:`2px solid ${sel ? "var(--green)" : "var(--border)"}`,
+                            background: sel ? "var(--green)" : "white",
+                            display:"flex", alignItems:"center", justifyContent:"center",
+                            transition:"all 0.15s"
+                          }}>
+                            {sel && <span style={{ color:"white", fontSize:11, fontWeight:900, lineHeight:1 }}>✓</span>}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight:700, fontSize:13 }}>🏟️ {c.nombre}</div>
+                            {c.direccion && <div style={{ fontSize:11, color:"var(--text-muted)" }}>{c.direccion}</div>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {canchasSeleccionadas.length > 0 && (
+                    <div style={{ marginTop:8, fontSize:12, color:"var(--green)", fontWeight:600 }}>
+                      ✓ {canchasSeleccionadas.length} {canchasSeleccionadas.length === 1 ? "unidad seleccionada" : "unidades seleccionadas"}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* SI ES ADMIN DE LIGA → selector de liga */}
-            {modalSolicitud.tipo_rol === "league_admin" && (
-              <div style={{ marginBottom:20 }}>
-                <label className="form-label">Asignar a liga *</label>
-                <select className="form-input" value={ligaSeleccionada} onChange={e => setLigaSeleccionada(e.target.value)}>
-                  <option value="">Selecciona una liga...</option>
-                  {ligas.map(l => (
-                    <option key={l.id} value={l.id}>🏆 {l.nombre} · {l.dia} {l.turno}</option>
-                  ))}
-                </select>
-                <p style={{ fontSize:12, color:"var(--text-muted)", marginTop:6 }}>
-                  Esta persona podrá gestionar equipos y jugadores de la liga seleccionada
-                </p>
-              </div>
-            )}
-
-            {/* SI ES ÁRBITRO → selector de canchas */}
-            {modalSolicitud.tipo_rol === "referee" && (
-              <div style={{ marginBottom:20 }}>
-                <label className="form-label">Asignar a unidades deportivas *</label>
-                <p style={{ fontSize:12, color:"var(--text-muted)", marginBottom:12 }}>
-                  El árbitro podrá registrar fichas en los torneos de estas unidades
-                </p>
-                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  {canchas.length === 0 ? (
-                    <div style={{ fontSize:13, color:"var(--text-muted)", fontStyle:"italic" }}>
-                      No hay unidades deportivas registradas
-                    </div>
-                  ) : canchas.map(c => {
-                    const seleccionada = canchasSeleccionadas.includes(c.id);
-                    return (
-                      <div key={c.id}
-                        onClick={() => toggleCancha(c.id)}
-                        style={{
-                          display:"flex", alignItems:"center", gap:12,
-                          padding:"12px 16px", borderRadius:10, cursor:"pointer",
-                          border:`2px solid ${seleccionada ? "var(--green)" : "var(--border)"}`,
-                          background: seleccionada ? "var(--green-light)" : "white",
-                          transition:"all 0.2s"
-                        }}>
-                        {/* CHECKBOX */}
-                        <div style={{
-                          width:20, height:20, borderRadius:6, flexShrink:0,
-                          border:`2px solid ${seleccionada ? "var(--green)" : "var(--border)"}`,
-                          background: seleccionada ? "var(--green)" : "white",
-                          display:"flex", alignItems:"center", justifyContent:"center",
-                          transition:"all 0.2s"
-                        }}>
-                          {seleccionada && <span style={{ color:"white", fontSize:12, fontWeight:900 }}>✓</span>}
-                        </div>
-                        {/* INFO CANCHA */}
-                        <div>
-                          <div style={{ fontWeight:700, fontSize:14, color:"var(--text)" }}>🏟️ {c.nombre}</div>
-                          {c.direccion && <div style={{ fontSize:12, color:"var(--text-muted)" }}>{c.direccion}</div>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                {canchasSeleccionadas.length > 0 && (
-                  <div style={{ marginTop:10, fontSize:12, color:"var(--green)", fontWeight:600 }}>
-                    ✓ {canchasSeleccionadas.length} {canchasSeleccionadas.length === 1 ? "unidad seleccionada" : "unidades seleccionadas"}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* BOTONES */}
-            <div style={{ display:"flex", gap:10, marginTop:8 }}>
+            {/* BOTONES FIJOS ABAJO */}
+            <div style={s.modalFooter}>
               <button className="btn btn-ghost" style={{ flex:1 }} onClick={() => setModalSolicitud(null)}>
                 Cancelar
               </button>
               <button className="btn btn-premium" style={{ flex:2 }} onClick={handleAprobar} disabled={procesando}>
-                {procesando ? "Aprobando..." : "✅ Confirmar aprobación"}
+                {procesando ? "Aprobando..." : "✅ Confirmar"}
               </button>
             </div>
           </div>
@@ -342,30 +326,49 @@ export default function Solicitudes({ session }) {
 
 const s = {
   wrap: {},
-  header: { display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:24 },
+  header: { display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:24, flexWrap:"wrap", gap:12 },
   title: { fontSize:24, fontWeight:800, color:"var(--text)", letterSpacing:-0.8, marginBottom:4 },
   sub: { color:"var(--text-muted)", fontSize:14 },
-  pendienteBadge: { background:"#fef9c3", color:"#854d0e", border:"1px solid #fde68a", borderRadius:"var(--radius-full)", padding:"8px 18px", fontSize:13, fontWeight:700, flexShrink:0 },
+  pendienteBadge: { background:"#fef9c3", color:"#854d0e", border:"1px solid #fde68a", borderRadius:"var(--radius-full)", padding:"6px 14px", fontSize:13, fontWeight:700, flexShrink:0 },
   filtros: { display:"flex", gap:8, marginBottom:24, flexWrap:"wrap" },
-  count: { background:"rgba(0,0,0,0.1)", borderRadius:20, padding:"1px 8px", fontSize:11, fontWeight:800, marginLeft:6 },
+  count: { background:"rgba(0,0,0,0.1)", borderRadius:20, padding:"1px 7px", fontSize:11, fontWeight:800, marginLeft:5 },
   lista: { display:"flex", flexDirection:"column", gap:12 },
-  card: { background:"white", borderRadius:"var(--radius-md)", padding:"18px 22px", boxShadow:"var(--shadow-md)", border:"1px solid var(--border)", display:"flex", justifyContent:"space-between", alignItems:"center", gap:16 },
-  cardLeft: { display:"flex", alignItems:"center", gap:16, flex:1 },
-  avatar: { width:52, height:52, borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 },
-  info: { flex:1 },
-  nombre: { fontSize:16, fontWeight:700, color:"var(--text)", marginBottom:6 },
-  meta: { display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" },
-  rolPill: { padding:"3px 10px", borderRadius:"var(--radius-full)", fontSize:12, fontWeight:600 },
-  fecha: { fontSize:12, color:"var(--text-muted)" },
-  cardRight: { display:"flex", alignItems:"center", gap:12, flexShrink:0 },
-  estadoBadge: { padding:"5px 14px", borderRadius:"var(--radius-full)", fontSize:12, fontWeight:700 },
+  card: { background:"white", borderRadius:"var(--radius-md)", padding:"16px 20px", boxShadow:"var(--shadow-md)", border:"1px solid var(--border)", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap" },
+  cardLeft: { display:"flex", alignItems:"center", gap:14, flex:1, minWidth:0 },
+  avatar: { width:48, height:48, borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 },
+  info: { flex:1, minWidth:0 },
+  nombre: { fontSize:15, fontWeight:700, color:"var(--text)", marginBottom:5 },
+  meta: { display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" },
+  rolPill: { padding:"3px 10px", borderRadius:"var(--radius-full)", fontSize:12, fontWeight:600, display:"inline-flex", alignItems:"center", gap:4 },
+  fecha: { fontSize:11, color:"var(--text-muted)" },
+  cardRight: { display:"flex", alignItems:"center", gap:10, flexShrink:0, flexWrap:"wrap" },
+  estadoBadge: { padding:"4px 12px", borderRadius:"var(--radius-full)", fontSize:12, fontWeight:700 },
   acciones: { display:"flex", gap:8 },
-  solicitanteCard: { background:"var(--bg)", borderRadius:"var(--radius-md)", padding:"18px", textAlign:"center", marginBottom:20 },
-  closeBtn: { background:"var(--bg)", border:"1px solid var(--border)", borderRadius:8, width:30, height:30, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", color:"var(--text-sub)" },
+  // MODAL
+  modal: {
+    background:"white", borderRadius:"var(--radius-xl)",
+    width:"calc(100% - 32px)", maxWidth:440,
+    maxHeight:"92vh", display:"flex", flexDirection:"column",
+    boxShadow:"var(--shadow-lg)", overflow:"hidden",
+    margin:"0 16px"
+  },
+  modalHeader: {
+    display:"flex", justifyContent:"space-between", alignItems:"center",
+    padding:"16px 20px", borderBottom:"1px solid var(--border)",
+    flexShrink:0, gap:12
+  },
+  modalHeaderLeft: { display:"flex", alignItems:"center", gap:12 },
+  modalBody: { flex:1, overflowY:"auto", padding:"16px 20px" },
+  modalFooter: {
+    display:"flex", gap:10, padding:"14px 20px",
+    borderTop:"1px solid var(--border)", flexShrink:0,
+    background:"white"
+  },
+  closeBtn: { background:"var(--bg)", border:"1px solid var(--border)", borderRadius:8, width:28, height:28, cursor:"pointer", fontSize:13, display:"flex", alignItems:"center", justifyContent:"center", color:"var(--text-sub)", flexShrink:0 },
 };
 
 const css = `
-  .filtro-btn { display:inline-flex; align-items:center; padding:8px 16px; border-radius:var(--radius-full); border:1.5px solid var(--border); background:white; color:var(--text-sub); font-size:13px; font-weight:600; cursor:pointer; transition:all 0.15s; font-family:'DM Sans',sans-serif; }
+  .filtro-btn { display:inline-flex; align-items:center; padding:7px 14px; border-radius:var(--radius-full); border:1.5px solid var(--border); background:white; color:var(--text-sub); font-size:13px; font-weight:600; cursor:pointer; transition:all 0.15s; font-family:'DM Sans',sans-serif; }
   .filtro-btn:hover { border-color:var(--green); color:var(--green); }
   .filtro-btn.active { background:var(--green); border-color:var(--green); color:white; }
 `;
