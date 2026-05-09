@@ -380,7 +380,7 @@ const s = {
   goleadoresRow: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 },
   goleadorChip: { background: "#f0fdf4", color: GREEN, fontSize: 11, padding: "3px 10px", borderRadius: 6, fontWeight: 600, border: "1px solid #c3e6a3" },
   goleadoresList: { display: "flex", flexDirection: "column", gap: 10 },
-  goleadorRow: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 12, padding: "14px 20px", display: "flex", alignItems: "center", gap: 16, boxShadow: "0 1px 2px rgba(0,0,0,0.04)" },
+  goleadorRow: { background: "linear-gradient(90deg, #f0fdf4 0%, #ffffff 60%)", border: "1px solid #c3e6a3", borderRadius: 12, padding: "14px 20px", display: "flex", alignItems: "center", gap: 16, boxShadow: "0 1px 4px rgba(79,143,47,0.08)", borderLeft: `4px solid ${GREEN}` },
   goleadorPos: { flexShrink: 0 },
   goleadorInfo: { flex: 1 },
   goleadorNombre: { fontSize: 15, fontWeight: 700, color: "#111827", marginBottom: 3 },

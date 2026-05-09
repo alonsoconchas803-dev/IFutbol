@@ -379,7 +379,7 @@ const s = {
   emptyHint: { color: "#9ca3af", fontSize: 13 },
   spinner: { width: 32, height: 32, border: `3px solid ${BORDER}`, borderTop: `3px solid ${GREEN}`, borderRadius: "50%", margin: "0 auto", animation: "spin 0.7s linear infinite" },
   partidoList: { display: "flex", flexDirection: "column", gap: 12 },
-  partidoCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "18px 22px", cursor: "pointer", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  partidoCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "18px 22px", cursor: "pointer", boxShadow: "0 2px 8px rgba(79,143,47,0.08)", borderTop: `3px solid ${GREEN}` },
   partidoTop: { display: "flex", justifyContent: "space-between", marginBottom: 14 },
   ligaBadge: { fontSize: 12, color: "#6b7280", fontWeight: 600 },
   fechaBadge: { fontSize: 12, color: "#6b7280" },

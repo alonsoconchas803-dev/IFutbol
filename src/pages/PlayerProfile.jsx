@@ -226,29 +226,36 @@ export default function PlayerProfile({ session }) {
         <div>
           {/* TARJETA DE JUGADOR */}
           <div style={s.playerCard}>
-            <div style={s.playerCardLeft}>
-              <div style={s.avatarWrap}>
-                {fotoPreview
-                  ? <img src={fotoPreview} alt="foto" style={s.avatarImg} />
-                  : <div style={s.avatarPlaceholder}>⚽</div>}
-                {editando && (
-                  <label style={s.avatarEditBtn}>
-                    📷
-                    <input type="file" accept="image/*" onChange={handleFotoChange} style={{ display: "none" }} />
-                  </label>
-                )}
+            {/* Banner verde con avatar e info principal */}
+            <div style={s.playerCardBanner}>
+              <div style={s.playerCardLeft}>
+                <div style={s.avatarWrap}>
+                  {fotoPreview
+                    ? <img src={fotoPreview} alt="foto" style={s.avatarImg} />
+                    : <div style={s.avatarPlaceholder}>⚽</div>}
+                  {editando && (
+                    <label style={s.avatarEditBtn}>
+                      📷
+                      <input type="file" accept="image/*" onChange={handleFotoChange} style={{ display: "none" }} />
+                    </label>
+                  )}
+                </div>
+              </div>
+              <div style={s.playerCardRight}>
+                <div style={s.afiliadoBadge}>#{jugador?.numero_afiliado || "AF-?????"}</div>
+                <div style={s.playerNombre}>{jugador?.nombre_completo || "Sin nombre"}</div>
+                <div style={s.playerPosicion}>{jugador?.posicion_preferida || "—"}</div>
               </div>
             </div>
-            <div style={s.playerCardRight}>
-              <div style={s.afiliadoBadge}>#{jugador?.numero_afiliado || "AF-?????"}</div>
+
+            {/* Cuerpo: datos y acciones */}
+            <div style={s.playerCardBody}>
               {!editando ? (
                 <>
-                  <div style={s.playerNombre}>{jugador?.nombre_completo || "Sin nombre"}</div>
-                  <div style={s.playerPosicion}>{jugador?.posicion_preferida || "—"}</div>
                   <div style={s.playerDatos}>
                     {[["📅","Fecha nac.",jugador?.fecha_nacimiento || "—"],["🏠","Domicilio",jugador?.domicilio || "—"]].map(([icon,lbl,val]) => (
                       <div key={lbl} style={s.playerDato}>
-                        <span style={s.playerDatoIcon}>{icon}</span>
+                        <div style={s.playerDatoIcon}>{icon}</div>
                         <div>
                           <div style={s.playerDatoLabel}>{lbl}</div>
                           <div style={s.playerDatoVal}>{val}</div>
@@ -293,7 +300,7 @@ export default function PlayerProfile({ session }) {
               ["🎽","Número afiliado", jugador?.numero_afiliado || "—"],
             ].map(([icon, lbl, val]) => (
               <div key={lbl} style={s.statCard}>
-                <div style={s.statIcon}>{icon}</div>
+                <div style={s.statIconWrap}>{icon}</div>
                 <div style={s.statVal}>{val}</div>
                 <div style={s.statLabel}>{lbl}</div>
               </div>
@@ -432,28 +439,30 @@ const s = {
   tabs: { display: "flex", gap: 4, marginBottom: 28, borderBottom: `1px solid ${BORDER}` },
   tab: { background: "transparent", border: "none", borderBottom: "2px solid transparent", color: "#6b7280", padding: "10px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer", marginBottom: -1 },
   tabActive: { color: GREEN, borderBottomColor: GREEN },
-  playerCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 16, padding: "24px 28px", display: "flex", gap: 28, marginBottom: 20, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" },
-  playerCardLeft: { display: "flex", flexDirection: "column", alignItems: "center", gap: 10 },
-  avatarWrap: { position: "relative", width: 100, height: 100 },
-  avatarImg: { width: 100, height: 100, borderRadius: "50%", objectFit: "cover", border: `3px solid ${BORDER}` },
-  avatarPlaceholder: { width: 100, height: 100, borderRadius: "50%", background: "#e5e7eb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, border: `3px solid ${BORDER}` },
-  avatarEditBtn: { position: "absolute", bottom: 0, right: 0, width: 30, height: 30, borderRadius: "50%", background: GREEN, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, cursor: "pointer" },
+  playerCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 18, marginBottom: 20, overflow: "hidden", boxShadow: "0 4px 16px rgba(79,143,47,0.12)" },
+  playerCardBanner: { background: "linear-gradient(135deg, #4f8f2f 0%, #7fbf4d 100%)", padding: "24px 28px", display: "flex", gap: 20, alignItems: "center" },
+  playerCardBody: { padding: "20px 28px 24px" },
+  playerCardLeft: { display: "flex", flexDirection: "column", alignItems: "center", gap: 10, flexShrink: 0 },
+  avatarWrap: { position: "relative", width: 88, height: 88 },
+  avatarImg: { width: 88, height: 88, borderRadius: "50%", objectFit: "cover", border: "3px solid rgba(255,255,255,0.6)" },
+  avatarPlaceholder: { width: 88, height: 88, borderRadius: "50%", background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 38, border: "3px solid rgba(255,255,255,0.4)" },
+  avatarEditBtn: { position: "absolute", bottom: 0, right: 0, width: 28, height: 28, borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, cursor: "pointer", boxShadow: "0 2px 6px rgba(0,0,0,0.2)" },
   playerCardRight: { flex: 1 },
-  afiliadoBadge: { display: "inline-block", background: "#f0fdf4", color: GREEN, fontSize: 13, fontWeight: 800, padding: "5px 14px", borderRadius: 8, marginBottom: 10, letterSpacing: 1, border: "1px solid #c3e6a3" },
-  playerNombre: { fontSize: 24, fontWeight: 800, color: "#111827", marginBottom: 4 },
-  playerPosicion: { fontSize: 14, color: "#6b7280", marginBottom: 18 },
+  afiliadoBadge: { display: "inline-block", background: "rgba(255,255,255,0.2)", color: "#fff", fontSize: 12, fontWeight: 800, padding: "4px 12px", borderRadius: 8, marginBottom: 8, letterSpacing: 1, border: "1px solid rgba(255,255,255,0.35)" },
+  playerNombre: { fontSize: 22, fontWeight: 800, color: "#fff", marginBottom: 3, letterSpacing: -0.4 },
+  playerPosicion: { fontSize: 13, color: "rgba(255,255,255,0.8)", fontWeight: 500 },
   playerDatos: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 },
-  playerDato: { display: "flex", alignItems: "center", gap: 10 },
-  playerDatoIcon: { fontSize: 16 },
-  playerDatoLabel: { fontSize: 11, color: "#9ca3af" },
-  playerDatoVal: { fontSize: 13, color: "#374151", fontWeight: 500 },
-  btnEditar: { background: "#f3f4f6", border: `1px solid ${BORDER}`, borderRadius: 10, padding: "9px 20px", color: "#374151", fontSize: 13, cursor: "pointer", fontWeight: 600 },
+  playerDato: { background: "#f0fdf4", border: "1px solid #c3e6a3", borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 },
+  playerDatoIcon: { width: 32, height: 32, background: "linear-gradient(135deg, #4f8f2f, #7fbf4d)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 },
+  playerDatoLabel: { fontSize: 10, color: GREEN, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 2 },
+  playerDatoVal: { fontSize: 14, color: "#111827", fontWeight: 600 },
+  btnEditar: { background: "linear-gradient(135deg, #4f8f2f, #7fbf4d)", border: "none", borderRadius: 10, padding: "10px 22px", color: "#fff", fontSize: 13, cursor: "pointer", fontWeight: 700, boxShadow: "0 2px 8px rgba(79,143,47,0.3)" },
   editForm: { display: "flex", flexDirection: "column", gap: 0 },
   statsRow: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 },
-  statCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 12, padding: "18px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
-  statIcon: { fontSize: 22, marginBottom: 8 },
-  statVal: { fontSize: 22, fontWeight: 800, color: "#111827", marginBottom: 4 },
-  statLabel: { fontSize: 12, color: "#6b7280" },
+  statCard: { background: "linear-gradient(135deg, #f0fdf4 0%, #e8f5e1 100%)", border: "1px solid #c3e6a3", borderRadius: 14, padding: "20px 16px", textAlign: "center", boxShadow: "0 2px 8px rgba(79,143,47,0.08)" },
+  statIconWrap: { width: 48, height: 48, background: "linear-gradient(135deg, #4f8f2f, #7fbf4d)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, margin: "0 auto 10px", boxShadow: "0 3px 10px rgba(79,143,47,0.3)" },
+  statVal: { fontSize: 24, fontWeight: 900, color: GREEN, marginBottom: 4 },
+  statLabel: { fontSize: 12, color: "#6b7280", fontWeight: 500 },
   secHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
   secCount: { color: "#6b7280", fontSize: 13 },
   btnAdd: { background: GREEN, color: "#ffffff", border: "none", borderRadius: 10, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" },
