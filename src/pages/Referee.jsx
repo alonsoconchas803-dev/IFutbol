@@ -4,19 +4,21 @@ const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
 
 const db = async (path, token, options = {}) => {
+  const method = (options.method || "GET").toUpperCase();
   const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
     ...options,
     headers: {
       "apikey": SUPABASE_KEY,
       "Authorization": `Bearer ${token}`,
       "Content-Type": "application/json",
-      "Prefer": "return=representation",
+      // Prefer solo en mutaciones, no en GETs (evita 406 en PostgREST)
+      ...(method !== "GET" ? { "Prefer": "return=representation" } : {}),
       ...(options.headers || {}),
     },
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.message || "Error en la base de datos");
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `Error ${res.status}`);
   }
   return res.status === 204 ? null : res.json();
 };
@@ -63,9 +65,11 @@ export default function Referee({ session }) {
         ligaIds.push(...(ligasDeUnidad || []).map(l => l.id));
       }
 
-      // Ligas específicas cuando acceso_total=false
-      const ligasEsp = await db(`/arbitro_liga?user_id=eq.${userId}&select=liga_id`, token);
-      ligaIds.push(...(ligasEsp || []).map(l => l.liga_id));
+      // Ligas específicas cuando acceso_total=false (puede estar vacío, no lanzar error)
+      try {
+        const ligasEsp = await db(`/arbitro_liga?user_id=eq.${userId}&select=liga_id`, token);
+        ligaIds.push(...(ligasEsp || []).map(l => l.liga_id));
+      } catch (_) { /* si no hay filas en arbitro_liga, continúa */ }
       ligaIds = [...new Set(ligaIds)];
 
       if (ligaIds.length === 0) { setPartidos([]); setLoading(false); return; }
