@@ -68,7 +68,8 @@ export default function LeagueAdmin({ session, userRole }) {
   // ── CARGAR LIGAS ─────────────────────────────────────────────
   const cargarLigas = async () => {
     try {
-      const data = await db("/ligas?select=*,canchas(nombre)&activa=eq.true&order=nombre", token);
+      const ligaFiltro = userRole?.liga_id ? `&id=eq.${userRole.liga_id}` : "";
+      const data = await db(`/ligas?select=*,canchas(nombre)&activa=eq.true${ligaFiltro}&order=nombre`, token);
       setLigas(data || []);
       if (data?.length > 0 && !ligaSeleccionada) {
         setLigaSeleccionada(data[0]);
