@@ -23,7 +23,7 @@ const db = async (path, token, options = {}) => {
 
 const ROLES_LABEL = {
   referee:      { label: "Árbitro",       icon: "🟡", color: "#f59e0b", bg: "#fffbeb", border: "#fde68a" },
-  league_admin: { label: "Admin de Liga", icon: "🏟️", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
+  league_admin: { label: "Admin de Unidad", icon: "🏟️", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
 };
 
 const ESTADO_LABEL = {
@@ -110,7 +110,13 @@ export default function Solicitudes({ session }) {
         setLigasEspecificas([]);
       }
     } else {
-      setLigaSeleccionada(sol.liga_id || "");
+      // league_admin: cargar cancha_id actual desde user_roles
+      try {
+        const roles = await db(`/user_roles?user_id=eq.${sol.user_id}&rol=eq.league_admin&select=cancha_id&limit=1`, token);
+        setLigaSeleccionada(roles?.[0]?.cancha_id || "");
+      } catch {
+        setLigaSeleccionada("");
+      }
       setCanchasSeleccionadas([]);
       setAccesoTotal(true);
       setLigasEspecificas([]);
@@ -151,7 +157,7 @@ export default function Solicitudes({ session }) {
   const handleAprobar = async () => {
     if (!modalSolicitud) return;
     if (modalSolicitud.tipo_rol === "league_admin" && !ligaSeleccionada)
-      return showToast("Selecciona la liga que administrará", "err");
+      return showToast("Selecciona la unidad deportiva que administrará", "err");
     if (modalSolicitud.tipo_rol === "referee" && canchasSeleccionadas.length === 0)
       return showToast("Selecciona al menos una unidad deportiva", "err");
     if (modalSolicitud.tipo_rol === "referee" && !accesoTotal && ligasEspecificas.length === 0)
@@ -164,7 +170,8 @@ export default function Solicitudes({ session }) {
         body: JSON.stringify({
           user_id: modalSolicitud.user_id,
           rol: modalSolicitud.tipo_rol,
-          liga_id: modalSolicitud.tipo_rol === "league_admin" ? ligaSeleccionada : null,
+          cancha_id: modalSolicitud.tipo_rol === "league_admin" ? ligaSeleccionada : null,
+          liga_id: null,
         })
       });
 
@@ -187,7 +194,7 @@ export default function Solicitudes({ session }) {
   const handleEditar = async () => {
     if (!modalSolicitud) return;
     if (modalSolicitud.tipo_rol === "league_admin" && !ligaSeleccionada)
-      return showToast("Selecciona una liga", "err");
+      return showToast("Selecciona una unidad deportiva", "err");
     if (modalSolicitud.tipo_rol === "referee" && canchasSeleccionadas.length === 0)
       return showToast("Selecciona al menos una unidad deportiva", "err");
     if (modalSolicitud.tipo_rol === "referee" && !accesoTotal && ligasEspecificas.length === 0)
@@ -198,13 +205,9 @@ export default function Solicitudes({ session }) {
       if (modalSolicitud.tipo_rol === "league_admin") {
         await db(`/user_roles?user_id=eq.${modalSolicitud.user_id}&rol=eq.league_admin`, token, {
           method: "PATCH",
-          body: JSON.stringify({ liga_id: ligaSeleccionada })
+          body: JSON.stringify({ cancha_id: ligaSeleccionada, liga_id: null })
         });
-        await db(`/solicitudes_registro?id=eq.${modalSolicitud.id}`, token, {
-          method: "PATCH",
-          body: JSON.stringify({ liga_id: ligaSeleccionada })
-        });
-        showToast("Liga actualizada ✓");
+        showToast("Unidad deportiva actualizada ✓");
       } else {
         await guardarArbitroCanchas(modalSolicitud.user_id);
         showToast("Asignaciones actualizadas ✓");
@@ -246,7 +249,7 @@ export default function Solicitudes({ session }) {
       <div style={s.header}>
         <div>
           <h2 style={s.title}>Solicitudes de registro 📋</h2>
-          <p style={s.sub}>Aprueba o rechaza solicitudes de árbitros y admins de liga</p>
+          <p style={s.sub}>Aprueba o rechaza solicitudes de árbitros y admins de unidad</p>
         </div>
         {pendientes > 0 && (
           <div style={s.pendienteBadge}>
@@ -346,13 +349,16 @@ export default function Solicitudes({ session }) {
             {/* CUERPO */}
             <div style={s.modalBody}>
 
-              {/* ADMIN DE LIGA → selector liga */}
+              {/* ADMIN DE UNIDAD → selector de unidad deportiva */}
               {modalSolicitud.tipo_rol === "league_admin" && (
                 <div style={{ marginBottom:16 }}>
-                  <label className="form-label">{modoEditar ? "Liga asignada" : "Asignar a liga *"}</label>
+                  <label className="form-label">{modoEditar ? "Unidad deportiva asignada" : "Asignar a unidad deportiva *"}</label>
+                  <p style={{ fontSize:12, color:"var(--text-muted)", marginBottom:10 }}>
+                    El admin tendrá acceso a todas las ligas de esta unidad deportiva
+                  </p>
                   <select className="form-input" value={ligaSeleccionada} onChange={e => setLigaSeleccionada(e.target.value)}>
-                    <option value="">Selecciona una liga...</option>
-                    {ligas.map(l => <option key={l.id} value={l.id}>🏆 {l.nombre} · {l.dia} {l.turno}</option>)}
+                    <option value="">Selecciona una unidad deportiva...</option>
+                    {canchas.map(c => <option key={c.id} value={c.id}>🏟️ {c.nombre}{c.direccion ? ` · ${c.direccion}` : ""}</option>)}
                   </select>
                 </div>
               )}

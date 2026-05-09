@@ -44,7 +44,7 @@ const POSITIONS = ["Portero", "Defensa", "Mediocampista", "Delantero"];
 
 const ROLES_INFO = {
   super_admin:  { label: "Super Admin",   icon: "👑", color: "#4f8f2f" },
-  league_admin: { label: "Admin de Liga", icon: "🏟️", color: "#3b82f6" },
+  league_admin: { label: "Admin de Unidad", icon: "🏟️", color: "#3b82f6" },
   referee:      { label: "Árbitro",       icon: "🟡", color: "#f59e0b" },
   player:       { label: "Jugador",       icon: "⚽", color: "#8b5cf6" },
 };
@@ -52,7 +52,7 @@ const ROLES_INFO = {
 const MENU = {
   super_admin: [
     { icon:"👑", label:"Panel Admin",    key:"panel" },
-    { icon:"🏟️", label:"Canchas",        key:"canchas" },
+    { icon:"🏟️", label:"Unidades Deportivas", key:"canchas" },
     { icon:"🏆", label:"Torneos",        key:"torneos" },
     { icon:"📊", label:"Clasificación",  key:"clasificacion" },
     { icon:"👥", label:"Usuarios",       key:"usuarios" },
@@ -113,7 +113,7 @@ export default function App() {
 
   const loadUserRole = async (token, userId) => {
     try {
-      const roles = await dbAuth(`/user_roles?user_id=eq.${userId}&select=rol,liga_id&limit=1`, token);
+      const roles = await dbAuth(`/user_roles?user_id=eq.${userId}&select=rol,liga_id,cancha_id&limit=1`, token);
       if (Array.isArray(roles) && roles.length > 0) {
         setUserRole(roles[0]);
         setScreen("dashboard");
@@ -199,7 +199,7 @@ function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, show
       if (activeSection === "solicitudes") return <Solicitudes session={session} />;
       return <SuperAdmin session={session} />;
     }
-    if (rol === "league_admin") return <LeagueAdmin session={session} />;
+    if (rol === "league_admin") return <LeagueAdmin session={session} userRole={userRole} />;
     if (rol === "referee") return <Referee session={session} />;
     if (rol === "player") return <PlayerProfile session={session} />;
     return null;

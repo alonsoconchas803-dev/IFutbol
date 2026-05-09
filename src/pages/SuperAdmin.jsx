@@ -80,10 +80,10 @@ export default function SuperAdmin({ session }) {
     try {
       if (editCanchaId) {
         await db(`/canchas?id=eq.${editCanchaId}`, token, { method: "PATCH", body: JSON.stringify(canchaForm) });
-        showToast("Cancha actualizada ✓");
+        showToast("Unidad deportiva actualizada ✓");
       } else {
         await db("/canchas", token, { method: "POST", body: JSON.stringify(canchaForm) });
-        showToast("Cancha registrada ✓");
+        showToast("Unidad deportiva registrada ✓");
       }
       setCanchaForm({ nombre: "", direccion: "", num_canchas: 1 });
       setEditCanchaId(null);
@@ -94,10 +94,10 @@ export default function SuperAdmin({ session }) {
   };
 
   const eliminarCancha = async (id) => {
-    if (!confirm("¿Eliminar esta cancha? Se eliminarán también sus ligas.")) return;
+    if (!confirm("¿Eliminar esta unidad deportiva? Se eliminarán también sus ligas.")) return;
     try {
       await db(`/canchas?id=eq.${id}`, token, { method: "DELETE" });
-      showToast("Cancha eliminada");
+      showToast("Unidad deportiva eliminada");
       cargarCanchas();
     } catch (e) { showToast(e.message, "err"); }
   };
@@ -110,7 +110,7 @@ export default function SuperAdmin({ session }) {
 
   // ── LIGAS ─────────────────────────────────────────────────────
   const guardarLiga = async () => {
-    if (!ligaForm.nombre || !ligaForm.cancha_id) return showToast("Nombre y cancha son obligatorios", "err");
+    if (!ligaForm.nombre || !ligaForm.cancha_id) return showToast("Nombre y unidad deportiva son obligatorios", "err");
     setLoading(true);
     try {
       if (editLigaId) {
@@ -200,13 +200,13 @@ export default function SuperAdmin({ session }) {
       <div style={s.header}>
         <div>
           <h2 style={s.title}>Panel Super Admin 👑</h2>
-          <p style={s.sub}>Control total sobre canchas, ligas y usuarios</p>
+          <p style={s.sub}>Control total sobre unidades deportivas, ligas y usuarios</p>
         </div>
       </div>
 
       {/* TABS */}
       <div style={s.tabs}>
-        {[["canchas","🏟️","Canchas"],["ligas","🏆","Ligas"],["equipos","👕","Equipos"],["stats","📊","Resumen"],["solicitudes","📋","Solicitudes"]].map(([key, icon, label]) => (
+        {[["canchas","🏟️","Unidades Deportivas"],["ligas","🏆","Ligas"],["equipos","👕","Equipos"],["stats","📊","Resumen"],["solicitudes","📋","Solicitudes"]].map(([key, icon, label]) => (
           <button key={key} onClick={() => setSeccion(key)}
             style={{ ...s.tab, ...(seccion === key ? s.tabActive : {}) }}>
             {icon} {label}
@@ -218,17 +218,17 @@ export default function SuperAdmin({ session }) {
       {seccion === "canchas" && (
         <div>
           <div style={s.secHeader}>
-            <span style={s.secCount}>{canchas.length} canchas registradas</span>
+            <span style={s.secCount}>{canchas.length} unidades deportivas registradas</span>
             <button style={s.btnAdd} onClick={() => { setCanchaForm({ nombre: "", direccion: "", num_canchas: 1 }); setEditCanchaId(null); setModal("cancha"); }}>
-              + Nueva cancha
+              + Nueva unidad deportiva
             </button>
           </div>
 
           {canchas.length === 0 ? (
             <div style={s.empty}>
               <div style={s.emptyIcon}>🏟️</div>
-              <div style={s.emptyTxt}>No hay canchas registradas aún</div>
-              <button style={s.btnAdd} onClick={() => setModal("cancha")}>Agregar primera cancha</button>
+              <div style={s.emptyTxt}>No hay unidades deportivas registradas aún</div>
+              <button style={s.btnAdd} onClick={() => setModal("cancha")}>Agregar primera unidad deportiva</button>
             </div>
           ) : (
             <div style={s.grid}>
@@ -243,7 +243,7 @@ export default function SuperAdmin({ session }) {
                   </div>
                   <div style={s.cardName}>{c.nombre}</div>
                   <div style={s.cardMeta}>{c.direccion || "Sin dirección"}</div>
-                  <div style={s.cardBadge}>{c.num_canchas} {c.num_canchas === 1 ? "cancha" : "canchas"}</div>
+                  <div style={s.cardBadge}>{c.num_canchas} {c.num_canchas === 1 ? "campo" : "campos"}</div>
                   <div style={s.cardLigas}>
                     {ligas.filter(l => l.cancha_id === c.id).length} ligas activas
                   </div>
@@ -266,7 +266,7 @@ export default function SuperAdmin({ session }) {
           </div>
 
           {canchas.length === 0 && (
-            <div style={s.warningBox}>⚠️ Primero debes registrar al menos una cancha para poder crear ligas.</div>
+            <div style={s.warningBox}>⚠️ Primero debes registrar al menos una unidad deportiva para poder crear ligas.</div>
           )}
 
           {ligas.length === 0 && canchas.length > 0 ? (
@@ -284,7 +284,7 @@ export default function SuperAdmin({ session }) {
                     <div>
                       <div style={s.ligaNombre}>{l.nombre}</div>
                       <div style={s.ligaMeta}>
-                        {l.dia} · {l.turno} · {l.canchas?.nombre || "Sin cancha"}
+                        {l.dia} · {l.turno} · {l.canchas?.nombre || "Sin unidad deportiva"}
                         {l.temporada && ` · Temp. ${l.temporada}`}
                       </div>
                     </div>
@@ -308,7 +308,7 @@ export default function SuperAdmin({ session }) {
       {seccion === "stats" && (
         <div style={s.statsGrid}>
           {[
-            ["🏟️", "Canchas", canchas.length, "registradas"],
+            ["🏟️", "Unidades Deportivas", canchas.length, "registradas"],
             ["🏆", "Ligas totales", ligas.length, "registradas"],
             ["✅", "Ligas activas", ligas.filter(l => l.activa).length, "en curso"],
             ["⏸️", "Ligas inactivas", ligas.filter(l => !l.activa).length, "pausadas"],
@@ -321,7 +321,7 @@ export default function SuperAdmin({ session }) {
             </div>
           ))}
           <div style={{ ...s.statCard, gridColumn: "1/-1" }}>
-            <div style={s.statLabel}>Ligas por cancha</div>
+            <div style={s.statLabel}>Ligas por unidad deportiva</div>
             {canchas.map(c => (
               <div key={c.id} style={s.barRow}>
                 <span style={s.barLabel}>{c.nombre}</span>
@@ -408,9 +408,9 @@ export default function SuperAdmin({ session }) {
       {modal === "cancha" && (
         <div style={s.overlay} onClick={() => setModal(null)}>
           <div style={s.modalBox} onClick={e => e.stopPropagation()}>
-            <h3 style={s.modalTitle}>{editCanchaId ? "Editar cancha" : "Nueva cancha"}</h3>
+            <h3 style={s.modalTitle}>{editCanchaId ? "Editar unidad deportiva" : "Nueva unidad deportiva"}</h3>
             <div style={s.field}>
-              <label style={s.label}>Nombre de las canchas *</label>
+              <label style={s.label}>Nombre de la unidad deportiva *</label>
               <input style={s.input} placeholder="ej. Canchas Manzano"
                 value={canchaForm.nombre} onChange={e => setCanchaForm({ ...canchaForm, nombre: e.target.value })} />
             </div>
@@ -420,14 +420,14 @@ export default function SuperAdmin({ session }) {
                 value={canchaForm.direccion} onChange={e => setCanchaForm({ ...canchaForm, direccion: e.target.value })} />
             </div>
             <div style={s.field}>
-              <label style={s.label}>Número de canchas disponibles</label>
+              <label style={s.label}>Número de campos disponibles</label>
               <input style={s.input} type="number" min="1" max="20"
                 value={canchaForm.num_canchas} onChange={e => setCanchaForm({ ...canchaForm, num_canchas: +e.target.value })} />
             </div>
             <div style={s.modalActions}>
               <button style={s.btnCancel} onClick={() => setModal(null)}>Cancelar</button>
               <button style={s.btnSave} onClick={guardarCancha} disabled={loading}>
-                {loading ? "Guardando..." : editCanchaId ? "Guardar cambios" : "Crear cancha"}
+                {loading ? "Guardando..." : editCanchaId ? "Guardar cambios" : "Crear unidad deportiva"}
               </button>
             </div>
           </div>
@@ -493,9 +493,9 @@ export default function SuperAdmin({ session }) {
               </div>
             </div>
             <div style={s.field}>
-              <label style={s.label}>Cancha *</label>
+              <label style={s.label}>Unidad Deportiva *</label>
               <select style={s.input} value={ligaForm.cancha_id} onChange={e => setLigaForm({ ...ligaForm, cancha_id: e.target.value })}>
-                <option value="">Selecciona una cancha</option>
+                <option value="">Selecciona una unidad deportiva</option>
                 {canchas.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
               </select>
             </div>

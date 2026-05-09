@@ -71,7 +71,7 @@ export default function LeagueAdmin({ session, userRole }) {
   // ── CARGAR LIGAS ─────────────────────────────────────────────
   const cargarLigas = async () => {
     try {
-      const ligaFiltro = userRole?.liga_id ? `&id=eq.${userRole.liga_id}` : "";
+      const ligaFiltro = userRole?.cancha_id ? `&cancha_id=eq.${userRole.cancha_id}` : "";
       const data = await db(`/ligas?select=*,canchas(nombre)&activa=eq.true${ligaFiltro}&order=nombre`, token);
       setLigas(data || []);
       if (data?.length > 0 && !ligaSeleccionada) {
@@ -234,8 +234,8 @@ export default function LeagueAdmin({ session, userRole }) {
       {/* ENCABEZADO */}
       <div style={s.header}>
         <div>
-          <h2 style={s.title}>Panel Admin de Liga 🏟️</h2>
-          <p style={s.sub}>Gestiona equipos y jugadores de tu liga</p>
+          <h2 style={s.title}>Panel Admin de Unidad 🏟️</h2>
+          <p style={s.sub}>Gestiona equipos, jugadores y árbitros de tu unidad deportiva</p>
         </div>
       </div>
 
