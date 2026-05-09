@@ -361,77 +361,77 @@ export default function Referee({ session }) {
   );
 }
 
-const BASE = "#090912";
-const SURFACE = "#0f0f1e";
-const BORDER = "#1e1e3a";
-const GREEN = "#4ade80";
+const BASE = "#f9fafb";
+const SURFACE = "#ffffff";
+const BORDER = "#e5e7eb";
+const GREEN = "#4f8f2f";
 
 const s = {
   wrap: {},
   header: { marginBottom: 24 },
-  title: { fontSize: 26, fontWeight: 800, color: "#fff", letterSpacing: -0.8, marginBottom: 4 },
-  sub: { color: "#666", fontSize: 14 },
+  title: { fontSize: 26, fontWeight: 800, color: "#111827", letterSpacing: -0.8, marginBottom: 4 },
+  sub: { color: "#6b7280", fontSize: 14 },
   secHeader: { marginBottom: 16 },
-  secCount: { color: "#666", fontSize: 13 },
+  secCount: { color: "#6b7280", fontSize: 13 },
   empty: { textAlign: "center", padding: "60px 20px" },
   emptyIcon: { fontSize: 48, marginBottom: 16 },
-  emptyTxt: { color: "#aaa", fontSize: 16, marginBottom: 8, fontWeight: 600 },
-  emptyHint: { color: "#555", fontSize: 13 },
-  spinner: { width: 32, height: 32, border: "3px solid #1e1e3a", borderTop: "3px solid #4ade80", borderRadius: "50%", margin: "0 auto", animation: "spin 0.7s linear infinite" },
+  emptyTxt: { color: "#6b7280", fontSize: 16, marginBottom: 8, fontWeight: 600 },
+  emptyHint: { color: "#9ca3af", fontSize: 13 },
+  spinner: { width: 32, height: 32, border: `3px solid ${BORDER}`, borderTop: `3px solid ${GREEN}`, borderRadius: "50%", margin: "0 auto", animation: "spin 0.7s linear infinite" },
   partidoList: { display: "flex", flexDirection: "column", gap: 12 },
-  partidoCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "18px 22px", cursor: "pointer" },
+  partidoCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "18px 22px", cursor: "pointer", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
   partidoTop: { display: "flex", justifyContent: "space-between", marginBottom: 14 },
-  ligaBadge: { fontSize: 12, color: "#888", fontWeight: 600 },
-  fechaBadge: { fontSize: 12, color: "#666" },
+  ligaBadge: { fontSize: 12, color: "#6b7280", fontWeight: 600 },
+  fechaBadge: { fontSize: 12, color: "#6b7280" },
   vsRow: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
   equipoVs: { display: "flex", alignItems: "center", gap: 10, flex: 1 },
   equipoDot: { width: 14, height: 14, borderRadius: "50%", flexShrink: 0 },
-  equipoVsNombre: { fontSize: 16, fontWeight: 700, color: "#fff" },
-  vsLabel: { fontSize: 12, color: "#555", fontWeight: 700, padding: "0 16px" },
+  equipoVsNombre: { fontSize: 16, fontWeight: 700, color: "#111827" },
+  vsLabel: { fontSize: 12, color: "#9ca3af", fontWeight: 700, padding: "0 16px" },
   partidoBottom: { display: "flex", justifyContent: "space-between", alignItems: "center" },
   statusBadge: { fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 6 },
-  horaLabel: { fontSize: 12, color: "#666" },
-  backBtn: { background: "transparent", border: "none", color: "#7c7cff", fontSize: 14, cursor: "pointer", marginBottom: 20, padding: 0, fontWeight: 600 },
-  cerradaBanner: { background: "#1a0d00", border: "1px solid #3a2200", borderRadius: 10, padding: "12px 18px", color: "#f59e0b", fontSize: 13, marginBottom: 20 },
-  fichaHeader: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 16, padding: "24px 28px", marginBottom: 24 },
-  fichaLiga: { fontSize: 12, color: "#888", fontWeight: 600, marginBottom: 20, textAlign: "center" },
+  horaLabel: { fontSize: 12, color: "#6b7280" },
+  backBtn: { background: "transparent", border: "none", color: GREEN, fontSize: 14, cursor: "pointer", marginBottom: 20, padding: 0, fontWeight: 600 },
+  cerradaBanner: { background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 18px", color: "#ca8a04", fontSize: 13, marginBottom: 20 },
+  fichaHeader: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 16, padding: "24px 28px", marginBottom: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" },
+  fichaLiga: { fontSize: 12, color: "#6b7280", fontWeight: 600, marginBottom: 20, textAlign: "center" },
   fichaVsGrande: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20 },
   fichaEquipo: { display: "flex", flexDirection: "column", alignItems: "center", gap: 8, flex: 1 },
   fichaEscudo: { width: 60, height: 60, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 800, color: "#fff", overflow: "hidden" },
   escudoImg: { width: "100%", height: "100%", objectFit: "cover" },
-  fichaEquipoNombre: { fontSize: 16, fontWeight: 700, color: "#fff", textAlign: "center" },
-  fichaEquipoLabel: { fontSize: 11, color: "#666" },
+  fichaEquipoNombre: { fontSize: 16, fontWeight: 700, color: "#111827", textAlign: "center" },
+  fichaEquipoLabel: { fontSize: 11, color: "#6b7280" },
   marcadorBox: { display: "flex", flexDirection: "column", alignItems: "center", gap: 8 },
   marcadorRow: { display: "flex", alignItems: "center", gap: 8 },
-  marcadorBtn: { width: 32, height: 32, borderRadius: 8, background: "#1e1e3a", border: `1px solid ${BORDER}`, color: "#fff", fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
-  marcadorNum: { width: 56, height: 56, background: BASE, border: `2px solid ${BORDER}`, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, fontWeight: 900, color: "#fff" },
-  marcadorGuion: { fontSize: 24, color: "#444", padding: "0 4px" },
-  marcadorLabel: { fontSize: 11, color: "#666" },
-  seccion: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "20px 24px", marginBottom: 16 },
-  seccionTitle: { fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 16 },
+  marcadorBtn: { width: 32, height: 32, borderRadius: 8, background: "#f3f4f6", border: `1px solid ${BORDER}`, color: "#374151", fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
+  marcadorNum: { width: 56, height: 56, background: BASE, border: `2px solid ${BORDER}`, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, fontWeight: 900, color: "#111827" },
+  marcadorGuion: { fontSize: 24, color: "#9ca3af", padding: "0 4px" },
+  marcadorLabel: { fontSize: 11, color: "#6b7280" },
+  seccion: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "20px 24px", marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  seccionTitle: { fontSize: 15, fontWeight: 700, color: "#111827", marginBottom: 16 },
   goleadoresGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 },
   goleadoresCol: { display: "flex", flexDirection: "column", gap: 8 },
-  goleadoresColHeader: { fontSize: 13, fontWeight: 700, color: "#fff", paddingBottom: 10, marginBottom: 4 },
+  goleadoresColHeader: { fontSize: 13, fontWeight: 700, color: "#111827", paddingBottom: 10, marginBottom: 4 },
   jugadorGolRow: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderRadius: 8, transition: "background 0.2s" },
   jugadorGolInfo: { display: "flex", alignItems: "center", gap: 8, flex: 1 },
   dorsalMin: { width: 24, height: 24, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: "#fff", flexShrink: 0 },
-  jugadorGolNombre: { fontSize: 13, color: "#ccc", fontWeight: 500 },
+  jugadorGolNombre: { fontSize: 13, color: "#374151", fontWeight: 500 },
   golBtns: { display: "flex", alignItems: "center", gap: 6 },
-  golBtnPlus: { background: "#1a3a1a", border: "1px solid #2a5a2a", borderRadius: 6, color: GREEN, fontSize: 14, cursor: "pointer", padding: "3px 8px", fontWeight: 700 },
-  golBtnMinus: { background: "#3a1111", border: "1px solid #5a2020", borderRadius: 6, color: "#f87171", fontSize: 14, cursor: "pointer", padding: "3px 8px", fontWeight: 700 },
+  golBtnPlus: { background: "#dcfce7", border: "1px solid #bbf7d0", borderRadius: 6, color: GREEN, fontSize: 14, cursor: "pointer", padding: "3px 8px", fontWeight: 700 },
+  golBtnMinus: { background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, color: "#dc2626", fontSize: 14, cursor: "pointer", padding: "3px 8px", fontWeight: 700 },
   golCount: { fontSize: 14, fontWeight: 800, color: GREEN, minWidth: 16, textAlign: "center" },
   golCountCerrada: { fontSize: 13, fontWeight: 700, color: GREEN },
-  sinJugadores: { fontSize: 12, color: "#555", fontStyle: "italic" },
-  textarea: { width: "100%", background: BASE, border: `1px solid ${BORDER}`, borderRadius: 10, padding: "12px 14px", color: "#eee", fontSize: 14, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" },
+  sinJugadores: { fontSize: 12, color: "#9ca3af", fontStyle: "italic" },
+  textarea: { width: "100%", background: BASE, border: `1px solid ${BORDER}`, borderRadius: 10, padding: "12px 14px", color: "#111827", fontSize: 14, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" },
   acciones: { display: "flex", gap: 12 },
-  btnGuardar: { flex: 1, background: "#1e1e3a", border: `1px solid ${BORDER}`, borderRadius: 12, padding: "14px", color: "#eee", fontSize: 14, fontWeight: 700, cursor: "pointer" },
-  btnCerrar: { flex: 1, background: GREEN, border: "none", borderRadius: 12, padding: "14px", color: "#0d0d1a", fontSize: 14, fontWeight: 800, cursor: "pointer" },
+  btnGuardar: { flex: 1, background: "#f3f4f6", border: `1px solid ${BORDER}`, borderRadius: 12, padding: "14px", color: "#374151", fontSize: 14, fontWeight: 700, cursor: "pointer" },
+  btnCerrar: { flex: 1, background: GREEN, border: "none", borderRadius: 12, padding: "14px", color: "#ffffff", fontSize: 14, fontWeight: 800, cursor: "pointer" },
   toast: { position: "fixed", bottom: 28, right: 28, padding: "12px 24px", borderRadius: 12, fontWeight: 700, fontSize: 14, zIndex: 9999 },
 };
 
 const css = `
   .ref-card { transition: transform 0.18s, box-shadow 0.18s; }
-  .ref-card:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(0,0,0,0.4); }
-  input:focus, textarea:focus { border-color: #4ade80 !important; }
+  .ref-card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+  input:focus, textarea:focus { border-color: #4f8f2f !important; }
   @keyframes spin { to { transform: rotate(360deg); } }
 `;

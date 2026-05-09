@@ -419,81 +419,80 @@ export default function PlayerProfile({ session }) {
   );
 }
 
-const BASE = "#090912";
-const SURFACE = "#0f0f1e";
-const BORDER = "#1e1e3a";
-const GREEN = "#4ade80";
+const BASE = "#f9fafb";
+const SURFACE = "#ffffff";
+const BORDER = "#e5e7eb";
+const GREEN = "#4f8f2f";
 
 const s = {
   wrap: {},
   header: { marginBottom: 20 },
-  title: { fontSize: 26, fontWeight: 800, color: "#fff", letterSpacing: -0.8, marginBottom: 4 },
-  sub: { color: "#666", fontSize: 14 },
+  title: { fontSize: 26, fontWeight: 800, color: "#111827", letterSpacing: -0.8, marginBottom: 4 },
+  sub: { color: "#6b7280", fontSize: 14 },
   tabs: { display: "flex", gap: 4, marginBottom: 28, borderBottom: `1px solid ${BORDER}` },
-  tab: { background: "transparent", border: "none", borderBottom: "2px solid transparent", color: "#888", padding: "10px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer", marginBottom: -1 },
+  tab: { background: "transparent", border: "none", borderBottom: "2px solid transparent", color: "#6b7280", padding: "10px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer", marginBottom: -1 },
   tabActive: { color: GREEN, borderBottomColor: GREEN },
-  playerCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 16, padding: "24px 28px", display: "flex", gap: 28, marginBottom: 20 },
+  playerCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 16, padding: "24px 28px", display: "flex", gap: 28, marginBottom: 20, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" },
   playerCardLeft: { display: "flex", flexDirection: "column", alignItems: "center", gap: 10 },
   avatarWrap: { position: "relative", width: 100, height: 100 },
   avatarImg: { width: 100, height: 100, borderRadius: "50%", objectFit: "cover", border: `3px solid ${BORDER}` },
-  avatarPlaceholder: { width: 100, height: 100, borderRadius: "50%", background: "#1e1e3a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, border: `3px solid ${BORDER}` },
+  avatarPlaceholder: { width: 100, height: 100, borderRadius: "50%", background: "#e5e7eb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, border: `3px solid ${BORDER}` },
   avatarEditBtn: { position: "absolute", bottom: 0, right: 0, width: 30, height: 30, borderRadius: "50%", background: GREEN, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, cursor: "pointer" },
   playerCardRight: { flex: 1 },
-  afiliadoBadge: { display: "inline-block", background: "#1a1a2e", color: GREEN, fontSize: 13, fontWeight: 800, padding: "5px 14px", borderRadius: 8, marginBottom: 10, letterSpacing: 1 },
-  playerNombre: { fontSize: 24, fontWeight: 800, color: "#fff", marginBottom: 4 },
-  playerPosicion: { fontSize: 14, color: "#888", marginBottom: 18 },
+  afiliadoBadge: { display: "inline-block", background: "#f0fdf4", color: GREEN, fontSize: 13, fontWeight: 800, padding: "5px 14px", borderRadius: 8, marginBottom: 10, letterSpacing: 1, border: "1px solid #c3e6a3" },
+  playerNombre: { fontSize: 24, fontWeight: 800, color: "#111827", marginBottom: 4 },
+  playerPosicion: { fontSize: 14, color: "#6b7280", marginBottom: 18 },
   playerDatos: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 },
   playerDato: { display: "flex", alignItems: "center", gap: 10 },
   playerDatoIcon: { fontSize: 16 },
-  playerDatoLabel: { fontSize: 11, color: "#666" },
-  playerDatoVal: { fontSize: 13, color: "#ccc", fontWeight: 500 },
-  btnEditar: { background: "#1e1e3a", border: `1px solid ${BORDER}`, borderRadius: 10, padding: "9px 20px", color: "#ccc", fontSize: 13, cursor: "pointer", fontWeight: 600 },
+  playerDatoLabel: { fontSize: 11, color: "#9ca3af" },
+  playerDatoVal: { fontSize: 13, color: "#374151", fontWeight: 500 },
+  btnEditar: { background: "#f3f4f6", border: `1px solid ${BORDER}`, borderRadius: 10, padding: "9px 20px", color: "#374151", fontSize: 13, cursor: "pointer", fontWeight: 600 },
   editForm: { display: "flex", flexDirection: "column", gap: 0 },
   statsRow: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 },
-  statCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 12, padding: "18px 16px" },
+  statCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 12, padding: "18px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
   statIcon: { fontSize: 22, marginBottom: 8 },
-  statVal: { fontSize: 22, fontWeight: 800, color: "#fff", marginBottom: 4 },
-  statLabel: { fontSize: 12, color: "#666" },
+  statVal: { fontSize: 22, fontWeight: 800, color: "#111827", marginBottom: 4 },
+  statLabel: { fontSize: 12, color: "#6b7280" },
   secHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
-  secCount: { color: "#666", fontSize: 13 },
-  btnAdd: { background: GREEN, color: "#0d0d1a", border: "none", borderRadius: 10, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" },
+  secCount: { color: "#6b7280", fontSize: 13 },
+  btnAdd: { background: GREEN, color: "#ffffff", border: "none", borderRadius: 10, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" },
   empty: { textAlign: "center", padding: "60px 20px" },
   emptyIcon: { fontSize: 48, marginBottom: 16 },
-  emptyTxt: { color: "#aaa", fontSize: 15, marginBottom: 20, fontWeight: 600 },
+  emptyTxt: { color: "#6b7280", fontSize: 15, marginBottom: 20, fontWeight: 600 },
   inscripcionesList: { display: "flex", flexDirection: "column", gap: 12 },
-  inscripcionCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "18px 22px", display: "flex", justifyContent: "space-between", alignItems: "center" },
+  inscripcionCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "18px 22px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
   inscripcionLeft: { display: "flex", alignItems: "center", gap: 16 },
   escudoWrap: { width: 52, height: 52, borderRadius: 12, overflow: "hidden", flexShrink: 0 },
   escudoImg: { width: "100%", height: "100%", objectFit: "cover" },
   escudoPlaceholder: { width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, color: "#fff" },
-  inscripcionEquipo: { fontSize: 16, fontWeight: 700, color: "#fff", marginBottom: 4 },
-  inscripcionLiga: { fontSize: 13, color: "#888" },
+  inscripcionEquipo: { fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 4 },
+  inscripcionLiga: { fontSize: 13, color: "#6b7280" },
   inscripcionRight: {},
   dorsalCard: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6 },
   dorsalNum: { width: 48, height: 48, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 900, color: "#fff" },
-  dorsalNombreCamiseta: { fontSize: 12, fontWeight: 700, color: "#aaa", textTransform: "uppercase", letterSpacing: 1 },
+  dorsalNombreCamiseta: { fontSize: 12, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 },
   field: { marginBottom: 16, flex: 1 },
   formRow: { display: "flex", gap: 16 },
-  label: { display: "block", fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 7 },
-  input: { width: "100%", background: BASE, border: `1px solid ${BORDER}`, borderRadius: 9, padding: "10px 14px", color: "#eee", fontSize: 14, outline: "none", boxSizing: "border-box" },
+  label: { display: "block", fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 7 },
+  input: { width: "100%", background: BASE, border: `1px solid ${BORDER}`, borderRadius: 9, padding: "10px 14px", color: "#111827", fontSize: 14, outline: "none", boxSizing: "border-box" },
   editActions: { display: "flex", gap: 10, marginTop: 8 },
-  btnCancelar: { flex: 1, background: "transparent", border: `1px solid ${BORDER}`, borderRadius: 10, padding: 10, color: "#888", fontSize: 13, cursor: "pointer" },
-  btnGuardar: { flex: 2, background: GREEN, color: "#0d0d1a", border: "none", borderRadius: 10, padding: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" },
+  btnCancelar: { flex: 1, background: "transparent", border: `1px solid ${BORDER}`, borderRadius: 10, padding: 10, color: "#6b7280", fontSize: 13, cursor: "pointer" },
+  btnGuardar: { flex: 2, background: GREEN, color: "#ffffff", border: "none", borderRadius: 10, padding: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" },
   camisetaPreview: { background: BASE, border: `1px solid ${BORDER}`, borderRadius: 12, padding: "16px", textAlign: "center", marginBottom: 16 },
   camisetaNum: { width: 52, height: 52, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 900, color: "#fff", margin: "0 auto 8px" },
-  camisetaNombrePreview: { fontSize: 16, fontWeight: 800, color: "#fff", letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 },
-  warningBox: { background: "#2a1a00", border: "1px solid #4a3000", borderRadius: 10, padding: "10px 14px", color: "#f59e0b", fontSize: 13 },
-  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 },
-  modalBox: { background: "#13132a", border: `1px solid ${BORDER}`, borderRadius: 18, padding: 32, width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto" },
-  modalTitle: { fontSize: 18, fontWeight: 800, color: "#fff", marginBottom: 22 },
+  camisetaNombrePreview: { fontSize: 16, fontWeight: 800, color: "#111827", letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 },
+  warningBox: { background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "10px 14px", color: "#ca8a04", fontSize: 13 },
+  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 },
+  modalBox: { background: "#ffffff", border: `1px solid ${BORDER}`, borderRadius: 18, padding: 32, width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.12)" },
+  modalTitle: { fontSize: 18, fontWeight: 800, color: "#111827", marginBottom: 22 },
   modalActions: { display: "flex", gap: 10, marginTop: 8 },
-  spinner: { width: 32, height: 32, border: "3px solid #1e1e3a", borderTop: `3px solid ${GREEN}`, borderRadius: "50%", margin: "0 auto", animation: "spin 0.7s linear infinite" },
+  spinner: { width: 32, height: 32, border: `3px solid ${BORDER}`, borderTop: `3px solid ${GREEN}`, borderRadius: "50%", margin: "0 auto", animation: "spin 0.7s linear infinite" },
   toast: { position: "fixed", bottom: 28, right: 28, padding: "12px 24px", borderRadius: 12, fontWeight: 700, fontSize: 14, zIndex: 9999 },
 };
 
 const css = `
   * { box-sizing: border-box; }
-  input:focus, select:focus { border-color: #4ade80 !important; }
-  select option { background: #0f0f1e; }
+  input:focus, select:focus { border-color: #4f8f2f !important; }
   @keyframes spin { to { transform: rotate(360deg); } }
 `;
