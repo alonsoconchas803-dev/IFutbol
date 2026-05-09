@@ -62,3 +62,10 @@ Credentials are currently hardcoded in `App.jsx` (anon key + project URL). These
 ## Language
 
 All UI text, variable names for domain concepts, and database column names are in **Spanish** (e.g., `canchas`, `jugadores`, `solicitudes`, `arbitros`, `ligas`). Keep this convention when adding features.
+
+## Reference documents
+
+Consult these files before working on related features:
+
+- **`REGLAS_NEGOCIO.md`** — Reglas de negocio completas: roles y permisos detallados, algoritmo del generador de calendario (round-robin, regla del 75%), sistema de liguilla y copa, flujo de solicitudes, fichas de partido, planes de cobro y validaciones técnicas. Máximo **17 jugadores por equipo** y **17 filas en las fichas**.
+- **`DISEÑO.md`** — Sistema de diseño completo: paleta de colores (verde `#4f8f2f`, fondo `#e9ecef`), tipografía DM Sans, variables CSS globales, especificaciones de todos los componentes (botones, tarjetas, modales, sidebar, tobar, tabs, toasts) y decisiones de UX/UI.
