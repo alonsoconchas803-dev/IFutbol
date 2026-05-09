@@ -112,14 +112,21 @@ export default function PlayerProfile({ session }) {
     } catch (e) { console.error(e); }
   };
 
+  const MAX_JUGADORES = 17;
+
   // ── CARGAR EQUIPOS DE LIGA ────────────────────────────────────
   const cargarEquiposLiga = async (ligaId) => {
     if (!ligaId) return;
     try {
-      const data = await db(`/equipos?liga_id=eq.${ligaId}&select=*&order=nombre`, token);
-      // Filtrar equipos donde ya está inscrito en esa liga
       const yaInscrito = inscripciones.find(i => i.liga_id === ligaId);
-      setEquiposDisponibles(yaInscrito ? [] : (data || []));
+      if (yaInscrito) { setEquiposDisponibles([]); return; }
+      const [equipos, inscritos] = await Promise.all([
+        db(`/equipos?liga_id=eq.${ligaId}&select=*&order=nombre`, token),
+        db(`/jugador_equipo?liga_id=eq.${ligaId}&select=equipo_id`, token),
+      ]);
+      const conteo = {};
+      (inscritos || []).forEach(r => { conteo[r.equipo_id] = (conteo[r.equipo_id] || 0) + 1; });
+      setEquiposDisponibles((equipos || []).map(e => ({ ...e, _jugadores: conteo[e.id] || 0 })));
     } catch (e) { console.error(e); }
   };
 
@@ -150,6 +157,10 @@ export default function PlayerProfile({ session }) {
   const inscribirse = async () => {
     if (!inscForm.liga_id || !inscForm.equipo_id) return showToast("Selecciona liga y equipo", "err");
     if (!inscForm.dorsal) return showToast("El dorsal es obligatorio", "err");
+    const equipoElegido = equiposDisponibles.find(e => e.id === inscForm.equipo_id);
+    if (equipoElegido && equipoElegido._jugadores >= MAX_JUGADORES) {
+      return showToast(`Este equipo ya alcanzó el máximo de ${MAX_JUGADORES} jugadores`, "err");
+    }
     setGuardando(true);
     try {
       await db("/jugador_equipo", token, {
@@ -359,7 +370,14 @@ export default function PlayerProfile({ session }) {
                   : <select style={s.input} value={inscForm.equipo_id}
                       onChange={e => setInscForm({ ...inscForm, equipo_id: e.target.value })}>
                       <option value="">Elige un equipo...</option>
-                      {equiposDisponibles.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+                      {equiposDisponibles.map(e => {
+                        const lleno = e._jugadores >= MAX_JUGADORES;
+                        return (
+                          <option key={e.id} value={e.id} disabled={lleno}>
+                            {e.nombre} ({e._jugadores}/{MAX_JUGADORES}){lleno ? " — Completo" : ""}
+                          </option>
+                        );
+                      })}
                     </select>}
               </div>
             )}
