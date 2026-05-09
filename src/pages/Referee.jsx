@@ -50,11 +50,44 @@ export default function Referee({ session }) {
   const cargarPartidos = async () => {
     setLoading(true);
     try {
-      const data = await db(
-        `/partidos?arbitro_id=eq.${userId}&select=*,jornadas(numero,fecha,ligas(nombre)),equipos_local:equipos!partidos_equipo_local_id_fkey(id,nombre,color_playera,escudo_url),equipos_visitante:equipos!partidos_equipo_visitante_id_fkey(id,nombre,color_playera,escudo_url)&order=created_at.desc`,
+      // 1. Qué unidades tiene acceso este árbitro
+      const accesos = await db(`/arbitro_cancha?user_id=eq.${userId}&select=cancha_id,acceso_total`, token);
+      if (!accesos || accesos.length === 0) { setPartidos([]); setLoading(false); return; }
+
+      // 2. Construir lista de liga_ids permitidas
+      let ligaIds = [];
+
+      const canchasTotal = accesos.filter(a => a.acceso_total).map(a => a.cancha_id);
+      if (canchasTotal.length > 0) {
+        const ligasDeUnidad = await db(`/ligas?cancha_id=in.(${canchasTotal.join(",")})&select=id`, token);
+        ligaIds.push(...(ligasDeUnidad || []).map(l => l.id));
+      }
+
+      // Ligas específicas cuando acceso_total=false
+      const ligasEsp = await db(`/arbitro_liga?user_id=eq.${userId}&select=liga_id`, token);
+      ligaIds.push(...(ligasEsp || []).map(l => l.liga_id));
+      ligaIds = [...new Set(ligaIds)];
+
+      if (ligaIds.length === 0) { setPartidos([]); setLoading(false); return; }
+
+      // 3. Jornadas de esas ligas
+      const jornadas = await db(
+        `/jornadas?liga_id=in.(${ligaIds.join(",")})&select=id,numero,fecha,liga_id,ligas(id,nombre)`,
         token
       );
-      setPartidos(data || []);
+      const jornadaIds = (jornadas || []).map(j => j.id);
+      const jornadasMap = Object.fromEntries((jornadas || []).map(j => [j.id, j]));
+
+      if (jornadaIds.length === 0) { setPartidos([]); setLoading(false); return; }
+
+      // 4. Partidos de esas jornadas
+      const data = await db(
+        `/partidos?jornada_id=in.(${jornadaIds.join(",")})&select=*,equipos_local:equipos!partidos_equipo_local_id_fkey(id,nombre,color_playera,escudo_url),equipos_visitante:equipos!partidos_equipo_visitante_id_fkey(id,nombre,color_playera,escudo_url),ficha_partido(cerrada)&order=jornada_id`,
+        token
+      );
+
+      const parts = (data || []).map(p => ({ ...p, jornadas: jornadasMap[p.jornada_id] || null }));
+      setPartidos(parts);
     } catch (e) {
       showToast(e.message, "err");
     }

@@ -16,9 +16,10 @@ export default function Viewer() {
   const [ligaActiva, setLigaActiva] = useState(null);
   const [equipos, setEquipos] = useState([]);
   const [clasificacion, setClasificacion] = useState([]);
-  const [partidos, setPartidos] = useState([]);
+  const [partidos, setPartidos] = useState([]);       // todos (calendario)
+  const [resultados, setResultados] = useState([]);   // solo fichas cerradas
   const [goleadores, setGoleadores] = useState([]);
-  const [seccion, setSeccion] = useState("tabla");
+  const [seccion, setSeccion] = useState("calendario");
   const [loading, setLoading] = useState(true);
 
   // ── CARGAR LIGAS ─────────────────────────────────────────────
@@ -39,53 +40,55 @@ export default function Viewer() {
   const cargarDatosLiga = async (ligaId) => {
     setLoading(true);
     try {
-      const [eqs, parts] = await Promise.all([
-        db(`/equipos?liga_id=eq.${ligaId}&select=*&order=nombre`),
-        db(`/partidos?select=*,jornadas(numero,fecha),equipos_local:equipos!partidos_equipo_local_id_fkey(nombre,color_playera,escudo_url),equipos_visitante:equipos!partidos_equipo_visitante_id_fkey(nombre,color_playera,escudo_url),ficha_partido(goles_local,goles_visitante,goleadores,cerrada)&jornadas.liga_id=eq.${ligaId}&order=jornadas(fecha).desc`),
-      ]);
+      // 1. Jornadas de esta liga
+      const jornadas = await db(`/jornadas?liga_id=eq.${ligaId}&select=id,numero,fecha&order=numero`);
+      const jornadaIds = (jornadas || []).map(j => j.id);
+      const jornadasMap = Object.fromEntries((jornadas || []).map(j => [j.id, j]));
+
+      // 2. Equipos + partidos en paralelo
+      let partsData = [];
+      if (jornadaIds.length > 0) {
+        partsData = await db(
+          `/partidos?jornada_id=in.(${jornadaIds.join(",")})&select=*,equipos_local:equipos!partidos_equipo_local_id_fkey(id,nombre,color_playera,escudo_url),equipos_visitante:equipos!partidos_equipo_visitante_id_fkey(id,nombre,color_playera,escudo_url),ficha_partido(goles_local,goles_visitante,goleadores,cerrada)&order=jornada_id,cancha_numero`
+        );
+      }
+      const eqs = await db(`/equipos?liga_id=eq.${ligaId}&select=*&order=nombre`);
       setEquipos(eqs || []);
 
-      // Calcular clasificación desde fichas
-      const fichas = (parts || []).filter(p => p.ficha_partido?.length > 0 && p.ficha_partido[0].cerrada);
+      // Adjuntar jornada a cada partido
+      const parts = (partsData || []).map(p => ({ ...p, jornadas: jornadasMap[p.jornada_id] || null }));
+      setPartidos(parts);
+
+      // Fichas cerradas → resultados y clasificación
+      const fichas = parts.filter(p => p.ficha_partido?.length > 0 && p.ficha_partido[0].cerrada);
+      setResultados(fichas);
+
       const tabla = {};
       (eqs || []).forEach(eq => {
         tabla[eq.id] = { equipo: eq, pj: 0, g: 0, e: 0, d: 0, gf: 0, gc: 0, pts: 0 };
       });
       fichas.forEach(p => {
         const f = p.ficha_partido[0];
-        const local = p.equipos_local;
-        const visit = p.equipos_visitante;
-        const localId = (eqs || []).find(e => e.nombre === local?.nombre)?.id;
-        const visitId = (eqs || []).find(e => e.nombre === visit?.nombre)?.id;
-        if (!localId || !visitId) return;
-        tabla[localId].pj++; tabla[visitId].pj++;
-        tabla[localId].gf += f.goles_local; tabla[localId].gc += f.goles_visitante;
-        tabla[visitId].gf += f.goles_visitante; tabla[visitId].gc += f.goles_local;
-        if (f.goles_local > f.goles_visitante) {
-          tabla[localId].g++; tabla[localId].pts += 3; tabla[visitId].d++;
-        } else if (f.goles_local < f.goles_visitante) {
-          tabla[visitId].g++; tabla[visitId].pts += 3; tabla[localId].d++;
-        } else {
-          tabla[localId].e++; tabla[localId].pts++; tabla[visitId].e++; tabla[visitId].pts++;
-        }
+        const lid = p.equipo_local_id, vid = p.equipo_visitante_id;
+        if (!tabla[lid] || !tabla[vid]) return;
+        tabla[lid].pj++; tabla[vid].pj++;
+        tabla[lid].gf += f.goles_local;  tabla[lid].gc += f.goles_visitante;
+        tabla[vid].gf += f.goles_visitante; tabla[vid].gc += f.goles_local;
+        if (f.goles_local > f.goles_visitante)       { tabla[lid].g++; tabla[lid].pts += 3; tabla[vid].d++; }
+        else if (f.goles_local < f.goles_visitante)  { tabla[vid].g++; tabla[vid].pts += 3; tabla[lid].d++; }
+        else                                          { tabla[lid].e++; tabla[lid].pts++; tabla[vid].e++; tabla[vid].pts++; }
       });
-      const tablaOrdenada = Object.values(tabla).sort((a, b) => b.pts - a.pts || (b.gf - b.gc) - (a.gf - a.gc));
-      setClasificacion(tablaOrdenada);
-      setPartidos((parts || []).filter(p => p.ficha_partido?.length > 0 && p.ficha_partido[0].cerrada));
+      setClasificacion(Object.values(tabla).sort((a, b) => b.pts - a.pts || (b.gf - b.gc) - (a.gf - a.gc)));
 
-      // Calcular goleadores
+      // Goleadores
       const golesMap = {};
       fichas.forEach(p => {
-        const f = p.ficha_partido[0];
-        (f.goleadores || []).forEach(g => {
-          if (!golesMap[g.jugador_id]) {
-            golesMap[g.jugador_id] = { nombre: g.nombre, equipo_nombre: g.equipo_nombre, goles: 0 };
-          }
+        (p.ficha_partido[0].goleadores || []).forEach(g => {
+          if (!golesMap[g.jugador_id]) golesMap[g.jugador_id] = { nombre: g.nombre, equipo_nombre: g.equipo_nombre, goles: 0 };
           golesMap[g.jugador_id].goles += g.goles;
         });
       });
-      const golesOrdenados = Object.values(golesMap).sort((a, b) => b.goles - a.goles).slice(0, 10);
-      setGoleadores(golesOrdenados);
+      setGoleadores(Object.values(golesMap).sort((a, b) => b.goles - a.goles).slice(0, 10));
     } catch (e) { console.error(e); }
     setLoading(false);
   };
@@ -94,7 +97,7 @@ export default function Viewer() {
 
   const cambiarLiga = async (liga) => {
     setLigaActiva(liga);
-    setSeccion("tabla");
+    setSeccion("calendario");
     await cargarDatosLiga(liga.id);
   };
 
@@ -148,7 +151,7 @@ export default function Viewer() {
 
           {/* TABS */}
           <div style={s.tabs}>
-            {[["tabla","📊","Tabla"],["resultados","⚽","Resultados"],["goleadores","🥇","Goleadores"],["equipos","👕","Equipos"]].map(([key, icon, label]) => (
+            {[["calendario","📅","Calendario"],["tabla","📊","Tabla"],["resultados","⚽","Resultados"],["goleadores","🥇","Goleadores"],["equipos","👕","Equipos"]].map(([key, icon, label]) => (
               <button key={key} onClick={() => setSeccion(key)}
                 style={{ ...s.tab, ...(seccion === key ? s.tabActive : {}) }}>
                 {icon} {label}
@@ -160,6 +163,70 @@ export default function Viewer() {
             <div style={{ textAlign: "center", padding: 60 }}><div style={s.spinner}/></div>
           ) : (
             <>
+              {/* ── CALENDARIO ── */}
+              {seccion === "calendario" && (
+                <div>
+                  {partidos.length === 0 ? (
+                    <div style={s.empty}>
+                      <div style={s.emptyIcon}>📅</div>
+                      <div style={s.emptyTxt}>No hay partidos programados aún</div>
+                    </div>
+                  ) : (
+                    <div style={s.jornadasList}>
+                      {Object.values(
+                        partidos.reduce((acc, p) => {
+                          const jId = p.jornada_id;
+                          if (!acc[jId]) acc[jId] = { jornada: p.jornadas, ps: [] };
+                          acc[jId].ps.push(p);
+                          return acc;
+                        }, {})
+                      ).sort((a, b) => (a.jornada?.numero || 0) - (b.jornada?.numero || 0))
+                      .map(({ jornada, ps }) => (
+                        <div key={jornada?.id || Math.random()} style={s.jornadaGroup}>
+                          <div style={s.jornadaHeader}>
+                            <span style={s.jornadaNum}>Jornada {jornada?.numero}</span>
+                            <span style={s.jornadaFecha}>{jornada?.fecha || "Fecha por definir"}</span>
+                          </div>
+                          <div style={s.jornadaPartidos}>
+                            {ps.map(p => {
+                              const fichaOk = p.ficha_partido?.length > 0 && p.ficha_partido[0].cerrada;
+                              return (
+                                <div key={p.id} style={s.calendarioCard}>
+                                  <div style={s.calendarioVs}>
+                                    <div style={s.calendarioEquipo}>
+                                      <div style={{ ...s.calendarioDot, background: p.equipos_local?.color_playera || "#666" }}/>
+                                      <span style={s.calendarioNombre}>{p.equipos_local?.nombre}</span>
+                                    </div>
+                                    {fichaOk ? (
+                                      <div style={s.calendarioMarcador}>
+                                        <span style={{ color: p.ficha_partido[0].goles_local > p.ficha_partido[0].goles_visitante ? "#4ade80" : "#eee" }}>{p.ficha_partido[0].goles_local}</span>
+                                        <span style={{ color:"#6b7280" }}>-</span>
+                                        <span style={{ color: p.ficha_partido[0].goles_visitante > p.ficha_partido[0].goles_local ? "#4ade80" : "#eee" }}>{p.ficha_partido[0].goles_visitante}</span>
+                                      </div>
+                                    ) : (
+                                      <div style={s.calendarioVsLabel}>VS</div>
+                                    )}
+                                    <div style={{ ...s.calendarioEquipo, justifyContent:"flex-end" }}>
+                                      <span style={s.calendarioNombre}>{p.equipos_visitante?.nombre}</span>
+                                      <div style={{ ...s.calendarioDot, background: p.equipos_visitante?.color_playera || "#666" }}/>
+                                    </div>
+                                  </div>
+                                  <div style={s.calendarioMeta}>
+                                    <span>⏰ {p.hora || "Hora s/d"}</span>
+                                    <span>· Campo {p.cancha_numero || "—"}</span>
+                                    {fichaOk && <span style={s.calendarioFinalBadge}>✓ Jugado</span>}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* ── TABLA DE POSICIONES ── */}
               {seccion === "tabla" && (
                 <div style={s.tableWrap}>
@@ -212,14 +279,14 @@ export default function Viewer() {
               {/* ── RESULTADOS ── */}
               {seccion === "resultados" && (
                 <div>
-                  {partidos.length === 0 ? (
+                  {resultados.length === 0 ? (
                     <div style={s.empty}>
                       <div style={s.emptyIcon}>⚽</div>
                       <div style={s.emptyTxt}>No hay resultados disponibles aún</div>
                     </div>
                   ) : (
                     <div style={s.resultadosList}>
-                      {partidos.map(p => {
+                      {resultados.map(p => {
                         const f = p.ficha_partido[0];
                         return (
                           <div key={p.id} style={s.resultadoCard}>
@@ -399,6 +466,21 @@ const s = {
   equipoStats: { display: "flex", justifyContent: "center", gap: 16 },
   equipoStat: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2 },
   equipoStatLabel: { fontSize: 10, color: "#9ca3af" },
+  jornadasList: { display: "flex", flexDirection: "column", gap: 20 },
+  jornadaGroup: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  jornadaHeader: { background: BASE, padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${BORDER}` },
+  jornadaNum: { fontSize: 13, fontWeight: 700, color: "#111827" },
+  jornadaFecha: { fontSize: 12, color: "#6b7280" },
+  jornadaPartidos: { padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 },
+  calendarioCard: { padding: "12px 16px", background: BASE, borderRadius: 10, border: `1px solid ${BORDER}` },
+  calendarioVs: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
+  calendarioEquipo: { display: "flex", alignItems: "center", gap: 8, flex: 1 },
+  calendarioDot: { width: 10, height: 10, borderRadius: "50%", flexShrink: 0 },
+  calendarioNombre: { fontSize: 14, fontWeight: 600, color: "#111827" },
+  calendarioVsLabel: { fontSize: 12, color: "#9ca3af", fontWeight: 700, padding: "0 12px" },
+  calendarioMarcador: { display: "flex", gap: 6, fontSize: 20, fontWeight: 900, padding: "0 12px" },
+  calendarioMeta: { display: "flex", gap: 8, fontSize: 11, color: "#6b7280", alignItems: "center" },
+  calendarioFinalBadge: { background: "#f0fdf4", color: GREEN, fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 700, border: `1px solid #c3e6a3` },
   empty: { textAlign: "center", padding: "60px 20px" },
   emptyIcon: { fontSize: 48, marginBottom: 16 },
   emptyTxt: { color: "#6b7280", fontSize: 15 },
