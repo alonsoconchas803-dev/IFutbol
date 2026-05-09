@@ -24,6 +24,7 @@ const db = async (path, token, options = {}) => {
 
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 const TURNOS = ["Mañana", "Tarde", "Noche"];
+const COLORES = ["#e53e3e","#dd6b20","#d69e2e","#38a169","#3182ce","#805ad5","#d53f8c","#2d3748","#319795","#e53e8c"];
 
 export default function SuperAdmin({ session }) {
   const [seccion, setSeccion] = useState("canchas");
@@ -32,11 +33,17 @@ export default function SuperAdmin({ session }) {
   const [usuarios, setUsuarios] = useState([]);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
-  const [modal, setModal] = useState(null); // "cancha" | "liga" | "usuario"
+  const [modal, setModal] = useState(null); // "cancha" | "liga" | "equipo"
 
   // Formulario canchas
   const [canchaForm, setCanchaForm] = useState({ nombre: "", direccion: "", num_canchas: 1 });
   const [editCanchaId, setEditCanchaId] = useState(null);
+
+  // Equipos
+  const [equipos, setEquipos] = useState([]);
+  const [ligaEquipos, setLigaEquipos] = useState(null);
+  const [equipoForm, setEquipoForm] = useState({ nombre: "", color_playera: "#3182ce" });
+  const [editEquipoId, setEditEquipoId] = useState(null);
 
   // Formulario ligas
   const [ligaForm, setLigaForm] = useState({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: "", temporada: "" });
@@ -144,6 +151,45 @@ export default function SuperAdmin({ session }) {
     } catch (e) { showToast(e.message, "err"); }
   };
 
+  // ── EQUIPOS ───────────────────────────────────────────────────
+  const cargarEquipos = async (ligaId) => {
+    if (!ligaId) return;
+    try {
+      const data = await db(`/equipos?liga_id=eq.${ligaId}&order=nombre`, token);
+      setEquipos(data || []);
+    } catch (e) { showToast(e.message, "err"); }
+  };
+
+  const guardarEquipo = async () => {
+    if (!equipoForm.nombre) return showToast("El nombre es obligatorio", "err");
+    if (!ligaEquipos) return showToast("Selecciona una liga primero", "err");
+    setLoading(true);
+    try {
+      const payload = { nombre: equipoForm.nombre, color_playera: equipoForm.color_playera, liga_id: ligaEquipos.id };
+      if (editEquipoId) {
+        await db(`/equipos?id=eq.${editEquipoId}`, token, { method: "PATCH", body: JSON.stringify(payload) });
+        showToast("Equipo actualizado ✓");
+      } else {
+        await db("/equipos", token, { method: "POST", body: JSON.stringify(payload) });
+        showToast("Equipo registrado ✓");
+      }
+      setEquipoForm({ nombre: "", color_playera: "#3182ce" });
+      setEditEquipoId(null);
+      setModal(null);
+      cargarEquipos(ligaEquipos.id);
+    } catch (e) { showToast(e.message, "err"); }
+    setLoading(false);
+  };
+
+  const eliminarEquipo = async (id) => {
+    if (!confirm("¿Eliminar este equipo?")) return;
+    try {
+      await db(`/equipos?id=eq.${id}`, token, { method: "DELETE" });
+      showToast("Equipo eliminado");
+      cargarEquipos(ligaEquipos.id);
+    } catch (e) { showToast(e.message, "err"); }
+  };
+
   // ── RENDER ────────────────────────────────────────────────────
   return (
     <div style={s.wrap}>
@@ -160,7 +206,7 @@ export default function SuperAdmin({ session }) {
 
       {/* TABS */}
       <div style={s.tabs}>
-        {[["canchas","🏟️","Canchas"],["ligas","🏆","Ligas"],["stats","📊","Resumen"],["solicitudes","📋","Solicitudes"]].map(([key, icon, label]) => (
+        {[["canchas","🏟️","Canchas"],["ligas","🏆","Ligas"],["equipos","👕","Equipos"],["stats","📊","Resumen"],["solicitudes","📋","Solicitudes"]].map(([key, icon, label]) => (
           <button key={key} onClick={() => setSeccion(key)}
             style={{ ...s.tab, ...(seccion === key ? s.tabActive : {}) }}>
             {icon} {label}
@@ -289,6 +335,71 @@ export default function SuperAdmin({ session }) {
         </div>
       )}
 
+      {/* ── SECCIÓN EQUIPOS ── */}
+      {seccion === "equipos" && (
+        <div>
+          <div style={s.field}>
+            <label style={s.label}>Liga</label>
+            <select style={s.input} value={ligaEquipos?.id || ""} onChange={e => {
+              const liga = ligas.find(l => l.id === e.target.value) || null;
+              setLigaEquipos(liga);
+              if (liga) cargarEquipos(liga.id);
+              else setEquipos([]);
+            }}>
+              <option value="">Selecciona una liga...</option>
+              {ligas.map(l => <option key={l.id} value={l.id}>{l.nombre} · {l.dia} {l.turno}</option>)}
+            </select>
+          </div>
+
+          {!ligaEquipos && (
+            <div style={s.empty}>
+              <div style={s.emptyIcon}>👆</div>
+              <div style={s.emptyTxt}>Selecciona una liga para ver o agregar equipos</div>
+            </div>
+          )}
+
+          {ligaEquipos && (
+            <>
+              <div style={s.secHeader}>
+                <span style={s.secCount}>{equipos.length} equipos en {ligaEquipos.nombre}</span>
+                <button style={s.btnAdd} onClick={() => { setEquipoForm({ nombre: "", color_playera: "#3182ce" }); setEditEquipoId(null); setModal("equipo"); }}>
+                  + Nuevo equipo
+                </button>
+              </div>
+
+              {equipos.length === 0 ? (
+                <div style={s.empty}>
+                  <div style={s.emptyIcon}>👕</div>
+                  <div style={s.emptyTxt}>No hay equipos en esta liga</div>
+                  <button style={s.btnAdd} onClick={() => { setEquipoForm({ nombre: "", color_playera: "#3182ce" }); setEditEquipoId(null); setModal("equipo"); }}>
+                    Agregar primer equipo
+                  </button>
+                </div>
+              ) : (
+                <div style={s.grid}>
+                  {equipos.map(eq => (
+                    <div key={eq.id} style={{ ...s.card, borderTop: `3px solid ${eq.color_playera}` }} className="sa-card">
+                      <div style={s.cardTop}>
+                        <div style={{ ...s.cardIcon, background: eq.color_playera }}>👕</div>
+                        <div style={s.cardActions}>
+                          <button style={s.btnEdit} onClick={() => { setEquipoForm({ nombre: eq.nombre, color_playera: eq.color_playera }); setEditEquipoId(eq.id); setModal("equipo"); }}>✏️</button>
+                          <button style={s.btnDel} onClick={() => eliminarEquipo(eq.id)}>🗑️</button>
+                        </div>
+                      </div>
+                      <div style={s.cardName}>{eq.nombre}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                        <div style={{ width: 14, height: 14, borderRadius: "50%", background: eq.color_playera, flexShrink: 0 }} />
+                        <span style={{ fontSize: 11, color: "#6b7280" }}>{eq.color_playera}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {seccion === "solicitudes" && (
   <Solicitudes session={session} />
 )}
@@ -317,6 +428,40 @@ export default function SuperAdmin({ session }) {
               <button style={s.btnCancel} onClick={() => setModal(null)}>Cancelar</button>
               <button style={s.btnSave} onClick={guardarCancha} disabled={loading}>
                 {loading ? "Guardando..." : editCanchaId ? "Guardar cambios" : "Crear cancha"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL EQUIPO ── */}
+      {modal === "equipo" && (
+        <div style={s.overlay} onClick={() => setModal(null)}>
+          <div style={s.modalBox} onClick={e => e.stopPropagation()}>
+            <h3 style={s.modalTitle}>{editEquipoId ? "Editar equipo" : "Nuevo equipo"}</h3>
+            <div style={s.field}>
+              <label style={s.label}>Nombre del equipo *</label>
+              <input style={s.input} placeholder="ej. Tigres FC"
+                value={equipoForm.nombre} onChange={e => setEquipoForm({ ...equipoForm, nombre: e.target.value })} />
+            </div>
+            <div style={s.field}>
+              <label style={s.label}>Color de playera</label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                {COLORES.map(c => (
+                  <div key={c} onClick={() => setEquipoForm({ ...equipoForm, color_playera: c })}
+                    style={{ width: 30, height: 30, borderRadius: "50%", background: c, cursor: "pointer", transition: "box-shadow 0.15s",
+                      boxShadow: equipoForm.color_playera === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none" }} />
+                ))}
+                <input type="color" value={equipoForm.color_playera}
+                  onChange={e => setEquipoForm({ ...equipoForm, color_playera: e.target.value })}
+                  style={{ width: 30, height: 30, borderRadius: "50%", border: "none", cursor: "pointer", padding: 0 }}
+                  title="Color personalizado" />
+              </div>
+            </div>
+            <div style={s.modalActions}>
+              <button style={s.btnCancel} onClick={() => setModal(null)}>Cancelar</button>
+              <button style={s.btnSave} onClick={guardarEquipo} disabled={loading}>
+                {loading ? "Guardando..." : editEquipoId ? "Guardar cambios" : "Crear equipo"}
               </button>
             </div>
           </div>

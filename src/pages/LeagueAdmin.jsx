@@ -58,6 +58,9 @@ export default function LeagueAdmin({ session, userRole }) {
   const [escudoPreview, setEscudoPreview] = useState(null);
   const [editEquipoId, setEditEquipoId] = useState(null);
 
+  // Árbitros
+  const [arbitros, setArbitros] = useState([]);
+
   const token = session?.access_token;
 
   const showToast = (msg, tipo = "ok") => {
@@ -109,6 +112,46 @@ export default function LeagueAdmin({ session, userRole }) {
     } catch (e) { showToast(e.message, "err"); }
   };
 
+  // ── CARGAR ÁRBITROS ───────────────────────────────────────────
+  const cargarArbitros = async () => {
+    if (!ligaSeleccionada) return;
+    try {
+      const canchaId = ligaSeleccionada.cancha_id;
+      const [arbsCanchaData, arbsLigaData, solicData] = await Promise.all([
+        db(`/arbitro_cancha?cancha_id=eq.${canchaId}&select=user_id,acceso_total`, token),
+        db(`/arbitro_liga?liga_id=eq.${ligaSeleccionada.id}&select=user_id`, token),
+        db(`/solicitudes_registro?tipo_rol=eq.referee&estado=eq.aprobado&select=user_id,nombre_completo`, token),
+      ]);
+      const arbsLigaSet = new Set((arbsLigaData || []).map(a => a.user_id));
+      const solicMap = Object.fromEntries((solicData || []).map(s => [s.user_id, s.nombre_completo]));
+      setArbitros((arbsCanchaData || []).map(arb => ({
+        user_id: arb.user_id,
+        nombre: solicMap[arb.user_id] || "Árbitro",
+        acceso_total: arb.acceso_total,
+        tiene_acceso_liga: arb.acceso_total || arbsLigaSet.has(arb.user_id),
+      })));
+    } catch (e) { showToast(e.message, "err"); }
+  };
+
+  const toggleAccesoArbitro = async (arbitro) => {
+    try {
+      if (arbitro.acceso_total) {
+        return showToast("Este árbitro tiene acceso total. Modifícalo desde Solicitudes.", "err");
+      }
+      if (arbitro.tiene_acceso_liga) {
+        await db(`/arbitro_liga?user_id=eq.${arbitro.user_id}&liga_id=eq.${ligaSeleccionada.id}`, token, { method: "DELETE" });
+        showToast("Acceso revocado");
+      } else {
+        await db("/arbitro_liga", token, {
+          method: "POST",
+          body: JSON.stringify({ user_id: arbitro.user_id, liga_id: ligaSeleccionada.id })
+        });
+        showToast("Acceso otorgado ✓");
+      }
+      cargarArbitros();
+    } catch (e) { showToast(e.message, "err"); }
+  };
+
   useEffect(() => { cargarLigas(); }, []);
   useEffect(() => {
     if (ligaSeleccionada) {
@@ -116,6 +159,10 @@ export default function LeagueAdmin({ session, userRole }) {
       cargarJugadores(ligaSeleccionada.id);
     }
   }, [ligaSeleccionada]);
+
+  useEffect(() => {
+    if (seccion === "arbitros" && ligaSeleccionada) cargarArbitros();
+  }, [seccion, ligaSeleccionada]);
 
   // ── GUARDAR EQUIPO ────────────────────────────────────────────
   const guardarEquipo = async () => {
@@ -211,7 +258,7 @@ export default function LeagueAdmin({ session, userRole }) {
         <>
           {/* TABS */}
           <div style={s.tabs}>
-            {[["equipos","👕","Equipos"],["jugadores","👥","Jugadores"],["calendario","📅","Calendario"],].map(([key, icon, label]) => (
+            {[["equipos","👕","Equipos"],["jugadores","👥","Jugadores"],["calendario","📅","Calendario"],["arbitros","🟡","Árbitros"]].map(([key, icon, label]) => (
               <button key={key} onClick={() => { setSeccion(key); setEquipoDetalle(null); }}
                 style={{ ...s.tab, ...(seccion === key || (seccion === "detalle" && key === "equipos") ? s.tabActive : {}) }}>
                 {icon} {label}
@@ -363,6 +410,70 @@ export default function LeagueAdmin({ session, userRole }) {
     cancha={null}
   />
 )}
+
+          {/* ── SECCIÓN ÁRBITROS ── */}
+          {seccion === "arbitros" && (
+            <div>
+              <div style={s.secHeader}>
+                <span style={s.secCount}>{arbitros.length} árbitros en la unidad deportiva</span>
+                <button style={{ ...s.btnAdd, background:"#f9fafb", color:"#374151", border:"1px solid #e5e7eb" }}
+                  onClick={cargarArbitros} title="Recargar">
+                  ↻ Actualizar
+                </button>
+              </div>
+
+              {arbitros.length === 0 ? (
+                <div style={s.empty}>
+                  <div style={s.emptyIcon}>🟡</div>
+                  <div style={s.emptyTxt}>No hay árbitros asignados a esta unidad deportiva</div>
+                  <div style={{ fontSize:13, color:"#6b7280" }}>Los árbitros se asignan desde Solicitudes en el panel Super Admin</div>
+                </div>
+              ) : (
+                <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                  {arbitros.map(arb => (
+                    <div key={arb.user_id} style={{ ...s.jugadorRow, justifyContent:"space-between" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+                        <div style={{ width:42, height:42, borderRadius:"50%", background:"#fef3c7", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>
+                          🟡
+                        </div>
+                        <div>
+                          <div style={s.jugadorNombre}>{arb.nombre}</div>
+                          <div style={{ fontSize:12, color:"#6b7280" }}>
+                            {arb.acceso_total
+                              ? "Acceso total a todos los torneos de esta unidad"
+                              : arb.tiene_acceso_liga
+                                ? `Con acceso a ${ligaSeleccionada.nombre}`
+                                : `Sin acceso a ${ligaSeleccionada.nombre}`}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        {arb.acceso_total ? (
+                          <span style={{ fontSize:11, padding:"4px 10px", borderRadius:6, background:"#f0fdf4", color:"#4f8f2f", border:"1px solid #c3e6a3", fontWeight:700 }}>
+                            Acceso total
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => toggleAccesoArbitro(arb)}
+                            style={{
+                              fontSize:12, padding:"6px 14px", borderRadius:8, cursor:"pointer", fontWeight:700, border:"none",
+                              background: arb.tiene_acceso_liga ? "#fee2e2" : "#f0fdf4",
+                              color: arb.tiene_acceso_liga ? "#dc2626" : "#4f8f2f",
+                            }}>
+                            {arb.tiene_acceso_liga ? "✕ Revocar acceso" : "✓ Dar acceso"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ marginTop:20, padding:"12px 16px", borderRadius:10, background:"#fffbeb", border:"1px solid #fde68a", fontSize:12, color:"#92400e" }}>
+                ⚠️ Para cambiar las unidades deportivas de un árbitro o su tipo de acceso, usa <strong>Solicitudes</strong> en el panel Super Admin.
+              </div>
+            </div>
+          )}
 
         </>
       )}

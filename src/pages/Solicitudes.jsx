@@ -43,6 +43,9 @@ export default function Solicitudes({ session }) {
   const [ligaSeleccionada, setLigaSeleccionada]         = useState("");
   const [canchasSeleccionadas, setCanchasSeleccionadas] = useState([]);
   const [procesando, setProcesando]                     = useState(false);
+  const [modoEditar, setModoEditar]                     = useState(false);
+  const [accesoTotal, setAccesoTotal]                   = useState(true);
+  const [ligasEspecificas, setLigasEspecificas]         = useState([]);
 
   const token = session?.access_token;
 
@@ -71,10 +74,47 @@ export default function Solicitudes({ session }) {
   const filtradas = solicitudes.filter(s => filtro === "todas" ? true : s.estado === filtro);
   const pendientes = solicitudes.filter(s => s.estado === "pendiente").length;
 
-  const abrirModal = (sol) => {
-    setModalSolicitud(sol);
+  const cerrarModal = () => {
+    setModalSolicitud(null);
+    setModoEditar(false);
     setLigaSeleccionada("");
     setCanchasSeleccionadas([]);
+    setAccesoTotal(true);
+    setLigasEspecificas([]);
+  };
+
+  const abrirModal = (sol) => {
+    setModalSolicitud(sol);
+    setModoEditar(false);
+    setLigaSeleccionada("");
+    setCanchasSeleccionadas([]);
+    setAccesoTotal(true);
+    setLigasEspecificas([]);
+  };
+
+  const abrirEditar = async (sol) => {
+    setModalSolicitud(sol);
+    setModoEditar(true);
+    if (sol.tipo_rol === "referee") {
+      try {
+        const [arbsCanchaData, arbsLigaData] = await Promise.all([
+          db(`/arbitro_cancha?user_id=eq.${sol.user_id}&select=cancha_id,acceso_total`, token),
+          db(`/arbitro_liga?user_id=eq.${sol.user_id}&select=liga_id`, token),
+        ]);
+        setCanchasSeleccionadas((arbsCanchaData || []).map(r => r.cancha_id));
+        setAccesoTotal((arbsCanchaData || [])[0]?.acceso_total ?? true);
+        setLigasEspecificas((arbsLigaData || []).map(r => r.liga_id));
+      } catch (e) {
+        setCanchasSeleccionadas([]);
+        setAccesoTotal(true);
+        setLigasEspecificas([]);
+      }
+    } else {
+      setLigaSeleccionada(sol.liga_id || "");
+      setCanchasSeleccionadas([]);
+      setAccesoTotal(true);
+      setLigasEspecificas([]);
+    }
   };
 
   const toggleCancha = (id) => {
@@ -83,12 +123,39 @@ export default function Solicitudes({ session }) {
     );
   };
 
+  const toggleLigaEspecifica = (id) => {
+    setLigasEspecificas(prev =>
+      prev.includes(id) ? prev.filter(l => l !== id) : [...prev, id]
+    );
+  };
+
+  const guardarArbitroCanchas = async (userId) => {
+    await db(`/arbitro_cancha?user_id=eq.${userId}`, token, { method: "DELETE" });
+    for (const canchaId of canchasSeleccionadas) {
+      await db("/arbitro_cancha", token, {
+        method: "POST",
+        body: JSON.stringify({ user_id: userId, cancha_id: canchaId, acceso_total: accesoTotal })
+      });
+    }
+    await db(`/arbitro_liga?user_id=eq.${userId}`, token, { method: "DELETE" });
+    if (!accesoTotal) {
+      for (const ligaId of ligasEspecificas) {
+        await db("/arbitro_liga", token, {
+          method: "POST",
+          body: JSON.stringify({ user_id: userId, liga_id: ligaId })
+        });
+      }
+    }
+  };
+
   const handleAprobar = async () => {
     if (!modalSolicitud) return;
     if (modalSolicitud.tipo_rol === "league_admin" && !ligaSeleccionada)
       return showToast("Selecciona la liga que administrará", "err");
     if (modalSolicitud.tipo_rol === "referee" && canchasSeleccionadas.length === 0)
       return showToast("Selecciona al menos una unidad deportiva", "err");
+    if (modalSolicitud.tipo_rol === "referee" && !accesoTotal && ligasEspecificas.length === 0)
+      return showToast("Selecciona al menos un torneo o activa acceso total", "err");
 
     setProcesando(true);
     try {
@@ -102,18 +169,7 @@ export default function Solicitudes({ session }) {
       });
 
       if (modalSolicitud.tipo_rol === "referee") {
-        for (const canchaId of canchasSeleccionadas) {
-          await fetch(`${SUPABASE_URL}/rest/v1/arbitro_cancha`, {
-            method: "POST",
-            headers: {
-              "apikey": SUPABASE_KEY,
-              "Authorization": `Bearer ${token}`,
-              "Content-Type": "application/json",
-              "Prefer": "return=representation"
-            },
-            body: JSON.stringify({ user_id: modalSolicitud.user_id, cancha_id: canchaId })
-          });
-        }
+        await guardarArbitroCanchas(modalSolicitud.user_id);
       }
 
       await db(`/solicitudes_registro?id=eq.${modalSolicitud.id}`, token, {
@@ -122,9 +178,38 @@ export default function Solicitudes({ session }) {
       });
 
       showToast(`✅ ${modalSolicitud.nombre_completo} aprobado correctamente`);
-      setModalSolicitud(null);
-      setLigaSeleccionada("");
-      setCanchasSeleccionadas([]);
+      cerrarModal();
+      cargarDatos();
+    } catch (e) { showToast(e.message, "err"); }
+    setProcesando(false);
+  };
+
+  const handleEditar = async () => {
+    if (!modalSolicitud) return;
+    if (modalSolicitud.tipo_rol === "league_admin" && !ligaSeleccionada)
+      return showToast("Selecciona una liga", "err");
+    if (modalSolicitud.tipo_rol === "referee" && canchasSeleccionadas.length === 0)
+      return showToast("Selecciona al menos una unidad deportiva", "err");
+    if (modalSolicitud.tipo_rol === "referee" && !accesoTotal && ligasEspecificas.length === 0)
+      return showToast("Selecciona al menos un torneo o activa acceso total", "err");
+
+    setProcesando(true);
+    try {
+      if (modalSolicitud.tipo_rol === "league_admin") {
+        await db(`/user_roles?user_id=eq.${modalSolicitud.user_id}&rol=eq.league_admin`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ liga_id: ligaSeleccionada })
+        });
+        await db(`/solicitudes_registro?id=eq.${modalSolicitud.id}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ liga_id: ligaSeleccionada })
+        });
+        showToast("Liga actualizada ✓");
+      } else {
+        await guardarArbitroCanchas(modalSolicitud.user_id);
+        showToast("Asignaciones actualizadas ✓");
+      }
+      cerrarModal();
       cargarDatos();
     } catch (e) { showToast(e.message, "err"); }
     setProcesando(false);
@@ -224,6 +309,12 @@ export default function Solicitudes({ session }) {
                       </button>
                     </div>
                   )}
+                  {sol.estado === "aprobado" && (
+                    <button style={{ fontSize:13, padding:"8px 14px", background:"#f3f4f6", color:"#374151", border:"1px solid #e5e7eb", borderRadius:8, cursor:"pointer", fontWeight:600 }}
+                      onClick={() => abrirEditar(sol)}>
+                      ✏️ Editar
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -233,30 +324,32 @@ export default function Solicitudes({ session }) {
 
       {/* MODAL */}
       {modalSolicitud && (
-        <div className="ifutbol-overlay" onClick={() => setModalSolicitud(null)}>
+        <div className="ifutbol-overlay" onClick={cerrarModal}>
           <div onClick={e => e.stopPropagation()} style={s.modal}>
 
-            {/* HEADER COMPACTO */}
+            {/* HEADER */}
             <div style={s.modalHeader}>
               <div style={s.modalHeaderLeft}>
                 <span style={{ fontSize:20 }}>{ROLES_LABEL[modalSolicitud.tipo_rol]?.icon}</span>
                 <div>
-                  <div style={{ fontWeight:800, fontSize:16, color:"var(--text)" }}>{modalSolicitud.nombre_completo}</div>
+                  <div style={{ fontWeight:800, fontSize:16, color:"var(--text)" }}>
+                    {modoEditar ? `Editar: ${modalSolicitud.nombre_completo}` : modalSolicitud.nombre_completo}
+                  </div>
                   <span style={{ ...s.rolPill, background:ROLES_LABEL[modalSolicitud.tipo_rol]?.bg, color:ROLES_LABEL[modalSolicitud.tipo_rol]?.color, border:`1px solid ${ROLES_LABEL[modalSolicitud.tipo_rol]?.border}`, fontSize:11 }}>
                     {ROLES_LABEL[modalSolicitud.tipo_rol]?.label}
                   </span>
                 </div>
               </div>
-              <button style={s.closeBtn} onClick={() => setModalSolicitud(null)}>✕</button>
+              <button style={s.closeBtn} onClick={cerrarModal}>✕</button>
             </div>
 
-            {/* CUERPO SCROLLEABLE */}
+            {/* CUERPO */}
             <div style={s.modalBody}>
 
               {/* ADMIN DE LIGA → selector liga */}
               {modalSolicitud.tipo_rol === "league_admin" && (
                 <div style={{ marginBottom:16 }}>
-                  <label className="form-label">Asignar a liga *</label>
+                  <label className="form-label">{modoEditar ? "Liga asignada" : "Asignar a liga *"}</label>
                   <select className="form-input" value={ligaSeleccionada} onChange={e => setLigaSeleccionada(e.target.value)}>
                     <option value="">Selecciona una liga...</option>
                     {ligas.map(l => <option key={l.id} value={l.id}>🏆 {l.nombre} · {l.dia} {l.turno}</option>)}
@@ -266,56 +359,106 @@ export default function Solicitudes({ session }) {
 
               {/* ÁRBITRO → checkboxes canchas */}
               {modalSolicitud.tipo_rol === "referee" && (
-                <div>
-                  <label className="form-label">Asignar a unidades deportivas *</label>
-                  <p style={{ fontSize:12, color:"var(--text-muted)", marginBottom:10 }}>
-                    El árbitro podrá registrar fichas en estas unidades
-                  </p>
-                  <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                    {canchas.map(c => {
-                      const sel = canchasSeleccionadas.includes(c.id);
-                      return (
-                        <div key={c.id} onClick={() => toggleCancha(c.id)} style={{
-                          display:"flex", alignItems:"center", gap:10,
-                          padding:"10px 14px", borderRadius:10, cursor:"pointer",
-                          border:`2px solid ${sel ? "var(--green)" : "var(--border)"}`,
-                          background: sel ? "var(--green-light)" : "white",
-                          transition:"all 0.15s"
-                        }}>
-                          <div style={{
-                            width:18, height:18, borderRadius:5, flexShrink:0,
+                <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+                  <div>
+                    <label className="form-label">Unidades deportivas *</label>
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {canchas.map(c => {
+                        const sel = canchasSeleccionadas.includes(c.id);
+                        return (
+                          <div key={c.id} onClick={() => toggleCancha(c.id)} style={{
+                            display:"flex", alignItems:"center", gap:10,
+                            padding:"10px 14px", borderRadius:10, cursor:"pointer",
                             border:`2px solid ${sel ? "var(--green)" : "var(--border)"}`,
-                            background: sel ? "var(--green)" : "white",
-                            display:"flex", alignItems:"center", justifyContent:"center",
+                            background: sel ? "var(--green-light)" : "white",
                             transition:"all 0.15s"
                           }}>
-                            {sel && <span style={{ color:"white", fontSize:11, fontWeight:900, lineHeight:1 }}>✓</span>}
+                            <div style={{
+                              width:18, height:18, borderRadius:5, flexShrink:0,
+                              border:`2px solid ${sel ? "var(--green)" : "var(--border)"}`,
+                              background: sel ? "var(--green)" : "white",
+                              display:"flex", alignItems:"center", justifyContent:"center"
+                            }}>
+                              {sel && <span style={{ color:"white", fontSize:11, fontWeight:900, lineHeight:1 }}>✓</span>}
+                            </div>
+                            <div>
+                              <div style={{ fontWeight:700, fontSize:13 }}>🏟️ {c.nombre}</div>
+                              {c.direccion && <div style={{ fontSize:11, color:"var(--text-muted)" }}>{c.direccion}</div>}
+                            </div>
                           </div>
-                          <div>
-                            <div style={{ fontWeight:700, fontSize:13 }}>🏟️ {c.nombre}</div>
-                            {c.direccion && <div style={{ fontSize:11, color:"var(--text-muted)" }}>{c.direccion}</div>}
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* ACCESO TOTAL toggle */}
+                  {canchasSeleccionadas.length > 0 && (
+                    <div style={{ padding:"12px 14px", borderRadius:10, background:"#f9fafb", border:"1px solid #e5e7eb" }}>
+                      <label style={{ display:"flex", alignItems:"flex-start", gap:10, cursor:"pointer" }}>
+                        <input type="checkbox" checked={accesoTotal} onChange={e => setAccesoTotal(e.target.checked)}
+                          style={{ marginTop:2, accentColor:"var(--green)", width:16, height:16 }} />
+                        <div>
+                          <div style={{ fontWeight:700, fontSize:13 }}>Acceso total a torneos</div>
+                          <div style={{ fontSize:11, color:"#6b7280", marginTop:2 }}>
+                            El árbitro puede trabajar en todos los torneos de las unidades seleccionadas (incluyendo futuros)
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                  {canchasSeleccionadas.length > 0 && (
-                    <div style={{ marginTop:8, fontSize:12, color:"var(--green)", fontWeight:600 }}>
-                      ✓ {canchasSeleccionadas.length} {canchasSeleccionadas.length === 1 ? "unidad seleccionada" : "unidades seleccionadas"}
+                      </label>
                     </div>
                   )}
+
+                  {/* LIGAS ESPECÍFICAS cuando acceso_total=false */}
+                  {!accesoTotal && canchasSeleccionadas.length > 0 && (() => {
+                    const ligasFiltradas = ligas.filter(l => canchasSeleccionadas.includes(l.cancha_id));
+                    return ligasFiltradas.length > 0 ? (
+                      <div>
+                        <label className="form-label">Torneos con acceso *</label>
+                        <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                          {ligasFiltradas.map(l => {
+                            const sel = ligasEspecificas.includes(l.id);
+                            return (
+                              <div key={l.id} onClick={() => toggleLigaEspecifica(l.id)} style={{
+                                display:"flex", alignItems:"center", gap:8,
+                                padding:"8px 12px", borderRadius:8, cursor:"pointer",
+                                border:`2px solid ${sel ? "var(--green)" : "#e5e7eb"}`,
+                                background: sel ? "var(--green-light)" : "white", transition:"all 0.15s"
+                              }}>
+                                <div style={{
+                                  width:15, height:15, borderRadius:4, flexShrink:0,
+                                  border:`2px solid ${sel ? "var(--green)" : "#e5e7eb"}`,
+                                  background: sel ? "var(--green)" : "white",
+                                  display:"flex", alignItems:"center", justifyContent:"center"
+                                }}>
+                                  {sel && <span style={{ color:"white", fontSize:9, fontWeight:900 }}>✓</span>}
+                                </div>
+                                <span style={{ fontSize:12, fontWeight:600 }}>🏆 {l.nombre} · {l.dia} {l.turno}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize:12, color:"#6b7280" }}>No hay torneos registrados en las unidades seleccionadas.</div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
 
-            {/* BOTONES FIJOS ABAJO */}
+            {/* BOTONES */}
             <div style={s.modalFooter}>
-              <button className="btn btn-ghost" style={{ flex:1 }} onClick={() => setModalSolicitud(null)}>
+              <button className="btn btn-ghost" style={{ flex:1 }} onClick={cerrarModal}>
                 Cancelar
               </button>
-              <button className="btn btn-premium" style={{ flex:2 }} onClick={handleAprobar} disabled={procesando}>
-                {procesando ? "Aprobando..." : "✅ Confirmar"}
-              </button>
+              {modoEditar ? (
+                <button className="btn btn-premium" style={{ flex:2 }} onClick={handleEditar} disabled={procesando}>
+                  {procesando ? "Guardando..." : "💾 Guardar cambios"}
+                </button>
+              ) : (
+                <button className="btn btn-premium" style={{ flex:2 }} onClick={handleAprobar} disabled={procesando}>
+                  {procesando ? "Aprobando..." : "✅ Confirmar aprobación"}
+                </button>
+              )}
             </div>
           </div>
         </div>
