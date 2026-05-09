@@ -365,10 +365,11 @@ function HomePage({ canchas, onVerUnidad }) {
 function UnidadPage({ cancha, onBack }) {
   const [torneos, setTorneos] = useState([]);
   const [torneoActivo, setTorneoActivo] = useState(null);
-  const [seccion, setSeccion] = useState("tabla");
+  const [seccion, setSeccion] = useState("partidos");
   const [equipos, setEquipos] = useState([]);
   const [clasificacion, setClasificacion] = useState([]);
-  const [partidos, setPartidos] = useState([]);
+  const [calendario, setCalendario] = useState([]);  // todos los partidos
+  const [partidos, setPartidos] = useState([]);       // solo fichas cerradas
   const [goleadores, setGoleadores] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -382,20 +383,36 @@ function UnidadPage({ cancha, onBack }) {
 
   const cargarDatos = async (ligaId) => {
     setLoading(true);
-    const [eqs, parts] = await Promise.all([
+    // 1. Jornadas de esta liga + equipos en paralelo
+    const [eqs, jornadas] = await Promise.all([
       db(`/equipos?liga_id=eq.${ligaId}&select=*&order=nombre`),
-      db(`/partidos?select=*,jornadas(numero,fecha,liga_id),equipos_local:equipos!partidos_equipo_local_id_fkey(id,nombre,color_playera,escudo_url),equipos_visitante:equipos!partidos_equipo_visitante_id_fkey(id,nombre,color_playera,escudo_url),ficha_partido(goles_local,goles_visitante,goleadores,cerrada)&order=created_at.desc`),
+      db(`/jornadas?liga_id=eq.${ligaId}&select=id,numero,fecha&order=numero`),
     ]);
     const eqsF = eqs || [];
     setEquipos(eqsF);
-    const fichas = (parts||[]).filter(p => p.ficha_partido?.length>0 && p.ficha_partido[0].cerrada && p.jornadas?.liga_id===ligaId);
+    const jornadaIds = (jornadas||[]).map(j=>j.id);
+    const jornadasMap = Object.fromEntries((jornadas||[]).map(j=>[j.id,j]));
+
+    // 2. Partidos de esas jornadas
+    let allParts = [];
+    if (jornadaIds.length > 0) {
+      allParts = await db(
+        `/partidos?jornada_id=in.(${jornadaIds.join(",")})&select=*,equipos_local:equipos!partidos_equipo_local_id_fkey(id,nombre,color_playera,escudo_url),equipos_visitante:equipos!partidos_equipo_visitante_id_fkey(id,nombre,color_playera,escudo_url),ficha_partido(goles_local,goles_visitante,goleadores,cerrada)&order=jornada_id,cancha_numero`
+      );
+    }
+    const parts = (allParts||[]).map(p=>({...p, jornada: jornadasMap[p.jornada_id]||null}));
+    setCalendario(parts);
+
+    const fichas = parts.filter(p=>p.ficha_partido?.length>0 && p.ficha_partido[0].cerrada);
+    setPartidos(fichas);
+
+    // Clasificación usando IDs directos (no búsqueda por nombre)
     const tabla = {};
     eqsF.forEach(eq => { tabla[eq.id] = { equipo:eq, pj:0, g:0, e:0, d:0, gf:0, gc:0, pts:0 }; });
     fichas.forEach(p => {
       const f = p.ficha_partido[0];
-      const lId = eqsF.find(e=>e.nombre===p.equipos_local?.nombre)?.id;
-      const vId = eqsF.find(e=>e.nombre===p.equipos_visitante?.nombre)?.id;
-      if (!lId||!vId||!tabla[lId]||!tabla[vId]) return;
+      const lId = p.equipo_local_id, vId = p.equipo_visitante_id;
+      if (!tabla[lId]||!tabla[vId]) return;
       tabla[lId].pj++; tabla[vId].pj++;
       tabla[lId].gf+=f.goles_local||0; tabla[lId].gc+=f.goles_visitante||0;
       tabla[vId].gf+=f.goles_visitante||0; tabla[vId].gc+=f.goles_local||0;
@@ -404,7 +421,7 @@ function UnidadPage({ cancha, onBack }) {
       else{tabla[lId].e++;tabla[lId].pts++;tabla[vId].e++;tabla[vId].pts++;}
     });
     setClasificacion(Object.values(tabla).sort((a,b)=>b.pts-a.pts||(b.gf-b.gc)-(a.gf-a.gc)));
-    setPartidos(fichas);
+
     const gm={};
     fichas.forEach(p=>(p.ficha_partido[0].goleadores||[]).forEach(g=>{
       if(!gm[g.jugador_id])gm[g.jugador_id]={nombre:g.nombre,equipo_nombre:g.equipo_nombre,goles:0};
@@ -414,8 +431,8 @@ function UnidadPage({ cancha, onBack }) {
     setLoading(false);
   };
 
-  const cambiarTorneo = t => { setTorneoActivo(t); setSeccion("tabla"); cargarDatos(t.id); };
-  const tabs = [["tabla","📊 Tabla"],["partidos","📅 Partidos"],["goleadores","🥇 Goleadores"],["equipos","👕 Equipos"],["ofensiva","⚔️ Mejor ofensiva"],["defensiva","🛡️ Mejor defensiva"],["fairplay","🤝 Fair play"]];
+  const cambiarTorneo = t => { setTorneoActivo(t); setSeccion("partidos"); cargarDatos(t.id); };
+  const tabs = [["partidos","📅 Partidos"],["tabla","📊 Tabla"],["goleadores","🥇 Goleadores"],["equipos","👕 Equipos"],["ofensiva","⚔️ Mejor ofensiva"],["defensiva","🛡️ Mejor defensiva"],["fairplay","🤝 Fair play"]];
 
   return (
     <div className="animate-in">
@@ -441,7 +458,7 @@ function UnidadPage({ cancha, onBack }) {
             <div style={{ fontSize:13, color:"var(--text-muted)" }}>{torneoActivo.dia} · {torneoActivo.turno}{torneoActivo.temporada&&` · Temp. ${torneoActivo.temporada}`}</div>
           </div>
           <div style={{ display:"flex", gap:20 }}>
-            {[[equipos.length,"equipos"],[partidos.length,"partidos"]].map(([n,l])=>(
+            {[[equipos.length,"equipos"],[calendario.length,"partidos"]].map(([n,l])=>(
               <div key={l} style={{ textAlign:"center" }}><div style={{ fontSize:20, fontWeight:800, color:"var(--green)" }}>{n}</div><div style={{ fontSize:11, color:"var(--text-muted)" }}>{l}</div></div>
             ))}
           </div>
@@ -474,31 +491,56 @@ function UnidadPage({ cancha, onBack }) {
               </table>
             </div>
           )}
-          {seccion==="partidos"&&(partidos.length===0?<EmptyState icon="📅" txt="No hay partidos registrados aún"/>:
-            <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
-              {partidos.map(p=>{const f=p.ficha_partido[0];return(
-                <div key={p.id} style={{ background:"white",borderRadius:"var(--radius-md)",padding:"16px 20px",boxShadow:"var(--shadow-sm)",border:"1px solid var(--border)" }}>
-                  <div style={{ display:"flex",justifyContent:"space-between",marginBottom:12 }}>
-                    <span style={{ fontSize:12,color:"var(--text-muted)",fontWeight:600 }}>Jornada {p.jornadas?.numero}</span>
-                    <span style={{ fontSize:12,color:"var(--text-muted)" }}>{p.jornadas?.fecha||"—"}</span>
+          {seccion==="partidos"&&(calendario.length===0?<EmptyState icon="📅" txt="No hay partidos programados aún"/>:
+            <div style={{ display:"flex",flexDirection:"column",gap:16 }}>
+              {Object.values(calendario.reduce((acc,p)=>{
+                const jId=p.jornada_id;
+                if(!acc[jId]) acc[jId]={jornada:p.jornada,ps:[]};
+                acc[jId].ps.push(p);
+                return acc;
+              },{})).sort((a,b)=>(a.jornada?.numero||0)-(b.jornada?.numero||0))
+              .map(({jornada,ps})=>(
+                <div key={jornada?.id||Math.random()} style={{ background:"white",borderRadius:"var(--radius-md)",overflow:"hidden",boxShadow:"var(--shadow-sm)",border:"1px solid var(--border)" }}>
+                  <div style={{ background:"var(--surface-soft,#f9fafb)",padding:"10px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid var(--border)" }}>
+                    <span style={{ fontWeight:700,fontSize:13 }}>Jornada {jornada?.numero}</span>
+                    <span style={{ fontSize:12,color:"var(--text-muted)" }}>{jornada?.fecha||"Fecha por definir"}</span>
                   </div>
-                  <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
-                    <div style={{ display:"flex",alignItems:"center",gap:8,flex:1 }}>
-                      <div style={{ width:10,height:10,borderRadius:"50%",background:p.equipos_local?.color_playera||"#999" }}/>
-                      <span style={{ fontWeight:700,fontSize:15 }}>{p.equipos_local?.nombre}</span>
-                    </div>
-                    <div style={{ display:"flex",alignItems:"center",gap:10,fontSize:26,fontWeight:900,padding:"0 16px" }}>
-                      <span style={{ color:f.goles_local>f.goles_visitante?"#16a34a":"var(--text)" }}>{f.goles_local}</span>
-                      <span style={{ color:"#d1d5db",fontSize:18 }}>-</span>
-                      <span style={{ color:f.goles_visitante>f.goles_local?"#16a34a":"var(--text)" }}>{f.goles_visitante}</span>
-                    </div>
-                    <div style={{ display:"flex",alignItems:"center",gap:8,flex:1,justifyContent:"flex-end" }}>
-                      <span style={{ fontWeight:700,fontSize:15 }}>{p.equipos_visitante?.nombre}</span>
-                      <div style={{ width:10,height:10,borderRadius:"50%",background:p.equipos_visitante?.color_playera||"#999" }}/>
-                    </div>
+                  <div style={{ padding:"10px 14px",display:"flex",flexDirection:"column",gap:8 }}>
+                    {ps.map(p=>{
+                      const fichaOk=p.ficha_partido?.length>0&&p.ficha_partido[0].cerrada;
+                      const f=fichaOk?p.ficha_partido[0]:null;
+                      return(
+                        <div key={p.id} style={{ padding:"10px 14px",background:"#f9fafb",borderRadius:10,border:"1px solid var(--border)" }}>
+                          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4 }}>
+                            <div style={{ display:"flex",alignItems:"center",gap:8,flex:1 }}>
+                              <div style={{ width:10,height:10,borderRadius:"50%",background:p.equipos_local?.color_playera||"#999",flexShrink:0 }}/>
+                              <span style={{ fontWeight:600,fontSize:14 }}>{p.equipos_local?.nombre}</span>
+                            </div>
+                            {f?(
+                              <div style={{ display:"flex",alignItems:"center",gap:8,fontSize:22,fontWeight:900,padding:"0 12px" }}>
+                                <span style={{ color:f.goles_local>f.goles_visitante?"#16a34a":"var(--text)" }}>{f.goles_local}</span>
+                                <span style={{ color:"#d1d5db",fontSize:16 }}>-</span>
+                                <span style={{ color:f.goles_visitante>f.goles_local?"#16a34a":"var(--text)" }}>{f.goles_visitante}</span>
+                              </div>
+                            ):(
+                              <span style={{ fontSize:13,color:"var(--text-muted)",fontWeight:700,padding:"0 12px" }}>VS</span>
+                            )}
+                            <div style={{ display:"flex",alignItems:"center",gap:8,flex:1,justifyContent:"flex-end" }}>
+                              <span style={{ fontWeight:600,fontSize:14 }}>{p.equipos_visitante?.nombre}</span>
+                              <div style={{ width:10,height:10,borderRadius:"50%",background:p.equipos_visitante?.color_playera||"#999",flexShrink:0 }}/>
+                            </div>
+                          </div>
+                          <div style={{ fontSize:11,color:"var(--text-muted)",display:"flex",gap:8,alignItems:"center" }}>
+                            <span>⏰ {p.hora||"Hora s/d"}</span>
+                            <span>· Campo {p.cancha_numero||"—"}</span>
+                            {fichaOk&&<span style={{ color:"var(--green)",fontWeight:700 }}>✓ Jugado</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-              );})}
+              ))}
             </div>
           )}
           {seccion==="goleadores"&&(goleadores.length===0?<EmptyState icon="🥇" txt="No hay goles registrados aún"/>:
