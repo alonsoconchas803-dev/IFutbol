@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
+import JerseySVG from "../components/JerseySVG";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -32,11 +34,15 @@ export default function Referee({ session }) {
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [toast, setToast] = useState(null);
+  const [modalCerrar, setModalCerrar] = useState(false);
 
   // Formulario ficha
   const [golesLocal, setGolesLocal] = useState(0);
   const [golesVisitante, setGolesVisitante] = useState(0);
   const [goleadores, setGoleadores] = useState([]);
+  const [asistencia, setAsistencia] = useState([]);
+  const [faltasLocal, setFaltasLocal] = useState(0);
+  const [faltasVisitante, setFaltasVisitante] = useState(0);
   const [observaciones, setObservaciones] = useState("");
   const [cerrada, setCerrada] = useState(false);
 
@@ -86,7 +92,7 @@ export default function Referee({ session }) {
 
       // 4. Partidos de esas jornadas
       const data = await db(
-        `/partidos?jornada_id=in.(${jornadaIds.join(",")})&select=*,equipos_local:equipos!partidos_equipo_local_id_fkey(id,nombre,color_playera,escudo_url),equipos_visitante:equipos!partidos_equipo_visitante_id_fkey(id,nombre,color_playera,escudo_url),ficha_partido(cerrada)&order=jornada_id`,
+        `/partidos?jornada_id=in.(${jornadaIds.join(",")})&select=*,equipos_local:equipos!partidos_equipo_local_id_fkey(id,nombre,color_playera,color_camiseta_2,diseno_camiseta,escudo_url),equipos_visitante:equipos!partidos_equipo_visitante_id_fkey(id,nombre,color_playera,color_camiseta_2,diseno_camiseta,escudo_url),ficha_partido(cerrada)&order=jornada_id`,
         token
       );
 
@@ -109,12 +115,17 @@ export default function Referee({ session }) {
         setGolesLocal(f.goles_local || 0);
         setGolesVisitante(f.goles_visitante || 0);
         setGoleadores(f.goleadores || []);
+        setAsistencia(f.asistencia || []);
+        setFaltasLocal(f.faltas_local || 0);
+        setFaltasVisitante(f.faltas_visitante || 0);
         setObservaciones(f.observaciones || "");
         setCerrada(f.cerrada || false);
       } else {
         setFicha(null);
         setGolesLocal(0); setGolesVisitante(0);
-        setGoleadores([]); setObservaciones(""); setCerrada(false);
+        setGoleadores([]); setAsistencia([]);
+        setFaltasLocal(0); setFaltasVisitante(0);
+        setObservaciones(""); setCerrada(false);
       }
       await cargarJugadores(partido);
     } catch (e) { showToast(e.message, "err"); }
@@ -134,6 +145,12 @@ export default function Referee({ session }) {
 
   useEffect(() => { if (userId) cargarPartidos(); }, [userId]);
 
+  // ── ASISTENCIA ───────────────────────────────────────────────
+  const toggleAsistencia = (jeId) => {
+    setAsistencia(prev => prev.includes(jeId) ? prev.filter(id => id !== jeId) : [...prev, jeId]);
+  };
+  const estaPresente = (jeId) => asistencia.includes(jeId);
+
   // ── AGREGAR GOLEADOR ─────────────────────────────────────────
   const agregarGoleador = (jugador, equipo, equipoNombre) => {
     const yaExiste = goleadores.findIndex(g => g.jugador_id === jugador.jugador_id && g.equipo === equipo);
@@ -151,6 +168,8 @@ export default function Referee({ session }) {
         goles: 1,
       }]);
     }
+    if (equipo === partidoActivo?.equipos_local?.id) setGolesLocal(prev => prev + 1);
+    else setGolesVisitante(prev => prev + 1);
   };
 
   const quitarGoleador = (jugador_id, equipo) => {
@@ -160,6 +179,8 @@ export default function Referee({ session }) {
       }
       return g;
     }).filter(g => g.goles > 0));
+    if (equipo === partidoActivo?.equipos_local?.id) setGolesLocal(prev => Math.max(0, prev - 1));
+    else setGolesVisitante(prev => Math.max(0, prev - 1));
   };
 
   const golesDeJugador = (jugador_id, equipo) => {
@@ -177,6 +198,9 @@ export default function Referee({ session }) {
         goles_local: golesLocal,
         goles_visitante: golesVisitante,
         goleadores,
+        asistencia,
+        faltas_local: faltasLocal,
+        faltas_visitante: faltasVisitante,
         observaciones,
         cerrada: cerrarFicha,
       };
@@ -225,7 +249,7 @@ export default function Referee({ session }) {
           ) : (
             <div style={s.partidoList}>
               {partidos.map(p => {
-                const tieneficha = p.ficha_partido?.length > 0;
+                const tieneficha = p.ficha_partido != null;
                 return (
                   <div key={p.id} style={s.partidoCard} className="ref-card" onClick={() => cargarFicha(p)}>
                     <div style={s.partidoTop}>
@@ -234,13 +258,13 @@ export default function Referee({ session }) {
                     </div>
                     <div style={s.vsRow}>
                       <div style={s.equipoVs}>
-                        <div style={{ ...s.equipoDot, background: p.equipos_local?.color_playera || "#666" }}/>
+                        <JerseySVG diseno={p.equipos_local?.diseno_camiseta||"solido"} color1={p.equipos_local?.color_playera||"#666"} color2={p.equipos_local?.color_camiseta_2||"#fff"} escudoUrl={p.equipos_local?.escudo_url||null} size={32}/>
                         <span style={s.equipoVsNombre}>{p.equipos_local?.nombre}</span>
                       </div>
                       <div style={s.vsLabel}>VS</div>
                       <div style={{ ...s.equipoVs, justifyContent: "flex-end" }}>
                         <span style={s.equipoVsNombre}>{p.equipos_visitante?.nombre}</span>
-                        <div style={{ ...s.equipoDot, background: p.equipos_visitante?.color_playera || "#666" }}/>
+                        <JerseySVG diseno={p.equipos_visitante?.diseno_camiseta||"solido"} color1={p.equipos_visitante?.color_playera||"#666"} color2={p.equipos_visitante?.color_camiseta_2||"#fff"} escudoUrl={p.equipos_visitante?.escudo_url||null} size={32}/>
                       </div>
                     </div>
                     <div style={s.partidoBottom}>
@@ -266,16 +290,15 @@ export default function Referee({ session }) {
 
           {/* CABECERA DEL PARTIDO */}
           <div style={s.fichaHeader}>
-            <div style={s.fichaLiga}>🏆 {partidoActivo.jornadas?.ligas?.nombre} · Jornada {partidoActivo.jornadas?.numero}</div>
+            <div style={s.fichaLiga}>
+              <span style={{ background:"rgba(0,0,0,0.22)", color:"#fff", padding:"5px 14px", borderRadius:99, fontSize:13, fontWeight:700, letterSpacing:0.3 }}>
+                🏆 {partidoActivo.jornadas?.ligas?.nombre} · Jornada {partidoActivo.jornadas?.numero}
+              </span>
+            </div>
             <div style={s.fichaVsGrande}>
               <div style={s.fichaEquipo}>
-                <div style={{ ...s.fichaEscudo, background: partidoActivo.equipos_local?.color_playera }}>
-                  {partidoActivo.equipos_local?.escudo_url
-                    ? <img src={partidoActivo.equipos_local.escudo_url} style={s.escudoImg} alt="escudo"/>
-                    : partidoActivo.equipos_local?.nombre[0]}
-                </div>
+                <JerseySVG diseno={partidoActivo.equipos_local?.diseno_camiseta||"solido"} color1={partidoActivo.equipos_local?.color_playera||"#666"} color2={partidoActivo.equipos_local?.color_camiseta_2||"#fff"} escudoUrl={partidoActivo.equipos_local?.escudo_url||null} size={60}/>
                 <span style={s.fichaEquipoNombre}>{partidoActivo.equipos_local?.nombre}</span>
-                <span style={s.fichaEquipoLabel}>Local</span>
               </div>
 
               {/* MARCADOR */}
@@ -293,76 +316,92 @@ export default function Referee({ session }) {
               </div>
 
               <div style={s.fichaEquipo}>
-                <div style={{ ...s.fichaEscudo, background: partidoActivo.equipos_visitante?.color_playera }}>
-                  {partidoActivo.equipos_visitante?.escudo_url
-                    ? <img src={partidoActivo.equipos_visitante.escudo_url} style={s.escudoImg} alt="escudo"/>
-                    : partidoActivo.equipos_visitante?.nombre[0]}
-                </div>
+                <JerseySVG diseno={partidoActivo.equipos_visitante?.diseno_camiseta||"solido"} color1={partidoActivo.equipos_visitante?.color_playera||"#666"} color2={partidoActivo.equipos_visitante?.color_camiseta_2||"#fff"} escudoUrl={partidoActivo.equipos_visitante?.escudo_url||null} size={60}/>
                 <span style={s.fichaEquipoNombre}>{partidoActivo.equipos_visitante?.nombre}</span>
-                <span style={s.fichaEquipoLabel}>Visitante</span>
               </div>
             </div>
           </div>
 
-          {/* GOLEADORES */}
+          {/* JUGADORES: ASISTENCIA + GOLES UNIFICADOS */}
           <div style={s.seccion}>
-            <h3 style={s.seccionTitle}>⚽ Goleadores</h3>
-            <div style={s.goleadoresGrid}>
-              {/* LOCAL */}
-              <div style={s.goleadoresCol}>
-                <div style={{ ...s.goleadoresColHeader, borderBottom: `2px solid ${partidoActivo.equipos_local?.color_playera}` }}>
-                  {partidoActivo.equipos_local?.nombre}
-                </div>
-                {jugadoresLocal.length === 0
-                  ? <p style={s.sinJugadores}>Sin jugadores registrados</p>
-                  : jugadoresLocal.map(j => {
-                    const goles = golesDeJugador(j.jugador_id, partidoActivo.equipos_local.id);
-                    return (
-                      <div key={j.id} style={{ ...s.jugadorGolRow, background: goles > 0 ? "#0d2a0d" : "transparent" }}>
-                        <div style={s.jugadorGolInfo}>
-                          <span style={{ ...s.dorsalMin, background: partidoActivo.equipos_local?.color_playera }}>{j.dorsal || "—"}</span>
-                          <span style={s.jugadorGolNombre}>{j.jugadores?.nombre_completo}</span>
-                        </div>
-                        {!cerrada && (
-                          <div style={s.golBtns}>
-                            {goles > 0 && <button style={s.golBtnMinus} onClick={() => quitarGoleador(j.jugador_id, partidoActivo.equipos_local.id)}>−</button>}
-                            <button style={s.golBtnPlus} onClick={() => agregarGoleador(j, partidoActivo.equipos_local.id, partidoActivo.equipos_local.nombre)}>⚽</button>
-                            {goles > 0 && <span style={s.golCount}>{goles}</span>}
+            <h3 style={s.seccionTitle}>📋 Jugadores</h3>
+            <div style={s.dosCol}>
+              {[
+                { equipo: partidoActivo.equipos_local, jugadores: jugadoresLocal },
+                { equipo: partidoActivo.equipos_visitante, jugadores: jugadoresVisitante },
+              ].map(({ equipo, jugadores }) => (
+                <div key={equipo.id}>
+                  <div style={{ ...s.colHeader, borderColor: equipo.color_playera || GREEN }}>
+                    <span>{equipo.nombre}</span>
+                    <span style={s.contadorBadge}>
+                      {jugadores.filter(j => estaPresente(j.id)).length}/{jugadores.length} presentes
+                    </span>
+                  </div>
+                  {jugadores.length === 0
+                    ? <p style={s.sinJugadores}>Sin jugadores registrados</p>
+                    : jugadores.map(j => {
+                      const presente = estaPresente(j.id);
+                      const goles = golesDeJugador(j.jugador_id, equipo.id);
+                      return (
+                        <div key={j.id} style={{
+                          ...s.jugadorRow,
+                          background: goles > 0 ? "rgba(22,163,74,0.15)" : presente ? "rgba(22,163,74,0.05)" : "transparent",
+                        }}>
+                          <span style={{ ...s.dorsalMin, background: equipo.color_playera || GREEN }}>{j.dorsal || "—"}</span>
+                          <div style={s.jugadorInfo}>
+                            <span style={s.jugadorCamiseta}>{j.nombre_camiseta || j.jugadores?.nombre_completo?.split(" ")[0]?.toUpperCase()}</span>
+                            <span style={s.jugadorNombre}>{j.jugadores?.nombre_completo}</span>
+                            {j.jugadores?.numero_afiliado && <span style={s.jugadorAfiliado}>#{j.jugadores.numero_afiliado}</span>}
                           </div>
-                        )}
-                        {cerrada && goles > 0 && <span style={s.golCountCerrada}>{goles} ⚽</span>}
-                      </div>
-                    );
-                  })}
-              </div>
+                          <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
+                            {/* Asistencia */}
+                            <span
+                              style={{ ...s.checkBox, background: presente ? "#16a34a" : "transparent", borderColor: presente ? "#16a34a" : "#6b7280", cursor: cerrada ? "default" : "pointer" }}
+                              onClick={() => !cerrada && toggleAsistencia(j.id)}
+                            >{presente ? "✓" : ""}</span>
+                            {/* Goles */}
+                            {!cerrada ? (
+                              <div style={s.golBtns}>
+                                {goles > 0 && <button style={s.golBtnMinus} onClick={() => quitarGoleador(j.jugador_id, equipo.id)}>−</button>}
+                                <button style={s.golBtnPlus} onClick={() => agregarGoleador(j, equipo.id, equipo.nombre)}>⚽</button>
+                                {goles > 0 && <span style={s.golCount}>{goles}</span>}
+                              </div>
+                            ) : (
+                              goles > 0 && <span style={s.golCountCerrada}>{goles}⚽</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              ))}
+            </div>
+          </div>
 
-              {/* VISITANTE */}
-              <div style={s.goleadoresCol}>
-                <div style={{ ...s.goleadoresColHeader, borderBottom: `2px solid ${partidoActivo.equipos_visitante?.color_playera}` }}>
-                  {partidoActivo.equipos_visitante?.nombre}
+          {/* FALTAS */}
+          <div style={s.seccion}>
+            <h3 style={s.seccionTitle}>🟨 Faltas cometidas</h3>
+            <div style={s.dosCol}>
+              {[
+                { nombre: partidoActivo.equipos_local?.nombre, color: partidoActivo.equipos_local?.color_playera, val: faltasLocal, set: setFaltasLocal },
+                { nombre: partidoActivo.equipos_visitante?.nombre, color: partidoActivo.equipos_visitante?.color_playera, set: setFaltasVisitante, val: faltasVisitante },
+              ].map(({ nombre, color, val, set }) => (
+                <div key={nombre} style={{ ...s.faltasCard, borderTop: `3px solid ${color || GREEN}` }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 12 }}>{nombre}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                    <button
+                      style={s.faltaBtn}
+                      onClick={() => !cerrada && set(prev => Math.max(0, prev - 1))}
+                      disabled={cerrada}>−</button>
+                    <span style={s.faltaNum}>{val}</span>
+                    <button
+                      style={s.faltaBtn}
+                      onClick={() => !cerrada && set(prev => prev + 1)}
+                      disabled={cerrada}>+</button>
+                    <span style={{ fontSize: 12, color: "#6b7280" }}>faltas</span>
+                  </div>
                 </div>
-                {jugadoresVisitante.length === 0
-                  ? <p style={s.sinJugadores}>Sin jugadores registrados</p>
-                  : jugadoresVisitante.map(j => {
-                    const goles = golesDeJugador(j.jugador_id, partidoActivo.equipos_visitante.id);
-                    return (
-                      <div key={j.id} style={{ ...s.jugadorGolRow, background: goles > 0 ? "#0d2a0d" : "transparent" }}>
-                        <div style={s.jugadorGolInfo}>
-                          <span style={{ ...s.dorsalMin, background: partidoActivo.equipos_visitante?.color_playera }}>{j.dorsal || "—"}</span>
-                          <span style={s.jugadorGolNombre}>{j.jugadores?.nombre_completo}</span>
-                        </div>
-                        {!cerrada && (
-                          <div style={s.golBtns}>
-                            {goles > 0 && <button style={s.golBtnMinus} onClick={() => quitarGoleador(j.jugador_id, partidoActivo.equipos_visitante.id)}>−</button>}
-                            <button style={s.golBtnPlus} onClick={() => agregarGoleador(j, partidoActivo.equipos_visitante.id, partidoActivo.equipos_visitante.nombre)}>⚽</button>
-                            {goles > 0 && <span style={s.golCount}>{goles}</span>}
-                          </div>
-                        )}
-                        {cerrada && goles > 0 && <span style={s.golCountCerrada}>{goles} ⚽</span>}
-                      </div>
-                    );
-                  })}
-              </div>
+              ))}
             </div>
           </div>
 
@@ -370,7 +409,7 @@ export default function Referee({ session }) {
           <div style={s.seccion}>
             <h3 style={s.seccionTitle}>📝 Observaciones del partido</h3>
             <textarea
-              style={{ ...s.textarea, opacity: cerrada ? 0.5 : 1 }}
+              style={{ ...s.textarea, opacity: cerrada ? 0.6 : 1 }}
               placeholder="Tarjetas amarillas, rojas, incidencias, notas importantes..."
               value={observaciones}
               onChange={e => !cerrada && setObservaciones(e.target.value)}
@@ -385,14 +424,41 @@ export default function Referee({ session }) {
               <button style={s.btnGuardar} onClick={() => guardarFicha(false)} disabled={guardando}>
                 {guardando ? "Guardando..." : "💾 Guardar borrador"}
               </button>
-              <button style={s.btnCerrar} onClick={() => {
-                if (confirm("¿Cerrar la ficha? Ya no podrás editarla después.")) guardarFicha(true);
-              }} disabled={guardando}>
+              <button style={s.btnCerrar} onClick={() => setModalCerrar(true)} disabled={guardando}>
                 🔒 Cerrar ficha final
               </button>
             </div>
           )}
         </div>
+      )}
+
+      {/* MODAL CONFIRMAR CIERRE — portal sobre document.body para no verse afectado por scroll del contenedor */}
+      {modalCerrar && createPortal(
+        <div style={s.overlay} onClick={() => setModalCerrar(false)}>
+          <div style={s.modalBox} onClick={e => e.stopPropagation()}>
+            <div style={{ textAlign:"center", marginBottom:22 }}>
+              <div style={{ fontSize:44, marginBottom:12 }}>🔒</div>
+              <h3 style={{ fontSize:18, fontWeight:800, color:"#111827", marginBottom:10 }}>¿Cerrar la ficha?</h3>
+              <p style={{ color:"#6b7280", fontSize:14, margin:0, lineHeight:1.6 }}>
+                Ya no podrás editarla después.
+              </p>
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <button
+                style={{ flex:1, background:"transparent", border:`1px solid ${BORDER}`, borderRadius:10, padding:"11px", color:"#6b7280", fontSize:13, cursor:"pointer", fontWeight:600 }}
+                onClick={() => setModalCerrar(false)}>
+                Cancelar
+              </button>
+              <button
+                style={{ flex:2, background:GREEN, border:"none", borderRadius:10, padding:"11px", color:"#fff", fontSize:13, fontWeight:800, cursor:"pointer", boxShadow:"0 2px 8px rgba(79,143,47,0.3)" }}
+                onClick={() => { setModalCerrar(false); guardarFicha(true); }}
+                disabled={guardando}>
+                {guardando ? "Cerrando..." : "Sí, cerrar ficha"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -405,9 +471,9 @@ const GREEN = "#4f8f2f";
 
 const s = {
   wrap: {},
-  header: { marginBottom: 24 },
-  title: { fontSize: 26, fontWeight: 800, color: "#111827", letterSpacing: -0.8, marginBottom: 4 },
-  sub: { color: "#6b7280", fontSize: 14 },
+  header: { marginBottom: 24, padding: "20px 24px", background: `linear-gradient(135deg, ${GREEN} 0%, #7fbf4d 100%)`, borderRadius: 16, boxShadow: "0 4px 16px rgba(79,143,47,0.3)" },
+  title: { fontSize: 26, fontWeight: 900, color: "#fff", letterSpacing: -0.8, marginBottom: 4 },
+  sub: { color: "rgba(255,255,255,0.78)", fontSize: 14, margin: 0 },
   secHeader: { marginBottom: 16 },
   secCount: { color: "#6b7280", fontSize: 13 },
   empty: { textAlign: "center", padding: "60px 20px" },
@@ -428,41 +494,49 @@ const s = {
   partidoBottom: { display: "flex", justifyContent: "space-between", alignItems: "center" },
   statusBadge: { fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 6 },
   horaLabel: { fontSize: 12, color: "#6b7280" },
-  backBtn: { background: "transparent", border: "none", color: GREEN, fontSize: 14, cursor: "pointer", marginBottom: 20, padding: 0, fontWeight: 600 },
+  backBtn: { display: "inline-flex", alignItems: "center", gap: 6, background: GREEN, border: "none", color: "#fff", fontSize: 13, cursor: "pointer", marginBottom: 20, padding: "9px 18px", borderRadius: 10, fontWeight: 700, boxShadow: "0 2px 8px rgba(79,143,47,0.3)" },
   cerradaBanner: { background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 18px", color: "#ca8a04", fontSize: 13, marginBottom: 20 },
-  fichaHeader: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 16, padding: "24px 28px", marginBottom: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" },
-  fichaLiga: { fontSize: 12, color: "#6b7280", fontWeight: 600, marginBottom: 20, textAlign: "center" },
+  fichaHeader: { background: "linear-gradient(135deg, #4f8f2f 0%, #7fbf4d 100%)", borderRadius: 18, padding: "26px 28px", marginBottom: 24, boxShadow: "0 4px 16px rgba(79,143,47,0.35)" },
+  fichaLiga: { fontSize: 13, fontWeight: 700, marginBottom: 20, textAlign: "center", display: "flex", justifyContent: "center" },
   fichaVsGrande: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20 },
-  fichaEquipo: { display: "flex", flexDirection: "column", alignItems: "center", gap: 8, flex: 1 },
+  fichaEquipo: { display: "flex", flexDirection: "column", alignItems: "center", gap: 10, flex: 1 },
   fichaEscudo: { width: 60, height: 60, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 800, color: "#fff", overflow: "hidden" },
   escudoImg: { width: "100%", height: "100%", objectFit: "cover" },
-  fichaEquipoNombre: { fontSize: 16, fontWeight: 700, color: "#111827", textAlign: "center" },
-  fichaEquipoLabel: { fontSize: 11, color: "#6b7280" },
+  fichaEquipoNombre: { fontSize: 14, fontWeight: 800, color: "#fff", textAlign: "center", textShadow: "0 1px 4px rgba(0,0,0,0.4)" },
   marcadorBox: { display: "flex", flexDirection: "column", alignItems: "center", gap: 8 },
   marcadorRow: { display: "flex", alignItems: "center", gap: 8 },
-  marcadorBtn: { width: 32, height: 32, borderRadius: 8, background: "#f3f4f6", border: `1px solid ${BORDER}`, color: "#374151", fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
-  marcadorNum: { width: 56, height: 56, background: BASE, border: `2px solid ${BORDER}`, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, fontWeight: 900, color: "#111827" },
-  marcadorGuion: { fontSize: 24, color: "#9ca3af", padding: "0 4px" },
-  marcadorLabel: { fontSize: 11, color: "#6b7280" },
+  marcadorBtn: { width: 34, height: 34, borderRadius: 8, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.25)", color: "#fff", fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
+  marcadorNum: { width: 60, height: 60, background: "rgba(255,255,255,0.95)", border: "none", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, fontWeight: 900, color: "#111827", boxShadow: "0 2px 12px rgba(0,0,0,0.2)" },
+  marcadorGuion: { fontSize: 26, color: "rgba(255,255,255,0.4)", padding: "0 4px" },
+  marcadorLabel: { fontSize: 11, color: "rgba(255,255,255,0.55)", letterSpacing: 0.5 },
   seccion: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "20px 24px", marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
   seccionTitle: { fontSize: 15, fontWeight: 700, color: "#111827", marginBottom: 16 },
-  goleadoresGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 },
-  goleadoresCol: { display: "flex", flexDirection: "column", gap: 8 },
-  goleadoresColHeader: { fontSize: 13, fontWeight: 700, color: "#111827", paddingBottom: 10, marginBottom: 4 },
-  jugadorGolRow: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderRadius: 8, transition: "background 0.2s" },
-  jugadorGolInfo: { display: "flex", alignItems: "center", gap: 8, flex: 1 },
-  dorsalMin: { width: 24, height: 24, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: "#fff", flexShrink: 0 },
-  jugadorGolNombre: { fontSize: 13, color: "#374151", fontWeight: 500 },
+  dosCol: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 },
+  goleadoresCol: { display: "flex", flexDirection: "column", gap: 4 },
+  colHeader: { fontSize: 13, fontWeight: 700, color: "#111827", paddingBottom: 8, marginBottom: 6, borderBottom: "2px solid", display: "flex", justifyContent: "space-between", alignItems: "center" },
+  contadorBadge: { fontSize: 11, background: "#f3f4f6", borderRadius: 6, padding: "2px 7px", color: "#6b7280", fontWeight: 700 },
+  jugadorRow: { display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 8, transition: "background 0.15s" },
+  jugadorInfo: { display: "flex", flexDirection: "column", flex: 1, minWidth: 0 },
+  jugadorCamiseta: { fontSize: 12, fontWeight: 800, color: "#111827", letterSpacing: 0.5, textTransform: "uppercase", lineHeight: 1.2 },
+  jugadorNombre: { fontSize: 11, color: "#6b7280", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  jugadorAfiliado: { fontSize: 10, color: "#9ca3af" },
+  checkBox: { width: 22, height: 22, borderRadius: 6, border: "2px solid", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: "#fff", flexShrink: 0, transition: "all 0.15s" },
+  dorsalMin: { width: 26, height: 26, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: "#fff", flexShrink: 0 },
   golBtns: { display: "flex", alignItems: "center", gap: 6 },
   golBtnPlus: { background: "#dcfce7", border: "1px solid #bbf7d0", borderRadius: 6, color: GREEN, fontSize: 14, cursor: "pointer", padding: "3px 8px", fontWeight: 700 },
   golBtnMinus: { background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, color: "#dc2626", fontSize: 14, cursor: "pointer", padding: "3px 8px", fontWeight: 700 },
   golCount: { fontSize: 14, fontWeight: 800, color: GREEN, minWidth: 16, textAlign: "center" },
   golCountCerrada: { fontSize: 13, fontWeight: 700, color: GREEN },
   sinJugadores: { fontSize: 12, color: "#9ca3af", fontStyle: "italic" },
+  faltasCard: { background: BASE, borderRadius: 10, padding: "16px 18px" },
+  faltaBtn: { width: 34, height: 34, borderRadius: 8, background: SURFACE, border: `1px solid ${BORDER}`, color: "#374151", fontSize: 20, cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" },
+  faltaNum: { fontSize: 32, fontWeight: 900, color: "#111827", minWidth: 36, textAlign: "center" },
   textarea: { width: "100%", background: BASE, border: `1px solid ${BORDER}`, borderRadius: 10, padding: "12px 14px", color: "#111827", fontSize: 14, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" },
   acciones: { display: "flex", gap: 12 },
   btnGuardar: { flex: 1, background: "#f3f4f6", border: `1px solid ${BORDER}`, borderRadius: 12, padding: "14px", color: "#374151", fontSize: 14, fontWeight: 700, cursor: "pointer" },
   btnCerrar: { flex: 1, background: GREEN, border: "none", borderRadius: 12, padding: "14px", color: "#ffffff", fontSize: 14, fontWeight: 800, cursor: "pointer" },
+  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 },
+  modalBox: { background: "#fff", borderRadius: 18, padding: "32px 28px", width: "100%", maxWidth: 360, boxShadow: "0 8px 32px rgba(0,0,0,0.18)", border: `1px solid ${BORDER}` },
   toast: { position: "fixed", bottom: 28, right: 28, padding: "12px 24px", borderRadius: 12, fontWeight: 700, fontSize: 14, zIndex: 9999 },
 };
 

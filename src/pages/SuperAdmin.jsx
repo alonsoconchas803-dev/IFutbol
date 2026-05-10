@@ -1,5 +1,6 @@
 import Solicitudes from "./Solicitudes";
 import { useState, useEffect } from "react";
+import JerseySVG, { JerseyDesignPicker } from "../components/JerseySVG";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -26,8 +27,8 @@ const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "
 const TURNOS = ["Mañana", "Tarde", "Noche"];
 const COLORES = ["#e53e3e","#dd6b20","#d69e2e","#38a169","#3182ce","#805ad5","#d53f8c","#2d3748","#319795","#e53e8c"];
 
-export default function SuperAdmin({ session }) {
-  const [seccion, setSeccion] = useState("canchas");
+export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
+  const [seccion, setSeccion] = useState(seccionInicial);
   const [canchas, setCanchas] = useState([]);
   const [ligas, setLigas] = useState([]);
   const [usuarios, setUsuarios] = useState([]);
@@ -42,7 +43,7 @@ export default function SuperAdmin({ session }) {
   // Equipos
   const [equipos, setEquipos] = useState([]);
   const [ligaEquipos, setLigaEquipos] = useState(null);
-  const [equipoForm, setEquipoForm] = useState({ nombre: "", color_playera: "#3182ce" });
+  const [equipoForm, setEquipoForm] = useState({ nombre: "", color_playera: "#3182ce", color_camiseta_2: "#ffffff", diseno_camiseta: "solido" });
   const [editEquipoId, setEditEquipoId] = useState(null);
 
   // Formulario ligas
@@ -165,7 +166,7 @@ export default function SuperAdmin({ session }) {
     if (!ligaEquipos) return showToast("Selecciona una liga primero", "err");
     setLoading(true);
     try {
-      const payload = { nombre: equipoForm.nombre, color_playera: equipoForm.color_playera, liga_id: ligaEquipos.id };
+      const payload = { nombre: equipoForm.nombre, color_playera: equipoForm.color_playera, color_camiseta_2: equipoForm.color_camiseta_2, diseno_camiseta: equipoForm.diseno_camiseta, liga_id: ligaEquipos.id };
       if (editEquipoId) {
         await db(`/equipos?id=eq.${editEquipoId}`, token, { method: "PATCH", body: JSON.stringify(payload) });
         showToast("Equipo actualizado ✓");
@@ -173,7 +174,7 @@ export default function SuperAdmin({ session }) {
         await db("/equipos", token, { method: "POST", body: JSON.stringify(payload) });
         showToast("Equipo registrado ✓");
       }
-      setEquipoForm({ nombre: "", color_playera: "#3182ce" });
+      setEquipoForm({ nombre: "", color_playera: "#3182ce", color_camiseta_2: "#ffffff", diseno_camiseta: "solido" });
       setEditEquipoId(null);
       setModal(null);
       cargarEquipos(ligaEquipos.id);
@@ -362,7 +363,7 @@ export default function SuperAdmin({ session }) {
             <>
               <div style={s.secHeader}>
                 <span style={s.secCount}>{equipos.length} equipos en {ligaEquipos.nombre}</span>
-                <button style={s.btnAdd} onClick={() => { setEquipoForm({ nombre: "", color_playera: "#3182ce" }); setEditEquipoId(null); setModal("equipo"); }}>
+                <button style={s.btnAdd} onClick={() => { setEquipoForm({ nombre: "", color_playera: "#3182ce", color_camiseta_2: "#ffffff", diseno_camiseta: "solido" }); setEditEquipoId(null); setModal("equipo"); }}>
                   + Nuevo equipo
                 </button>
               </div>
@@ -371,7 +372,7 @@ export default function SuperAdmin({ session }) {
                 <div style={s.empty}>
                   <div style={s.emptyIcon}>👕</div>
                   <div style={s.emptyTxt}>No hay equipos en esta liga</div>
-                  <button style={s.btnAdd} onClick={() => { setEquipoForm({ nombre: "", color_playera: "#3182ce" }); setEditEquipoId(null); setModal("equipo"); }}>
+                  <button style={s.btnAdd} onClick={() => { setEquipoForm({ nombre: "", color_playera: "#3182ce", color_camiseta_2: "#ffffff", diseno_camiseta: "solido" }); setEditEquipoId(null); setModal("equipo"); }}>
                     Agregar primer equipo
                   </button>
                 </div>
@@ -380,17 +381,18 @@ export default function SuperAdmin({ session }) {
                   {equipos.map(eq => (
                     <div key={eq.id} style={{ ...s.card, borderTop: `3px solid ${eq.color_playera}` }} className="sa-card">
                       <div style={s.cardTop}>
-                        <div style={{ ...s.cardIcon, background: eq.color_playera }}>👕</div>
+                        <JerseySVG
+                          diseno={eq.diseno_camiseta || "solido"}
+                          color1={eq.color_playera || "#3182ce"}
+                          color2={eq.color_camiseta_2 || "#ffffff"}
+                          size={44}
+                        />
                         <div style={s.cardActions}>
-                          <button style={s.btnEdit} onClick={() => { setEquipoForm({ nombre: eq.nombre, color_playera: eq.color_playera }); setEditEquipoId(eq.id); setModal("equipo"); }}>✏️</button>
+                          <button style={s.btnEdit} onClick={() => { setEquipoForm({ nombre: eq.nombre, color_playera: eq.color_playera || "#3182ce", color_camiseta_2: eq.color_camiseta_2 || "#ffffff", diseno_camiseta: eq.diseno_camiseta || "solido" }); setEditEquipoId(eq.id); setModal("equipo"); }}>✏️</button>
                           <button style={s.btnDel} onClick={() => eliminarEquipo(eq.id)}>🗑️</button>
                         </div>
                       </div>
                       <div style={s.cardName}>{eq.nombre}</div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
-                        <div style={{ width: 14, height: 14, borderRadius: "50%", background: eq.color_playera, flexShrink: 0 }} />
-                        <span style={{ fontSize: 11, color: "#6b7280" }}>{eq.color_playera}</span>
-                      </div>
                     </div>
                   ))}
                 </div>
@@ -437,27 +439,67 @@ export default function SuperAdmin({ session }) {
       {/* ── MODAL EQUIPO ── */}
       {modal === "equipo" && (
         <div style={s.overlay} onClick={() => setModal(null)}>
-          <div style={s.modalBox} onClick={e => e.stopPropagation()}>
+          <div style={{ ...s.modalBox, maxWidth: 500 }} onClick={e => e.stopPropagation()}>
             <h3 style={s.modalTitle}>{editEquipoId ? "Editar equipo" : "Nuevo equipo"}</h3>
+
+            {/* PREVIEW */}
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+              <JerseySVG
+                diseno={equipoForm.diseno_camiseta}
+                color1={equipoForm.color_playera}
+                color2={equipoForm.color_camiseta_2}
+                size={72}
+              />
+            </div>
+
             <div style={s.field}>
               <label style={s.label}>Nombre del equipo *</label>
               <input style={s.input} placeholder="ej. Tigres FC"
                 value={equipoForm.nombre} onChange={e => setEquipoForm({ ...equipoForm, nombre: e.target.value })} />
             </div>
+
             <div style={s.field}>
-              <label style={s.label}>Color de playera</label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                {COLORES.map(c => (
-                  <div key={c} onClick={() => setEquipoForm({ ...equipoForm, color_playera: c })}
-                    style={{ width: 30, height: 30, borderRadius: "50%", background: c, cursor: "pointer", transition: "box-shadow 0.15s",
-                      boxShadow: equipoForm.color_playera === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none" }} />
-                ))}
-                <input type="color" value={equipoForm.color_playera}
-                  onChange={e => setEquipoForm({ ...equipoForm, color_playera: e.target.value })}
-                  style={{ width: 30, height: 30, borderRadius: "50%", border: "none", cursor: "pointer", padding: 0 }}
-                  title="Color personalizado" />
+              <label style={s.label}>Diseño de camiseta</label>
+              <JerseyDesignPicker
+                diseno={equipoForm.diseno_camiseta}
+                color1={equipoForm.color_playera}
+                color2={equipoForm.color_camiseta_2}
+                onChange={({ diseno }) => setEquipoForm({ ...equipoForm, diseno_camiseta: diseno })}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: 16 }}>
+              <div style={{ flex: 1 }}>
+                <label style={s.label}>Color principal</label>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
+                  {COLORES.map(c => (
+                    <div key={c} onClick={() => setEquipoForm({ ...equipoForm, color_playera: c })}
+                      style={{ width: 28, height: 28, borderRadius: "50%", background: c, cursor: "pointer", transition: "box-shadow 0.15s",
+                        boxShadow: equipoForm.color_playera === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none" }} />
+                  ))}
+                  <input type="color" value={equipoForm.color_playera}
+                    onChange={e => setEquipoForm({ ...equipoForm, color_playera: e.target.value })}
+                    style={{ width: 28, height: 28, borderRadius: "50%", border: "none", cursor: "pointer", padding: 0 }}
+                    title="Color personalizado" />
+                </div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={s.label}>Color secundario</label>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
+                  {["#ffffff","#000000","#f5f5f5","#fbbf24","#ef4444","#3b82f6","#10b981","#8b5cf6"].map(c => (
+                    <div key={c} onClick={() => setEquipoForm({ ...equipoForm, color_camiseta_2: c })}
+                      style={{ width: 28, height: 28, borderRadius: "50%", background: c, cursor: "pointer", transition: "box-shadow 0.15s",
+                        boxShadow: equipoForm.color_camiseta_2 === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none",
+                        border: c === "#ffffff" ? "1px solid #e5e7eb" : "none" }} />
+                  ))}
+                  <input type="color" value={equipoForm.color_camiseta_2}
+                    onChange={e => setEquipoForm({ ...equipoForm, color_camiseta_2: e.target.value })}
+                    style={{ width: 28, height: 28, borderRadius: "50%", border: "none", cursor: "pointer", padding: 0 }}
+                    title="Color secundario personalizado" />
+                </div>
               </div>
             </div>
+
             <div style={s.modalActions}>
               <button style={s.btnCancel} onClick={() => setModal(null)}>Cancelar</button>
               <button style={s.btnSave} onClick={guardarEquipo} disabled={loading}>

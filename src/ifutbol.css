@@ -156,18 +156,25 @@ select option { background: #fff; color: var(--text); }
 .ifutbol-table { width: 100%; border-collapse: collapse; }
 .ifutbol-table th {
   padding: 12px 16px;
-  text-align: left;
+  text-align: center;
   font-size: 11px;
-  font-weight: 700;
-  color: var(--text-muted);
+  font-weight: 800;
+  color: #ffffff;
   text-transform: uppercase;
   letter-spacing: 0.8px;
-  background: #f8f9fa;
-  border-bottom: 1px solid var(--border);
+  background: #4f8f2f;
+  border-bottom: 2px solid #3a6e22;
+  border-right: 1px solid rgba(255,255,255,0.18);
 }
-.ifutbol-table td { padding: 14px 16px; font-size: 14px; border-bottom: 1px solid #f1f3f5; }
-.ifutbol-table tr:last-child td { border-bottom: none; }
-.ifutbol-table tr:hover td { background: #f8fdf5; }
+.ifutbol-table th:last-child { border-right: none; }
+.ifutbol-table td {
+  padding: 14px 16px;
+  font-size: 14px;
+  border-right: 1px solid #e2e8e0;
+}
+.ifutbol-table td:last-child { border-right: none; }
+.ifutbol-table tbody tr td { background: #ffffff; }
+.ifutbol-table tr:hover td { background: rgba(79,143,47,0.13); }
 
 /* ── FORM ── */
 .form-label {
@@ -192,22 +199,32 @@ select option { background: #fff; color: var(--text); }
 .form-input::placeholder { color: var(--text-muted); }
 
 /* ── TABS ── */
-.ifutbol-tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--border); margin-bottom: 24px; }
+.ifutbol-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 24px;
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  border: 1px solid var(--border);
+}
 .ifutbol-tab {
   background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-radius: 9px;
   color: var(--text-muted);
-  padding: 10px 18px;
-  font-size: 14px;
+  padding: 9px 16px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  margin-bottom: -2px;
   font-family: 'DM Sans', sans-serif;
-  transition: all 0.2s;
+  transition: background 0.18s, color 0.18s;
+  white-space: nowrap;
 }
-.ifutbol-tab:hover { color: var(--green); }
-.ifutbol-tab.active { color: var(--green); border-bottom-color: var(--green); }
+.ifutbol-tab:hover { color: var(--green); background: var(--green-light); }
+.ifutbol-tab.active { color: #ffffff; background: var(--green); }
 
 /* ── TOAST ── */
 .ifutbol-toast {
@@ -308,6 +325,6 @@ select option { background: #fff; color: var(--text); }
   .ifutbol-modal { padding: 24px; margin: 16px; max-width: calc(100% - 32px); }
 }
 @media (max-width: 480px) {
-  .ifutbol-tabs { overflow-x: auto; }
-  .ifutbol-tab { white-space: nowrap; padding: 10px 14px; font-size: 13px; }
+  .ifutbol-tabs { overflow-x: auto; flex-wrap: nowrap; }
+  .ifutbol-tab { padding: 8px 13px; font-size: 12px; }
 }

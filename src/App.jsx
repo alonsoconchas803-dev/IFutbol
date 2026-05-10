@@ -5,6 +5,7 @@ import LeagueAdmin from "./pages/LeagueAdmin";
 import Referee from "./pages/Referee";
 import PlayerProfile from "./pages/PlayerProfile";
 import Solicitudes from "./pages/Solicitudes";
+import JerseySVG from "./components/JerseySVG";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -51,28 +52,24 @@ const ROLES_INFO = {
 
 const MENU = {
   super_admin: [
-    { icon:"👑", label:"Panel Admin",    key:"panel" },
+    { icon:"👑", label:"Panel Admin",         key:"panel" },
     { icon:"🏟️", label:"Unidades Deportivas", key:"canchas" },
-    { icon:"🏆", label:"Torneos",        key:"torneos" },
-    { icon:"📊", label:"Clasificación",  key:"clasificacion" },
-    { icon:"👥", label:"Usuarios",       key:"usuarios" },
-    { icon:"📋", label:"Solicitudes",    key:"solicitudes" },
+    { icon:"🏆", label:"Torneos",             key:"torneos" },
+    { icon:"📋", label:"Solicitudes",         key:"solicitudes" },
   ],
   league_admin: [
-    { icon:"🏟️", label:"Mi Torneo",      key:"torneo" },
-    { icon:"👕", label:"Equipos",        key:"equipos" },
-    { icon:"🏆", label:"Torneos",        key:"torneos" },
-    { icon:"📊", label:"Clasificación",  key:"clasificacion" },
-    { icon:"👥", label:"Jugadores",      key:"jugadores" },
+    { icon:"👕", label:"Equipos",    key:"equipos" },
+    { icon:"👥", label:"Jugadores",  key:"jugadores" },
+    { icon:"📅", label:"Calendario", key:"calendario" },
+    { icon:"🟡", label:"Árbitros",   key:"arbitros" },
+    { icon:"📄", label:"Fichas",     key:"fichas" },
   ],
   referee: [
-    { icon:"🟡", label:"Mis Partidos",   key:"partidos" },
-    { icon:"📝", label:"Ficha",          key:"ficha" },
+    { icon:"🟡", label:"Mis Partidos", key:"partidos" },
   ],
   player: [
-    { icon:"⚽", label:"Mi Perfil",      key:"perfil" },
-    { icon:"👕", label:"Mi Equipo",      key:"equipo" },
-    { icon:"🏆", label:"Torneos",        key:"torneos" },
+    { icon:"⚽", label:"Mi Perfil",  key:"perfil" },
+    { icon:"🏆", label:"Mis Ligas",  key:"ligas" },
   ],
 };
 
@@ -83,6 +80,7 @@ export default function App() {
   const [jugadorData, setJugadorData]   = useState(null);
   const [screen, setScreen]             = useState("home");
   const [unidadActiva, setUnidadActiva] = useState(null);
+  const [dashSeccion, setDashSeccion]   = useState(null);
   const [modal, setModal]               = useState(null);
   const [sidebarOpen, setSidebarOpen]   = useState(false);
   const [toast, setToast]               = useState(null);
@@ -147,6 +145,7 @@ export default function App() {
         session={session} userRole={userRole} jugadorData={jugadorData}
         onLogout={handleLogout} toast={toast} showToast={showToast}
         onHome={() => setScreen("home")} initials={initials()}
+        seccionInicial={dashSeccion}
       />
     );
   }
@@ -156,7 +155,7 @@ export default function App() {
       <PublicLayout session={session} userRole={userRole} sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen} setModal={setModal} onLogout={handleLogout}
         initials={initials()} toast={toast} onHome={() => setScreen("home")}
-        onDashboard={() => setScreen("dashboard")}>
+        onDashboard={sec => { setDashSeccion(sec || null); setScreen("dashboard"); }}>
         <UnidadPage cancha={unidadActiva} onBack={() => setScreen("home")} />
         <Modals modal={modal} setModal={setModal} onLogin={handleLogin} showToast={showToast} />
       </PublicLayout>
@@ -167,7 +166,7 @@ export default function App() {
     <PublicLayout session={session} userRole={userRole} sidebarOpen={sidebarOpen}
       setSidebarOpen={setSidebarOpen} setModal={setModal} onLogout={handleLogout}
       initials={initials()} toast={toast} onHome={() => setScreen("home")}
-      onDashboard={() => setScreen("dashboard")}>
+      onDashboard={sec => { setDashSeccion(sec || null); setScreen("dashboard"); }}>
       <HomePage canchas={canchas} onVerUnidad={c => { setUnidadActiva(c); setScreen("unidad"); setSidebarOpen(false); }} />
       <Modals modal={modal} setModal={setModal} onLogin={handleLogin} showToast={showToast} />
     </PublicLayout>
@@ -187,21 +186,25 @@ function Modals({ modal, setModal, onLogin, showToast }) {
 // ─────────────────────────────────────────────────────────────────
 // DASHBOARD LAYOUT (con navegación lateral funcional)
 // ─────────────────────────────────────────────────────────────────
-function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, showToast, onHome, initials }) {
+function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, showToast, onHome, initials, seccionInicial }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activeSection, setActiveSection] = useState("panel");
   const rol = userRole?.rol;
   const roleInfo = ROLES_INFO[rol] || { label:"Usuario", icon:"👤", color:"#666" };
   const menuItems = MENU[rol] || [];
+  const [activeSection, setActiveSection] = useState(seccionInicial || menuItems[0]?.key || "panel");
+
+  const SUPER_MAP  = { panel:"stats", canchas:"canchas", torneos:"ligas", solicitudes:"solicitudes" };
+  const LEAGUE_MAP = { equipos:"equipos", jugadores:"jugadores", calendario:"calendario", arbitros:"arbitros", fichas:"fichas" };
+  const PLAYER_MAP = { perfil:"perfil", ligas:"ligas" };
 
   const renderContent = () => {
     if (rol === "super_admin") {
       if (activeSection === "solicitudes") return <Solicitudes session={session} />;
-      return <SuperAdmin session={session} />;
+      return <SuperAdmin session={session} seccionInicial={SUPER_MAP[activeSection] || "stats"} />;
     }
-    if (rol === "league_admin") return <LeagueAdmin session={session} userRole={userRole} />;
+    if (rol === "league_admin") return <LeagueAdmin session={session} userRole={userRole} seccionInicial={LEAGUE_MAP[activeSection] || "equipos"} />;
     if (rol === "referee") return <Referee session={session} />;
-    if (rol === "player") return <PlayerProfile session={session} />;
+    if (rol === "player") return <PlayerProfile session={session} seccionInicial={PLAYER_MAP[activeSection] || "perfil"} />;
     return null;
   };
 
@@ -220,11 +223,9 @@ function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, show
           </div>
         </div>
         <div style={s.topRight}>
-          <div style={{ ...s.pill, background:roleInfo.color+"18", color:roleInfo.color, border:`1px solid ${roleInfo.color}30` }}>
+          <div style={{ ...s.pill, background:"rgba(255,255,255,0.18)", color:"#fff", border:"1px solid rgba(255,255,255,0.35)" }}>
             {roleInfo.icon} {roleInfo.label}
           </div>
-          <button className="btn btn-ghost" style={{ fontSize:13, padding:"7px 14px" }} onClick={onHome}>Inicio</button>
-          <button className="btn btn-ghost" style={{ fontSize:13, padding:"7px 14px" }} onClick={onLogout}>Salir</button>
         </div>
       </header>
 
@@ -232,6 +233,10 @@ function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, show
         {/* SIDEBAR */}
         <aside style={{ width:sidebarOpen?220:0, overflow:"hidden", transition:"width 0.25s ease", background:"white", borderRight:"1px solid var(--border)", display:"flex", flexDirection:"column", position:"sticky", top:60, height:"calc(100vh - 60px)", flexShrink:0 }}>
           <nav style={{ flex:1, padding:"14px 10px", display:"flex", flexDirection:"column", gap:3 }}>
+            <div className="nav-item" onClick={onHome}>
+              <span style={{ fontSize:17, width:22, textAlign:"center", flexShrink:0 }}>🏠</span>
+              <span>Inicio</span>
+            </div>
             {menuItems.map(({ icon, label, key }) => (
               <div key={key}
                 className={`nav-item ${activeSection === key ? "nav-item-active" : ""}`}
@@ -240,6 +245,11 @@ function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, show
                 <span>{label}</span>
               </div>
             ))}
+            <div style={{ flex:1 }} />
+            <div className="nav-item" style={{ color:"#ef4444" }} onClick={onLogout}>
+              <span style={{ fontSize:17, width:22, textAlign:"center", flexShrink:0 }}>🚪</span>
+              <span>Cerrar sesión</span>
+            </div>
           </nav>
           <div style={s.sbFooter}>
             <Avatar initials={initials} size={36} />
@@ -277,13 +287,13 @@ function PublicLayout({ children, session, userRole, sidebarOpen, setSidebarOpen
         <div style={s.topLeft}>
           <button className="ham-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>☰</button>
           <div style={s.brand} onClick={onHome} className="clickable">
-            <div style={s.brandIcon}><BallIcon /></div>
-            <span style={s.brandName}>IFútbol</span>
+            <div style={{ ...s.brandIcon, background:"rgba(255,255,255,0.2)", border:"1.5px solid rgba(255,255,255,0.35)" }}><BallIcon /></div>
+            <span style={{ ...s.brandName, color:"white" }}>IFútbol</span>
           </div>
         </div>
         <div style={s.topRight}>
-          {roleInfo && <div style={{ ...s.pill, background:roleInfo.color+"18", color:roleInfo.color, border:`1px solid ${roleInfo.color}30` }}>{roleInfo.icon} {roleInfo.label}</div>}
-          {session && <button className="btn btn-outline" style={{ fontSize:13, padding:"7px 16px" }} onClick={onDashboard}>Mi panel</button>}
+          {roleInfo && <div style={{ ...s.pill, background:"rgba(255,255,255,0.18)", color:"white", border:"1px solid rgba(255,255,255,0.3)" }}>{roleInfo.icon} {roleInfo.label}</div>}
+          {session && <button className="btn btn-outline" style={{ fontSize:13, padding:"7px 16px", color:"white", borderColor:"rgba(255,255,255,0.55)", background:"rgba(255,255,255,0.12)" }} onClick={onDashboard}>Mi panel</button>}
         </div>
       </header>
 
@@ -303,7 +313,13 @@ function PublicLayout({ children, session, userRole, sidebarOpen, setSidebarOpen
             <button className="sb-btn" onClick={() => { setModal("register_player"); setSidebarOpen(false); }}>⚽ Registrarme como jugador</button>
             <button className="sb-btn" onClick={() => { setModal("register_staff"); setSidebarOpen(false); }}>📋 Registrarme</button>
           </> : <>
-            <button className="sb-btn" onClick={() => { onDashboard(); setSidebarOpen(false); }}>📊 Mi panel</button>
+            {userRole?.rol === "player" ? <>
+              <button className="sb-btn" onClick={() => { onDashboard("perfil"); setSidebarOpen(false); }}>⚽ Mi Perfil</button>
+              <button className="sb-btn" onClick={() => { onDashboard("ligas"); setSidebarOpen(false); }}>🏆 Mis Ligas</button>
+            </> : (
+              <button className="sb-btn" onClick={() => { onDashboard(); setSidebarOpen(false); }}>📊 Mi panel</button>
+            )}
+            <div style={{ flex:1 }} />
             <button className="sb-btn danger" onClick={() => { onLogout(); setSidebarOpen(false); }}>🚪 Cerrar sesión</button>
           </>}
         </nav>
@@ -329,17 +345,18 @@ function PublicLayout({ children, session, userRole, sidebarOpen, setSidebarOpen
 function HomePage({ canchas, onVerUnidad }) {
   return (
     <div>
-      <div style={{ marginBottom:24 }}>
-        <h1 style={{ fontSize:28, fontWeight:900, color:"var(--text)", letterSpacing:-1, marginBottom:6 }}>Unidades deportivas</h1>
-        <p style={{ color:"var(--text-muted)", fontSize:14 }}>Selecciona una unidad para ver sus torneos y estadísticas</p>
+      <div style={{ marginBottom:28, padding:"20px 24px", background:"var(--green)", borderRadius:"var(--radius-lg)", boxShadow:"0 4px 16px rgba(79,143,47,0.3)" }}>
+        <div style={{ fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:1.5, marginBottom:6 }}>Plataforma de fútbol 7</div>
+        <h1 style={{ fontSize:26, fontWeight:900, color:"white", letterSpacing:-0.5, marginBottom:6, margin:"0 0 6px" }}>Unidades deportivas</h1>
+        <p style={{ color:"rgba(255,255,255,0.78)", fontSize:14, margin:0 }}>Selecciona una unidad para ver sus torneos y estadísticas</p>
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(220px, 1fr))", gap:16 }}>
         {canchas.map(c => (
           <div key={c.id} className="ud-card" onClick={() => onVerUnidad(c)}>
-            <div style={{ fontSize:36, marginBottom:12 }}>🏟️</div>
-            <div style={{ fontSize:17, fontWeight:800, color:"var(--text)", marginBottom:6 }}>{c.nombre}</div>
+            <div style={{ width:44, height:44, borderRadius:12, background:"var(--green-light)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, marginBottom:14 }}>🏟️</div>
+            <div style={{ fontSize:16, fontWeight:800, color:"var(--text)", marginBottom:5 }}>{c.nombre}</div>
             <div style={{ fontSize:13, color:"var(--text-sub)", marginBottom:14 }}>{c.direccion || "Ver torneos →"}</div>
-            <div style={{ fontSize:12, color:"var(--green)", fontWeight:700 }}>{c.num_canchas} {c.num_canchas===1?"cancha":"canchas"}</div>
+            <div style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:12, color:"var(--green)", fontWeight:700, background:"var(--green-light)", padding:"3px 10px", borderRadius:99 }}>⚽ {c.num_canchas} {c.num_canchas===1?"cancha":"canchas"}</div>
           </div>
         ))}
         <div style={{ background:"white", borderRadius:"var(--radius-md)", padding:20, boxShadow:"var(--shadow-md)", border:"1px solid var(--border)", minHeight:180, display:"flex", flexDirection:"column" }}>
@@ -368,16 +385,16 @@ function UnidadPage({ cancha, onBack }) {
   const [seccion, setSeccion] = useState("partidos");
   const [equipos, setEquipos] = useState([]);
   const [clasificacion, setClasificacion] = useState([]);
-  const [calendario, setCalendario] = useState([]);  // todos los partidos
-  const [partidos, setPartidos] = useState([]);       // solo fichas cerradas
+  const [calendario, setCalendario] = useState([]);
+  const [partidos, setPartidos] = useState([]);
   const [goleadores, setGoleadores] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedCell, setSelectedCell] = useState(null); // [rowIdx, colIdx]
 
   useEffect(() => {
     db(`/ligas?cancha_id=eq.${cancha.id}&activa=eq.true&select=*&order=nombre`).then(data => {
       setTorneos(data || []);
-      if (data?.length > 0) { setTorneoActivo(data[0]); cargarDatos(data[0].id); }
-      else setLoading(false);
+      setLoading(false);
     });
   }, [cancha.id]);
 
@@ -397,25 +414,27 @@ function UnidadPage({ cancha, onBack }) {
     let allParts = [];
     if (jornadaIds.length > 0) {
       allParts = await db(
-        `/partidos?jornada_id=in.(${jornadaIds.join(",")})&select=*,equipos_local:equipos!partidos_equipo_local_id_fkey(id,nombre,color_playera,escudo_url),equipos_visitante:equipos!partidos_equipo_visitante_id_fkey(id,nombre,color_playera,escudo_url),ficha_partido(goles_local,goles_visitante,goleadores,cerrada)&order=jornada_id,cancha_numero`
+        `/partidos?jornada_id=in.(${jornadaIds.join(",")})&select=*,equipos_local:equipos!partidos_equipo_local_id_fkey(id,nombre,color_playera,color_camiseta_2,diseno_camiseta,escudo_url),equipos_visitante:equipos!partidos_equipo_visitante_id_fkey(id,nombre,color_playera,color_camiseta_2,diseno_camiseta,escudo_url),ficha_partido(goles_local,goles_visitante,goleadores,cerrada,faltas_local,faltas_visitante)&order=jornada_id,cancha_numero`
       );
     }
     const parts = (allParts||[]).map(p=>({...p, jornada: jornadasMap[p.jornada_id]||null}));
     setCalendario(parts);
 
-    const fichas = parts.filter(p=>p.ficha_partido?.length>0 && p.ficha_partido[0].cerrada);
+    // PostgREST devuelve ficha_partido como objeto {} (relación 1-a-1), no array
+    const fichas = parts.filter(p=>p.ficha_partido?.cerrada);
     setPartidos(fichas);
 
     // Clasificación usando IDs directos (no búsqueda por nombre)
     const tabla = {};
-    eqsF.forEach(eq => { tabla[eq.id] = { equipo:eq, pj:0, g:0, e:0, d:0, gf:0, gc:0, pts:0 }; });
+    eqsF.forEach(eq => { tabla[eq.id] = { equipo:eq, pj:0, g:0, e:0, d:0, gf:0, gc:0, pts:0, faltas:0 }; });
     fichas.forEach(p => {
-      const f = p.ficha_partido[0];
+      const f = p.ficha_partido;
       const lId = p.equipo_local_id, vId = p.equipo_visitante_id;
       if (!tabla[lId]||!tabla[vId]) return;
       tabla[lId].pj++; tabla[vId].pj++;
       tabla[lId].gf+=f.goles_local||0; tabla[lId].gc+=f.goles_visitante||0;
       tabla[vId].gf+=f.goles_visitante||0; tabla[vId].gc+=f.goles_local||0;
+      tabla[lId].faltas+=f.faltas_local||0; tabla[vId].faltas+=f.faltas_visitante||0;
       if ((f.goles_local||0)>(f.goles_visitante||0)){tabla[lId].g++;tabla[lId].pts+=3;tabla[vId].d++;}
       else if ((f.goles_local||0)<(f.goles_visitante||0)){tabla[vId].g++;tabla[vId].pts+=3;tabla[lId].d++;}
       else{tabla[lId].e++;tabla[lId].pts++;tabla[vId].e++;tabla[vId].pts++;}
@@ -423,7 +442,7 @@ function UnidadPage({ cancha, onBack }) {
     setClasificacion(Object.values(tabla).sort((a,b)=>b.pts-a.pts||(b.gf-b.gc)-(a.gf-a.gc)));
 
     const gm={};
-    fichas.forEach(p=>(p.ficha_partido[0].goleadores||[]).forEach(g=>{
+    fichas.forEach(p=>(p.ficha_partido?.goleadores||[]).forEach(g=>{
       if(!gm[g.jugador_id])gm[g.jugador_id]={nombre:g.nombre,equipo_nombre:g.equipo_nombre,goles:0};
       gm[g.jugador_id].goles+=g.goles;
     }));
@@ -431,63 +450,123 @@ function UnidadPage({ cancha, onBack }) {
     setLoading(false);
   };
 
-  const cambiarTorneo = t => { setTorneoActivo(t); setSeccion("partidos"); cargarDatos(t.id); };
+  const seleccionarTorneo = t => { setTorneoActivo(t); setSeccion("partidos"); cargarDatos(t.id); };
   const tabs = [["partidos","📅 Partidos"],["tabla","📊 Tabla"],["goleadores","🥇 Goleadores"],["equipos","👕 Equipos"],["ofensiva","⚔️ Mejor ofensiva"],["defensiva","🛡️ Mejor defensiva"],["fairplay","🤝 Fair play"]];
 
+  // Vista: selección de torneo (cards)
+  if (!torneoActivo) {
+    return (
+      <div className="animate-in">
+        <button className="btn btn-ghost" style={{ fontSize:13, padding:"7px 16px", marginBottom:20 }} onClick={onBack}>← Volver</button>
+        <div style={{ display:"flex", alignItems:"center", gap:18, marginBottom:24 }}>
+          <div style={{ fontSize:40, width:68, height:68, background:"var(--green-light)", borderRadius:16, display:"flex", alignItems:"center", justifyContent:"center" }}>🏟️</div>
+          <div>
+            <h1 style={{ fontSize:26, fontWeight:900, color:"var(--text)", letterSpacing:-0.8, marginBottom:4 }}>{cancha.nombre}</h1>
+            <p style={{ color:"var(--text-muted)", fontSize:14, margin:0 }}>{cancha.direccion} · {cancha.num_canchas} {cancha.num_canchas===1?"cancha":"canchas"}</p>
+          </div>
+        </div>
+        <div style={{ marginBottom:20, padding:"16px 22px", background:"var(--green)", borderRadius:"var(--radius-lg)", boxShadow:"0 4px 16px rgba(79,143,47,0.3)" }}>
+          <h2 style={{ fontSize:17, fontWeight:800, color:"white", margin:"0 0 4px" }}>Torneos activos</h2>
+          <p style={{ fontSize:13, color:"rgba(255,255,255,0.78)", margin:0 }}>Selecciona un torneo para ver sus estadísticas</p>
+        </div>
+        {loading ? <div style={{ padding:60, textAlign:"center" }}><div className="spinner"/></div> : (
+          torneos.length === 0
+            ? <EmptyState icon="🏆" txt="No hay torneos activos en esta unidad"/>
+            : <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(240px, 1fr))", gap:16 }}>
+                {torneos.map(t => (
+                  <div key={t.id} className="ud-card" onClick={() => seleccionarTorneo(t)}>
+                    <div style={{ width:44, height:44, borderRadius:12, background:"var(--green-light)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, marginBottom:14 }}>🏆</div>
+                    <div style={{ fontSize:16, fontWeight:800, color:"var(--text)", marginBottom:6 }}>{t.nombre}</div>
+                    {(t.dia||t.turno) && <div style={{ fontSize:13, color:"var(--text-sub)", marginBottom:6 }}>{[t.dia, t.turno].filter(Boolean).join(" · ")}</div>}
+                    {t.temporada && <div style={{ fontSize:12, color:"var(--text-muted)", marginBottom:10 }}>Temporada {t.temporada}</div>}
+                    <div style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:12, color:"var(--green)", fontWeight:700, background:"var(--green-light)", padding:"3px 10px", borderRadius:99 }}>Ver estadísticas →</div>
+                  </div>
+                ))}
+              </div>
+        )}
+      </div>
+    );
+  }
+
+  // Vista: estadísticas del torneo seleccionado
   return (
     <div className="animate-in">
-      <button className="btn btn-ghost" style={{ fontSize:13, padding:"7px 16px", marginBottom:20 }} onClick={onBack}>← Volver</button>
-      <div style={{ display:"flex", alignItems:"center", gap:18, marginBottom:24 }}>
-        <div style={{ fontSize:40, width:68, height:68, background:"var(--green-light)", borderRadius:16, display:"flex", alignItems:"center", justifyContent:"center" }}>🏟️</div>
-        <div>
-          <h1 style={{ fontSize:26, fontWeight:900, color:"var(--text)", letterSpacing:-0.8, marginBottom:4 }}>{cancha.nombre}</h1>
-          <p style={{ color:"var(--text-muted)", fontSize:14 }}>{cancha.direccion} · {cancha.num_canchas} {cancha.num_canchas===1?"cancha":"canchas"}</p>
-        </div>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:20 }}>
+        <button className="btn btn-ghost" style={{ fontSize:13, padding:"7px 16px" }} onClick={() => setTorneoActivo(null)}>← {cancha.nombre}</button>
+        <button className="btn btn-ghost" style={{ fontSize:13, padding:"7px 14px" }} onClick={() => cargarDatos(torneoActivo.id)} title="Actualizar datos">🔄 Actualizar</button>
       </div>
-      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20, flexWrap:"wrap" }}>
-        <span style={{ fontSize:13, color:"var(--text-muted)", fontWeight:700 }}>Torneos:</span>
-        {torneos.map(t=>(
-          <button key={t.id} className={`torneo-btn ${torneoActivo?.id===t.id?"active":""}`} onClick={()=>cambiarTorneo(t)}>🏆 {t.nombre}</button>
-        ))}
-        {torneos.length===0&&<span style={{ color:"var(--text-muted)", fontSize:13 }}>No hay torneos activos</span>}
-      </div>
-      {torneoActivo&&<>
-        <div style={{ background:"white", borderRadius:"var(--radius-md)", padding:"14px 20px", marginBottom:20, display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"var(--shadow-sm)", border:"1px solid var(--border)" }}>
+      <div style={{ background:"linear-gradient(135deg,#4f8f2f 0%,#7fbf4d 100%)", borderRadius:18, padding:"22px 28px", marginBottom:24, boxShadow:"0 4px 16px rgba(79,143,47,0.35)", display:"flex", alignItems:"center", justifyContent:"space-between", gap:16 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:16 }}>
+          <div style={{ fontSize:38, width:62, height:62, background:"rgba(255,255,255,0.18)", borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>🏆</div>
           <div>
-            <div style={{ fontSize:16, fontWeight:800, marginBottom:3 }}>{torneoActivo.nombre}</div>
-            <div style={{ fontSize:13, color:"var(--text-muted)" }}>{torneoActivo.dia} · {torneoActivo.turno}{torneoActivo.temporada&&` · Temp. ${torneoActivo.temporada}`}</div>
-          </div>
-          <div style={{ display:"flex", gap:20 }}>
-            {[[equipos.length,"equipos"],[calendario.length,"partidos"]].map(([n,l])=>(
-              <div key={l} style={{ textAlign:"center" }}><div style={{ fontSize:20, fontWeight:800, color:"var(--green)" }}>{n}</div><div style={{ fontSize:11, color:"var(--text-muted)" }}>{l}</div></div>
-            ))}
+            <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", fontWeight:700, textTransform:"uppercase", letterSpacing:0.6, marginBottom:3 }}>{cancha.nombre}</div>
+            <h1 style={{ fontSize:22, fontWeight:900, color:"#fff", letterSpacing:-0.5, margin:"0 0 4px" }}>{torneoActivo.nombre}</h1>
+            <p style={{ color:"rgba(255,255,255,0.75)", fontSize:13, margin:0 }}>{[torneoActivo.dia, torneoActivo.turno, torneoActivo.temporada ? `Temp. ${torneoActivo.temporada}` : null].filter(Boolean).join(" · ")}</p>
           </div>
         </div>
-        <div className="ifutbol-tabs" style={{ overflowX:"auto" }}>
-          {tabs.map(([key,label])=><button key={key} className={`ifutbol-tab ${seccion===key?"active":""}`} onClick={()=>setSeccion(key)}>{label}</button>)}
+        <div style={{ display:"flex", gap:24, flexShrink:0 }}>
+          {[[equipos.length,"equipos"],[calendario.length,"partidos"]].map(([n,l])=>(
+            <div key={l} style={{ textAlign:"center" }}>
+              <div style={{ fontSize:26, fontWeight:900, color:"#fff", lineHeight:1 }}>{n}</div>
+              <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:3 }}>{l}</div>
+            </div>
+          ))}
         </div>
-        {loading?<div style={{ padding:60, textAlign:"center" }}><div className="spinner"/></div>:<>
+      </div>
+      <div className="ifutbol-tabs" style={{ overflowX:"auto" }}>
+        {tabs.map(([key,label])=><button key={key} className={`ifutbol-tab ${seccion===key?"active":""}`} onClick={()=>setSeccion(key)}>{label}</button>)}
+      </div>
+      {loading?<div style={{ padding:60, textAlign:"center" }}><div className="spinner"/></div>:<>
           {seccion==="tabla"&&(clasificacion.length===0?<EmptyState icon="📊" txt="No hay partidos jugados aún"/>:
-            <div style={{ background:"white", borderRadius:"var(--radius-md)", overflow:"hidden", boxShadow:"var(--shadow-md)" }}>
-              <table className="ifutbol-table">
-                <thead><tr>{["#","Equipo","PJ","G","E","D","GF","GC","DIF","PTS"].map(h=><th key={h}>{h}</th>)}</tr></thead>
-                <tbody>{clasificacion.map((r,i)=>(
-                  <tr key={r.equipo.id}>
-                    <td><span className="rank-badge" style={{ background:i===0?"#FFD700":i===1?"#C0C0C0":i===2?"#CD7F32":"#f3f4f6",color:i<3?"#111":"#777" }}>{i+1}</span></td>
-                    <td><div style={{ display:"flex",alignItems:"center",gap:10 }}>
-                      {r.equipo.escudo_url?<img src={r.equipo.escudo_url} style={{ width:28,height:28,borderRadius:6,objectFit:"cover" }} alt=""/>:<div style={{ width:12,height:12,borderRadius:"50%",background:r.equipo.color_playera||"#999" }}/>}
-                      <span style={{ fontWeight:600 }}>{r.equipo.nombre}</span>
-                    </div></td>
-                    <td style={{ textAlign:"center" }}>{r.pj}</td>
-                    <td style={{ textAlign:"center",color:"#16a34a",fontWeight:700 }}>{r.g}</td>
-                    <td style={{ textAlign:"center",color:"#ca8a04",fontWeight:700 }}>{r.e}</td>
-                    <td style={{ textAlign:"center",color:"#dc2626",fontWeight:700 }}>{r.d}</td>
-                    <td style={{ textAlign:"center" }}>{r.gf}</td>
-                    <td style={{ textAlign:"center" }}>{r.gc}</td>
-                    <td style={{ textAlign:"center",color:(r.gf-r.gc)>0?"#16a34a":(r.gf-r.gc)<0?"#dc2626":"#666" }}>{r.gf-r.gc>0?`+${r.gf-r.gc}`:r.gf-r.gc}</td>
-                    <td style={{ textAlign:"center",fontWeight:800,fontSize:17,color:r.equipo.color_playera||"var(--green)" }}>{r.pts}</td>
-                  </tr>
-                ))}</tbody>
+            <div style={{ background:"white", borderRadius:"var(--radius-md)", overflow:"hidden", boxShadow:"var(--shadow-md)" }}
+              onClick={e=>{ if(e.target===e.currentTarget||e.target.tagName==="DIV"&&e.target===e.currentTarget) setSelectedCell(null); }}>
+              <table className="ifutbol-table" style={{ userSelect:"none" }}>
+                <thead><tr>
+                  {["#","Equipo","PJ","G","E","D","GF","GC","DIF","PTS"].map((h,ci)=>(
+                    <th key={h} style={{ textAlign: ci<=1?"left":"center",
+                      background: selectedCell&&selectedCell[1]===ci ? "rgba(0,0,0,0.18)" : undefined,
+                      transition:"background 0.15s" }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr></thead>
+                <tbody>{clasificacion.map((r,ri)=>{
+                  const cells = [
+                    <td key={0} style={{ background: selectedCell&&(selectedCell[0]===ri||selectedCell[1]===0) ? selectedCell[0]===ri&&selectedCell[1]===0?"rgba(79,143,47,0.2)":"rgba(79,143,47,0.07)" : undefined, transition:"background 0.15s", cursor:"pointer" }} onClick={()=>setSelectedCell(selectedCell&&selectedCell[0]===ri&&selectedCell[1]===0?null:[ri,0])}>
+                      <span className="rank-badge" style={{ background:ri===0?"#FFD700":ri===1?"#C0C0C0":ri===2?"#CD7F32":"#f3f4f6",color:ri<3?"#111":"#777" }}>{ri+1}</span>
+                    </td>,
+                    <td key={1} style={{ background: selectedCell&&(selectedCell[0]===ri||selectedCell[1]===1) ? selectedCell[0]===ri&&selectedCell[1]===1?"rgba(79,143,47,0.2)":"rgba(79,143,47,0.07)" : undefined, transition:"background 0.15s", cursor:"pointer" }} onClick={()=>setSelectedCell(selectedCell&&selectedCell[0]===ri&&selectedCell[1]===1?null:[ri,1])}>
+                      <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                        {r.equipo.escudo_url?<img src={r.equipo.escudo_url} style={{ width:28,height:28,borderRadius:6,objectFit:"cover" }} alt=""/>:<div style={{ width:12,height:12,borderRadius:"50%",background:r.equipo.color_playera||"#999" }}/>}
+                        <span style={{ fontWeight:600 }}>{r.equipo.nombre}</span>
+                      </div>
+                    </td>,
+                    ...[
+                      [r.pj,{}],
+                      [r.g,{color:"#16a34a",fontWeight:700}],
+                      [r.e,{color:"#ca8a04",fontWeight:700}],
+                      [r.d,{color:"#dc2626",fontWeight:700}],
+                      [r.gf,{}],
+                      [r.gc,{}],
+                      [r.gf-r.gc>0?`+${r.gf-r.gc}`:r.gf-r.gc,{color:(r.gf-r.gc)>0?"#16a34a":(r.gf-r.gc)<0?"#dc2626":"#666"}],
+                      [r.pts,{fontWeight:800,fontSize:17,color:r.equipo.color_playera||"var(--green)"}],
+                    ].map(([val,style],idx)=>{
+                      const ci=idx+2;
+                      const isRow=selectedCell&&selectedCell[0]===ri;
+                      const isCol=selectedCell&&selectedCell[1]===ci;
+                      const isBoth=isRow&&isCol;
+                      return(
+                        <td key={ci} style={{ textAlign:"center", ...style,
+                          background: isBoth?"rgba(79,143,47,0.22)":isRow||isCol?"rgba(79,143,47,0.07)":undefined,
+                          transition:"background 0.15s", cursor:"pointer" }}
+                          onClick={()=>setSelectedCell(isBoth?null:[ri,ci])}>
+                          {val}
+                        </td>
+                      );
+                    }),
+                  ];
+                  return <tr key={r.equipo.id}>{cells}</tr>;
+                })}</tbody>
               </table>
             </div>
           )}
@@ -507,33 +586,51 @@ function UnidadPage({ cancha, onBack }) {
                   </div>
                   <div style={{ padding:"10px 14px",display:"flex",flexDirection:"column",gap:8 }}>
                     {ps.map(p=>{
-                      const fichaOk=p.ficha_partido?.length>0&&p.ficha_partido[0].cerrada;
-                      const f=fichaOk?p.ficha_partido[0]:null;
+                      const fichaOk=p.ficha_partido?.cerrada;
+                      const f=fichaOk?p.ficha_partido:null;
                       return(
-                        <div key={p.id} style={{ padding:"10px 14px",background:"#f9fafb",borderRadius:10,border:"1px solid var(--border)" }}>
-                          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4 }}>
-                            <div style={{ display:"flex",alignItems:"center",gap:8,flex:1 }}>
-                              <div style={{ width:10,height:10,borderRadius:"50%",background:p.equipos_local?.color_playera||"#999",flexShrink:0 }}/>
-                              <span style={{ fontWeight:600,fontSize:14 }}>{p.equipos_local?.nombre}</span>
+                        <div key={p.id} style={{ padding:"12px 14px",background:"#f9fafb",borderRadius:10,border:"1px solid var(--border)" }}>
+                          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:4 }}>
+                            {/* Equipo local */}
+                            <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:4,flex:1,minWidth:0 }}>
+                              <JerseySVG
+                                diseno={p.equipos_local?.diseno_camiseta||"solido"}
+                                color1={p.equipos_local?.color_playera||"#999"}
+                                color2={p.equipos_local?.color_camiseta_2||"#fff"}
+                                escudoUrl={p.equipos_local?.escudo_url||null}
+                                size={44}
+                              />
+                              <span style={{ fontWeight:700,fontSize:13,textAlign:"center",lineHeight:1.2 }}>{p.equipos_local?.nombre}</span>
                             </div>
-                            {f?(
-                              <div style={{ display:"flex",alignItems:"center",gap:8,fontSize:22,fontWeight:900,padding:"0 12px" }}>
-                                <span style={{ color:f.goles_local>f.goles_visitante?"#16a34a":"var(--text)" }}>{f.goles_local}</span>
-                                <span style={{ color:"#d1d5db",fontSize:16 }}>-</span>
-                                <span style={{ color:f.goles_visitante>f.goles_local?"#16a34a":"var(--text)" }}>{f.goles_visitante}</span>
+
+                            {/* Marcador o VS */}
+                            <div style={{ textAlign:"center",padding:"0 8px",flexShrink:0 }}>
+                              {f?(
+                                <div style={{ fontSize:24,fontWeight:900,lineHeight:1 }}>
+                                  <span style={{ color:f.goles_local>f.goles_visitante?"#16a34a":"var(--text)" }}>{f.goles_local}</span>
+                                  <span style={{ color:"#d1d5db",fontSize:18,margin:"0 4px" }}>-</span>
+                                  <span style={{ color:f.goles_visitante>f.goles_local?"#16a34a":"var(--text)" }}>{f.goles_visitante}</span>
+                                </div>
+                              ):(
+                                <span style={{ fontSize:12,color:"var(--text-muted)",fontWeight:800,letterSpacing:1 }}>VS</span>
+                              )}
+                              <div style={{ fontSize:10,color:"var(--text-muted)",marginTop:4,whiteSpace:"nowrap" }}>
+                                ⏰ {p.hora||"—"} · Campo {p.cancha_numero||"—"}
                               </div>
-                            ):(
-                              <span style={{ fontSize:13,color:"var(--text-muted)",fontWeight:700,padding:"0 12px" }}>VS</span>
-                            )}
-                            <div style={{ display:"flex",alignItems:"center",gap:8,flex:1,justifyContent:"flex-end" }}>
-                              <span style={{ fontWeight:600,fontSize:14 }}>{p.equipos_visitante?.nombre}</span>
-                              <div style={{ width:10,height:10,borderRadius:"50%",background:p.equipos_visitante?.color_playera||"#999",flexShrink:0 }}/>
+                              {fichaOk&&<div style={{ fontSize:10,color:"var(--green)",fontWeight:700,marginTop:2 }}>✓ Jugado</div>}
                             </div>
-                          </div>
-                          <div style={{ fontSize:11,color:"var(--text-muted)",display:"flex",gap:8,alignItems:"center" }}>
-                            <span>⏰ {p.hora||"Hora s/d"}</span>
-                            <span>· Campo {p.cancha_numero||"—"}</span>
-                            {fichaOk&&<span style={{ color:"var(--green)",fontWeight:700 }}>✓ Jugado</span>}
+
+                            {/* Equipo visitante */}
+                            <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:4,flex:1,minWidth:0 }}>
+                              <JerseySVG
+                                diseno={p.equipos_visitante?.diseno_camiseta||"solido"}
+                                color1={p.equipos_visitante?.color_playera||"#999"}
+                                color2={p.equipos_visitante?.color_camiseta_2||"#fff"}
+                                escudoUrl={p.equipos_visitante?.escudo_url||null}
+                                size={44}
+                              />
+                              <span style={{ fontWeight:700,fontSize:13,textAlign:"center",lineHeight:1.2 }}>{p.equipos_visitante?.nombre}</span>
+                            </div>
                           </div>
                         </div>
                       );
@@ -579,9 +676,8 @@ function UnidadPage({ cancha, onBack }) {
           )}
           {seccion==="ofensiva"&&<TablaEspecial titulo="⚔️ Mejor ofensiva" datos={[...clasificacion].sort((a,b)=>(b.pj>0?b.gf/b.pj:0)-(a.pj>0?a.gf/a.pj:0))} campo="gf" label="Goles anotados"/>}
           {seccion==="defensiva"&&<TablaEspecial titulo="🛡️ Mejor defensiva" datos={[...clasificacion].sort((a,b)=>(a.pj>0?a.gc/a.pj:999)-(b.pj>0?b.gc/b.pj:999))} campo="gc" label="Goles concedidos"/>}
-          {seccion==="fairplay"&&<TablaEspecial titulo="🤝 Fair play" datos={clasificacion} campo="faltas" label="Faltas cometidas"/>}
+          {seccion==="fairplay"&&<TablaEspecial titulo="🤝 Fair play" datos={[...clasificacion].sort((a,b)=>(a.pj>0?a.faltas/a.pj:999)-(b.pj>0?b.faltas/b.pj:999))} campo="faltas" label="Faltas cometidas"/>}
         </>}
-      </>}
     </div>
   );
 }
@@ -847,7 +943,7 @@ function BallIcon() {
 // ─────────────────────────────────────────────────────────────────
 const s = {
   root: { display:"flex",flexDirection:"column",minHeight:"100vh",background:"var(--bg)" },
-  topbar: { display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0 20px",height:60,background:"white",borderBottom:"1px solid var(--border)",position:"sticky",top:0,zIndex:200,boxShadow:"var(--shadow-sm)" },
+  topbar: { display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0 20px",height:60,background:"var(--green)",borderBottom:"1px solid var(--green-dark)",position:"sticky",top:0,zIndex:200,boxShadow:"0 2px 12px rgba(0,0,0,0.18)" },
   topLeft: { display:"flex",alignItems:"center",gap:14 },
   topRight: { display:"flex",alignItems:"center",gap:10 },
   brand: { display:"flex",alignItems:"center",gap:10,cursor:"pointer" },
@@ -867,8 +963,8 @@ const m = {
 };
 
 const css = `
-  .ham-btn{background:transparent;border:none;cursor:pointer;padding:6px 10px;border-radius:8px;font-size:20px;color:var(--text-sub);display:flex;align-items:center;transition:background 0.15s;}
-  .ham-btn:hover{background:var(--bg);}
+  .ham-btn{background:transparent;border:none;cursor:pointer;padding:6px 10px;border-radius:8px;font-size:20px;color:rgba(255,255,255,0.85);display:flex;align-items:center;transition:background 0.15s;}
+  .ham-btn:hover{background:rgba(255,255,255,0.12);}
   .clickable{transition:opacity 0.15s;cursor:pointer;}
   .clickable:hover{opacity:0.8;}
   .sb-btn{display:flex;align-items:center;gap:12px;width:100%;padding:11px 14px;border-radius:10px;border:none;background:transparent;color:var(--text);font-size:14px;font-weight:600;cursor:pointer;text-align:left;transition:all 0.15s;font-family:'DM Sans',sans-serif;}

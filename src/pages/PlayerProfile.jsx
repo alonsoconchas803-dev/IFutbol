@@ -38,18 +38,17 @@ const uploadFile = async (bucket, path, file, token) => {
 
 const POSICIONES = ["Portero", "Defensa", "Mediocampista", "Delantero"];
 
-export default function PlayerProfile({ session }) {
+export default function PlayerProfile({ session, seccionInicial = "perfil" }) {
   const [jugador, setJugador] = useState(null);
-  const [ligas, setLigas] = useState([]);
-  const [equiposDisponibles, setEquiposDisponibles] = useState([]);
   const [inscripciones, setInscripciones] = useState([]);
-  const [historial, setHistorial] = useState([]);
-  const [seccion, setSeccion] = useState("perfil");
+  const [seccion, setSeccion] = useState(seccionInicial);
   const [editando, setEditando] = useState(false);
   const [loading, setLoading] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [toast, setToast] = useState(null);
-  const [modalInscripcion, setModalInscripcion] = useState(false);
+  const [editandoInsc, setEditandoInsc] = useState(null);
+  const [inscEditForm, setInscEditForm] = useState({ dorsal: "", nombre_camiseta: "" });
+  const [confirmDesinsc, setConfirmDesinsc] = useState(null);
 
   // Formulario perfil
   const [form, setForm] = useState({
@@ -58,11 +57,6 @@ export default function PlayerProfile({ session }) {
   });
   const [fotoFile, setFotoFile] = useState(null);
   const [fotoPreview, setFotoPreview] = useState(null);
-
-  // Formulario inscripción
-  const [inscForm, setInscForm] = useState({
-    liga_id: "", equipo_id: "", dorsal: "", nombre_camiseta: ""
-  });
 
   const token = session?.access_token;
   const userId = session?.user?.id;
@@ -104,33 +98,7 @@ export default function PlayerProfile({ session }) {
     } catch (e) { console.error(e); }
   };
 
-  // ── CARGAR LIGAS DISPONIBLES ──────────────────────────────────
-  const cargarLigas = async () => {
-    try {
-      const data = await db("/ligas?activa=eq.true&select=*&order=nombre", token);
-      setLigas(data || []);
-    } catch (e) { console.error(e); }
-  };
-
-  const MAX_JUGADORES = 17;
-
-  // ── CARGAR EQUIPOS DE LIGA ────────────────────────────────────
-  const cargarEquiposLiga = async (ligaId) => {
-    if (!ligaId) return;
-    try {
-      const yaInscrito = inscripciones.find(i => i.liga_id === ligaId);
-      if (yaInscrito) { setEquiposDisponibles([]); return; }
-      const [equipos, inscritos] = await Promise.all([
-        db(`/equipos?liga_id=eq.${ligaId}&select=*&order=nombre`, token),
-        db(`/jugador_equipo?liga_id=eq.${ligaId}&select=equipo_id`, token),
-      ]);
-      const conteo = {};
-      (inscritos || []).forEach(r => { conteo[r.equipo_id] = (conteo[r.equipo_id] || 0) + 1; });
-      setEquiposDisponibles((equipos || []).map(e => ({ ...e, _jugadores: conteo[e.id] || 0 })));
-    } catch (e) { console.error(e); }
-  };
-
-  useEffect(() => { cargarPerfil(); cargarLigas(); }, []);
+  useEffect(() => { cargarPerfil(); }, []);
 
   // ── GUARDAR PERFIL ────────────────────────────────────────────
   const guardarPerfil = async () => {
@@ -153,38 +121,40 @@ export default function PlayerProfile({ session }) {
     setGuardando(false);
   };
 
-  // ── INSCRIBIRSE A EQUIPO ──────────────────────────────────────
-  const inscribirse = async () => {
-    if (!inscForm.liga_id || !inscForm.equipo_id) return showToast("Selecciona liga y equipo", "err");
-    if (!inscForm.dorsal) return showToast("El dorsal es obligatorio", "err");
-    const equipoElegido = equiposDisponibles.find(e => e.id === inscForm.equipo_id);
-    if (equipoElegido && equipoElegido._jugadores >= MAX_JUGADORES) {
-      return showToast(`Este equipo ya alcanzó el máximo de ${MAX_JUGADORES} jugadores`, "err");
-    }
+  // ── DESINSCRIBIRSE DE UN EQUIPO ───────────────────────────────
+  const desinscribirse = async () => {
+    if (!confirmDesinsc) return;
     setGuardando(true);
     try {
-      await db("/jugador_equipo", token, {
-        method: "POST",
-        body: JSON.stringify({
-          jugador_id: jugador.id,
-          equipo_id: inscForm.equipo_id,
-          liga_id: inscForm.liga_id,
-          dorsal: +inscForm.dorsal,
-          nombre_camiseta: inscForm.nombre_camiseta || form.nombre_completo.split(" ")[0].toUpperCase(),
-          activo: true,
-        })
-      });
-      showToast("¡Inscripción exitosa! ✓");
-      setModalInscripcion(false);
-      setInscForm({ liga_id: "", equipo_id: "", dorsal: "", nombre_camiseta: "" });
+      await db(`/jugador_equipo?id=eq.${confirmDesinsc.id}`, token, { method: "DELETE" });
+      showToast("Te has dado de baja del equipo");
+      setConfirmDesinsc(null);
       cargarInscripciones(jugador.id);
-    } catch (e) {
-      if (e.message.includes("unique")) {
-        showToast("Ya estás inscrito en un equipo de esta liga", "err");
-      } else {
-        showToast(e.message, "err");
-      }
-    }
+    } catch (e) { showToast(e.message, "err"); }
+    setGuardando(false);
+  };
+
+  // ── EDITAR INSCRIPCIÓN (dorsal + nombre camiseta) ─────────────
+  const abrirEditarInsc = (ins) => {
+    setEditandoInsc(ins);
+    setInscEditForm({ dorsal: ins.dorsal || "", nombre_camiseta: ins.nombre_camiseta || "" });
+  };
+
+  const guardarInscripcion = async () => {
+    if (!inscEditForm.dorsal) return showToast("El dorsal es obligatorio", "err");
+    setGuardando(true);
+    try {
+      await db(`/jugador_equipo?id=eq.${editandoInsc.id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({
+          dorsal: +inscEditForm.dorsal,
+          nombre_camiseta: inscEditForm.nombre_camiseta.toUpperCase() || editandoInsc.nombre_camiseta,
+        }),
+      });
+      showToast("Camiseta actualizada ✓");
+      setEditandoInsc(null);
+      cargarInscripciones(jugador.id);
+    } catch (e) { showToast(e.message, "err"); }
     setGuardando(false);
   };
 
@@ -207,18 +177,11 @@ export default function PlayerProfile({ session }) {
       {toast && <div style={{ ...s.toast, background: toast.tipo === "err" ? "#ef4444" : "#4ade80", color: toast.tipo === "err" ? "#fff" : "#0d0d1a" }}>{toast.msg}</div>}
 
       <div style={s.header}>
-        <h2 style={s.title}>Mi Perfil ⚽</h2>
-        <p style={s.sub}>Tu identidad en la plataforma</p>
-      </div>
-
-      {/* TABS */}
-      <div style={s.tabs}>
-        {[["perfil","⚽","Mi Perfil"],["ligas","🏆","Mis Ligas"]].map(([key, icon, label]) => (
-          <button key={key} onClick={() => setSeccion(key)}
-            style={{ ...s.tab, ...(seccion === key ? s.tabActive : {}) }}>
-            {icon} {label}
-          </button>
-        ))}
+        <div style={{ fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:1.5, marginBottom:6 }}>
+          {seccion === "perfil" ? "Jugador registrado" : "Torneos activos"}
+        </div>
+        <h2 style={s.title}>{seccion === "perfil" ? "⚽ Mi Perfil" : "🏆 Mis Ligas"}</h2>
+        <p style={s.sub}>{seccion === "perfil" ? "Tu identidad en la plataforma" : "Tus inscripciones activas"}</p>
       </div>
 
       {/* ── SECCIÓN PERFIL ── */}
@@ -313,17 +276,14 @@ export default function PlayerProfile({ session }) {
       {seccion === "ligas" && (
         <div>
           <div style={s.secHeader}>
-            <span style={s.secCount}>{inscripciones.length} inscripciones activas</span>
-            <button style={s.btnAdd} onClick={() => { setModalInscripcion(true); setInscForm({ liga_id: "", equipo_id: "", dorsal: "", nombre_camiseta: "" }); setEquiposDisponibles([]); }}>
-              + Unirme a una liga
-            </button>
+            <span style={s.secCount}>{inscripciones.length} {inscripciones.length === 1 ? "inscripción activa" : "inscripciones activas"}</span>
           </div>
 
           {inscripciones.length === 0 ? (
             <div style={s.empty}>
               <div style={s.emptyIcon}>🏆</div>
-              <div style={s.emptyTxt}>Aún no estás inscrito en ninguna liga</div>
-              <button style={s.btnAdd} onClick={() => setModalInscripcion(true)}>Unirme a mi primera liga</button>
+              <div style={s.emptyTxt}>Aún no estás inscrito en ningún equipo</div>
+              <p style={{ color:"#9ca3af", fontSize:13, margin:0 }}>El administrador de tu unidad deportiva te inscribirá usando tu número de afiliado.</p>
             </div>
           ) : (
             <div style={s.inscripcionesList}>
@@ -344,6 +304,10 @@ export default function PlayerProfile({ session }) {
                     <div style={s.dorsalCard}>
                       <div style={{ ...s.dorsalNum, background: ins.equipos?.color_playera || "#3182ce" }}>{ins.dorsal}</div>
                       <div style={s.dorsalNombreCamiseta}>{ins.nombre_camiseta}</div>
+                      <div style={{ display:"flex", gap:6, marginTop:2 }}>
+                        <button style={s.btnEditarCamiseta} onClick={() => abrirEditarInsc(ins)}>✏️</button>
+                        <button style={{ ...s.btnEditarCamiseta, color:"#ef4444", borderColor:"#fca5a5" }} onClick={() => setConfirmDesinsc(ins)}>🚪</button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -353,70 +317,61 @@ export default function PlayerProfile({ session }) {
         </div>
       )}
 
-      {/* ── MODAL INSCRIPCIÓN ── */}
-      {modalInscripcion && (
-        <div style={s.overlay} onClick={() => setModalInscripcion(false)}>
+      {/* ── MODAL EDITAR CAMISETA ── */}
+      {editandoInsc && (
+        <div style={s.overlay} onClick={() => setEditandoInsc(null)}>
           <div style={s.modalBox} onClick={e => e.stopPropagation()}>
-            <h3 style={s.modalTitle}>Unirme a una liga ⚽</h3>
-            <div style={s.field}>
-              <label style={s.label}>Selecciona la liga *</label>
-              <select style={s.input} value={inscForm.liga_id}
-                onChange={e => { setInscForm({ ...inscForm, liga_id: e.target.value, equipo_id: "" }); cargarEquiposLiga(e.target.value); }}>
-                <option value="">Elige una liga...</option>
-                {ligas.map(l => {
-                  const yaInscrito = inscripciones.find(i => i.liga_id === l.id);
-                  return <option key={l.id} value={l.id} disabled={!!yaInscrito}>{l.nombre} {yaInscrito ? "(ya inscrito)" : ""}</option>;
-                })}
-              </select>
+            <h3 style={s.modalTitle}>Editar camiseta 🎽</h3>
+            <div style={{ marginBottom: 18, padding: "12px 16px", background: "#f0fdf4", border: "1px solid #c3e6a3", borderRadius: 10, fontSize: 14, fontWeight: 600 }}>
+              {editandoInsc.equipos?.nombre} · {editandoInsc.ligas?.nombre}
             </div>
-            {inscForm.liga_id && (
+            <div style={s.formRow}>
               <div style={s.field}>
-                <label style={s.label}>Selecciona el equipo *</label>
-                {equiposDisponibles.length === 0
-                  ? <div style={s.warningBox}>⚠️ No hay equipos disponibles en esta liga o ya estás inscrito</div>
-                  : <select style={s.input} value={inscForm.equipo_id}
-                      onChange={e => setInscForm({ ...inscForm, equipo_id: e.target.value })}>
-                      <option value="">Elige un equipo...</option>
-                      {equiposDisponibles.map(e => {
-                        const lleno = e._jugadores >= MAX_JUGADORES;
-                        return (
-                          <option key={e.id} value={e.id} disabled={lleno}>
-                            {e.nombre} ({e._jugadores}/{MAX_JUGADORES}){lleno ? " — Completo" : ""}
-                          </option>
-                        );
-                      })}
-                    </select>}
+                <label style={s.label}>Dorsal *</label>
+                <input style={s.input} type="number" min="1" max="99" placeholder="ej. 10"
+                  value={inscEditForm.dorsal} onChange={e => setInscEditForm({ ...inscEditForm, dorsal: e.target.value })} />
               </div>
-            )}
-            {inscForm.equipo_id && (
-              <>
-                <div style={s.formRow}>
-                  <div style={s.field}>
-                    <label style={s.label}>Dorsal (número) *</label>
-                    <input style={s.input} type="number" min="1" max="99" placeholder="ej. 10"
-                      value={inscForm.dorsal} onChange={e => setInscForm({ ...inscForm, dorsal: e.target.value })} />
-                  </div>
-                  <div style={s.field}>
-                    <label style={s.label}>Nombre en camiseta</label>
-                    <input style={s.input} type="text" placeholder={form.nombre_completo.split(" ")[0].toUpperCase()}
-                      value={inscForm.nombre_camiseta} onChange={e => setInscForm({ ...inscForm, nombre_camiseta: e.target.value.toUpperCase() })} />
-                  </div>
-                </div>
-                <div style={s.camisetaPreview}>
-                  <div style={{ ...s.camisetaNum, background: equiposDisponibles.find(e => e.id === inscForm.equipo_id)?.color_playera || "#3182ce" }}>
-                    {inscForm.dorsal || "?"}
-                  </div>
-                  <div style={s.camisetaNombrePreview}>
-                    {inscForm.nombre_camiseta || form.nombre_completo.split(" ")[0].toUpperCase()}
-                  </div>
-                  <div style={{ fontSize: 11, color: "#555" }}>Vista previa camiseta</div>
-                </div>
-              </>
-            )}
+              <div style={s.field}>
+                <label style={s.label}>Nombre en camiseta</label>
+                <input style={s.input} type="text" placeholder="APELLIDO"
+                  value={inscEditForm.nombre_camiseta} onChange={e => setInscEditForm({ ...inscEditForm, nombre_camiseta: e.target.value.toUpperCase() })} />
+              </div>
+            </div>
+            <div style={s.camisetaPreview}>
+              <div style={{ ...s.camisetaNum, background: editandoInsc.equipos?.color_playera || "#3182ce" }}>
+                {inscEditForm.dorsal || "?"}
+              </div>
+              <div style={s.camisetaNombrePreview}>{inscEditForm.nombre_camiseta || "NOMBRE"}</div>
+              <div style={{ fontSize: 11, color: "#555" }}>Vista previa camiseta</div>
+            </div>
             <div style={s.modalActions}>
-              <button style={s.btnCancelar} onClick={() => setModalInscripcion(false)}>Cancelar</button>
-              <button style={s.btnGuardar} onClick={inscribirse} disabled={guardando || !inscForm.equipo_id}>
-                {guardando ? "Procesando..." : "Confirmar inscripción"}
+              <button style={s.btnCancelar} onClick={() => setEditandoInsc(null)}>Cancelar</button>
+              <button style={s.btnGuardar} onClick={guardarInscripcion} disabled={guardando}>
+                {guardando ? "Guardando..." : "Guardar cambios"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL CONFIRMAR BAJA ── */}
+      {confirmDesinsc && (
+        <div style={s.overlay} onClick={() => setConfirmDesinsc(null)}>
+          <div style={{ ...s.modalBox, maxWidth: 380 }} onClick={e => e.stopPropagation()}>
+            <div style={{ textAlign:"center", marginBottom:20 }}>
+              <div style={{ fontSize:40, marginBottom:12 }}>🚪</div>
+              <h3 style={{ ...s.modalTitle, marginBottom:8 }}>¿Darte de baja?</h3>
+              <p style={{ color:"#6b7280", fontSize:14, margin:0 }}>
+                Saldrás del equipo <strong>{confirmDesinsc.equipos?.nombre}</strong> en la liga <strong>{confirmDesinsc.ligas?.nombre}</strong>.
+              </p>
+              <p style={{ color:"#ef4444", fontSize:12, marginTop:8 }}>
+                Esta acción no se puede revertir.
+              </p>
+            </div>
+            <div style={s.modalActions}>
+              <button style={s.btnCancelar} onClick={() => setConfirmDesinsc(null)}>Cancelar</button>
+              <button style={{ ...s.btnGuardar, background:"#ef4444" }} onClick={desinscribirse} disabled={guardando}>
+                {guardando ? "Procesando..." : "Sí, darme de baja"}
               </button>
             </div>
           </div>
@@ -433,12 +388,9 @@ const GREEN = "#4f8f2f";
 
 const s = {
   wrap: {},
-  header: { marginBottom: 20 },
-  title: { fontSize: 26, fontWeight: 800, color: "#111827", letterSpacing: -0.8, marginBottom: 4 },
-  sub: { color: "#6b7280", fontSize: 14 },
-  tabs: { display: "flex", gap: 4, marginBottom: 28, borderBottom: `1px solid ${BORDER}` },
-  tab: { background: "transparent", border: "none", borderBottom: "2px solid transparent", color: "#6b7280", padding: "10px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer", marginBottom: -1 },
-  tabActive: { color: GREEN, borderBottomColor: GREEN },
+  header: { marginBottom: 24, padding: "20px 24px", background: `linear-gradient(135deg, ${GREEN} 0%, #7fbf4d 100%)`, borderRadius: 16, boxShadow: "0 4px 16px rgba(79,143,47,0.3)" },
+  title: { fontSize: 26, fontWeight: 900, color: "#fff", letterSpacing: -0.8, marginBottom: 4 },
+  sub: { color: "rgba(255,255,255,0.78)", fontSize: 14, margin: 0 },
   playerCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 18, marginBottom: 20, overflow: "hidden", boxShadow: "0 4px 16px rgba(79,143,47,0.12)" },
   playerCardBanner: { background: "linear-gradient(135deg, #4f8f2f 0%, #7fbf4d 100%)", padding: "24px 28px", display: "flex", gap: 20, alignItems: "center" },
   playerCardBody: { padding: "20px 28px 24px" },
@@ -481,6 +433,7 @@ const s = {
   dorsalCard: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6 },
   dorsalNum: { width: 48, height: 48, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 900, color: "#fff" },
   dorsalNombreCamiseta: { fontSize: 12, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 },
+  btnEditarCamiseta: { background: "transparent", border: "1px solid #e5e7eb", borderRadius: 7, padding: "4px 10px", fontSize: 11, color: "#6b7280", cursor: "pointer", fontWeight: 600 },
   field: { marginBottom: 16, flex: 1 },
   formRow: { display: "flex", gap: 16 },
   label: { display: "block", fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 7 },

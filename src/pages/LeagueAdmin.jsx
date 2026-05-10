@@ -1,5 +1,7 @@
 import ScheduleGenerator from "./ScheduleGenerator";
+import FichaGenerator from "./FichaGenerator";
 import { useState, useEffect } from "react";
+import JerseySVG, { JerseyDesignPicker } from "../components/JerseySVG";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -40,8 +42,8 @@ const uploadFile = async (bucket, path, file, token) => {
 const COLORES = ["#e53e3e","#dd6b20","#d69e2e","#38a169","#3182ce","#805ad5","#d53f8c","#2d3748"];
 const POSICIONES = ["Portero","Defensa","Mediocampista","Delantero"];
 
-export default function LeagueAdmin({ session, userRole }) {
-  const [seccion, setSeccion] = useState("equipos");
+export default function LeagueAdmin({ session, userRole, seccionInicial = "equipos" }) {
+  const [seccion, setSeccion] = useState(seccionInicial);
   const [ligas, setLigas] = useState([]);
   const [ligaSeleccionada, setLigaSeleccionada] = useState(null);
   const [equipos, setEquipos] = useState([]);
@@ -53,7 +55,7 @@ export default function LeagueAdmin({ session, userRole }) {
   const [toast, setToast] = useState(null);
 
   // Formulario equipo
-  const [equipoForm, setEquipoForm] = useState({ nombre: "", color_playera: "#3182ce", escudo_url: "" });
+  const [equipoForm, setEquipoForm] = useState({ nombre: "", color_playera: "#3182ce", color_camiseta_2: "#ffffff", diseno_camiseta: "solido", escudo_url: "" });
   const [escudoFile, setEscudoFile] = useState(null);
   const [escudoPreview, setEscudoPreview] = useState(null);
   const [editEquipoId, setEditEquipoId] = useState(null);
@@ -178,7 +180,7 @@ export default function LeagueAdmin({ session, userRole }) {
         escudo_url = await uploadFile("imagenes", path, escudoFile, token);
       }
 
-      const payload = { nombre: equipoForm.nombre, color_playera: equipoForm.color_playera, escudo_url, liga_id: ligaSeleccionada.id };
+      const payload = { nombre: equipoForm.nombre, color_playera: equipoForm.color_playera, color_camiseta_2: equipoForm.color_camiseta_2, diseno_camiseta: equipoForm.diseno_camiseta, escudo_url, liga_id: ligaSeleccionada.id };
 
       if (editEquipoId) {
         await db(`/equipos?id=eq.${editEquipoId}`, token, { method: "PATCH", body: JSON.stringify(payload) });
@@ -187,7 +189,7 @@ export default function LeagueAdmin({ session, userRole }) {
         await db("/equipos", token, { method: "POST", body: JSON.stringify(payload) });
         showToast("Equipo registrado ✓");
       }
-      setEquipoForm({ nombre: "", color_playera: "#3182ce", escudo_url: "" });
+      setEquipoForm({ nombre: "", color_playera: "#3182ce", color_camiseta_2: "#ffffff", diseno_camiseta: "solido", escudo_url: "" });
       setEscudoFile(null); setEscudoPreview(null); setEditEquipoId(null);
       setModal(null);
       cargarEquipos(ligaSeleccionada.id);
@@ -206,7 +208,7 @@ export default function LeagueAdmin({ session, userRole }) {
   };
 
   const editarEquipo = (e) => {
-    setEquipoForm({ nombre: e.nombre, color_playera: e.color_playera || "#3182ce", escudo_url: e.escudo_url || "" });
+    setEquipoForm({ nombre: e.nombre, color_playera: e.color_playera || "#3182ce", color_camiseta_2: e.color_camiseta_2 || "#ffffff", diseno_camiseta: e.diseno_camiseta || "solido", escudo_url: e.escudo_url || "" });
     setEscudoPreview(e.escudo_url || null);
     setEditEquipoId(e.id);
     setModal("equipo");
@@ -258,7 +260,7 @@ export default function LeagueAdmin({ session, userRole }) {
         <>
           {/* TABS */}
           <div style={s.tabs}>
-            {[["equipos","👕","Equipos"],["jugadores","👥","Jugadores"],["calendario","📅","Calendario"],["arbitros","🟡","Árbitros"]].map(([key, icon, label]) => (
+            {[["equipos","👕","Equipos"],["jugadores","👥","Jugadores"],["calendario","📅","Calendario"],["arbitros","🟡","Árbitros"],["fichas","📄","Fichas"]].map(([key, icon, label]) => (
               <button key={key} onClick={() => { setSeccion(key); setEquipoDetalle(null); }}
                 style={{ ...s.tab, ...(seccion === key || (seccion === "detalle" && key === "equipos") ? s.tabActive : {}) }}>
                 {icon} {label}
@@ -271,7 +273,7 @@ export default function LeagueAdmin({ session, userRole }) {
             <div>
               <div style={s.secHeader}>
                 <span style={s.secCount}>{equipos.length} equipos en {ligaSeleccionada.nombre}</span>
-                <button style={s.btnAdd} onClick={() => { setEquipoForm({ nombre: "", color_playera: "#3182ce", escudo_url: "" }); setEscudoPreview(null); setEscudoFile(null); setEditEquipoId(null); setModal("equipo"); }}>
+                <button style={s.btnAdd} onClick={() => { setEquipoForm({ nombre: "", color_playera: "#3182ce", color_camiseta_2: "#ffffff", diseno_camiseta: "solido", escudo_url: "" }); setEscudoPreview(null); setEscudoFile(null); setEditEquipoId(null); setModal("equipo"); }}>
                   + Nuevo equipo
                 </button>
               </div>
@@ -287,11 +289,13 @@ export default function LeagueAdmin({ session, userRole }) {
                   {equipos.map(eq => (
                     <div key={eq.id} style={{ ...s.equipoCard, borderTop: `4px solid ${eq.color_playera || "#3182ce"}` }} className="la-card">
                       <div style={s.equipoCardTop}>
-                        <div style={s.escudoWrap}>
-                          {eq.escudo_url
-                            ? <img src={eq.escudo_url} alt="escudo" style={s.escudoImg} />
-                            : <div style={{ ...s.escudoPlaceholder, background: eq.color_playera || "#3182ce" }}>{eq.nombre[0]}</div>}
-                        </div>
+                        <JerseySVG
+                          diseno={eq.diseno_camiseta || "solido"}
+                          color1={eq.color_playera || "#3182ce"}
+                          color2={eq.color_camiseta_2 || "#ffffff"}
+                          escudoUrl={eq.escudo_url || null}
+                          size={52}
+                        />
                         <div style={s.equipoActions}>
                           <button style={s.btnEdit} onClick={() => editarEquipo(eq)}>✏️</button>
                           <button style={s.btnDel} onClick={() => eliminarEquipo(eq.id)}>🗑️</button>
@@ -475,28 +479,37 @@ export default function LeagueAdmin({ session, userRole }) {
             </div>
           )}
 
+          {/* ── SECCIÓN FICHAS ── */}
+          {seccion === "fichas" && (
+            <FichaGenerator session={session} liga={ligaSeleccionada} />
+          )}
+
         </>
       )}
 
       {/* ── MODAL EQUIPO ── */}
       {modal === "equipo" && (
         <div style={s.overlay} onClick={() => setModal(null)}>
-          <div style={s.modalBox} onClick={e => e.stopPropagation()}>
+          <div style={{ ...s.modalBox, maxWidth: 520 }} onClick={e => e.stopPropagation()}>
             <h3 style={s.modalTitle}>{editEquipoId ? "Editar equipo" : "Nuevo equipo"}</h3>
 
-            {/* ESCUDO */}
-            <div style={s.escudoUpload}>
-              <div style={{ ...s.escudoUploadPreview, background: equipoForm.color_playera }}>
-                {escudoPreview
-                  ? <img src={escudoPreview} alt="escudo" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 12 }} />
-                  : <span style={{ fontSize: 32 }}>{equipoForm.nombre ? equipoForm.nombre[0].toUpperCase() : "?"}</span>}
+            {/* PREVIEW CAMISETA + ESCUDO */}
+            <div style={{ display: "flex", gap: 20, alignItems: "center", marginBottom: 18 }}>
+              <div style={{ flexShrink: 0 }}>
+                <JerseySVG
+                  diseno={equipoForm.diseno_camiseta}
+                  color1={equipoForm.color_playera}
+                  color2={equipoForm.color_camiseta_2}
+                  escudoUrl={escudoPreview || null}
+                  size={72}
+                />
               </div>
-              <div>
+              <div style={{ flex: 1 }}>
                 <label style={s.uploadLabel}>
-                  📁 Subir escudo del equipo
+                  📁 Subir logo del equipo
                   <input type="file" accept="image/*" onChange={handleEscudoChange} style={{ display: "none" }} />
                 </label>
-                <p style={{ color: "#555", fontSize: 11, marginTop: 6 }}>PNG, JPG o SVG recomendado</p>
+                <p style={{ color: "#888", fontSize: 11, marginTop: 6 }}>Aparece en la camiseta. PNG o JPG.</p>
               </div>
             </div>
 
@@ -506,16 +519,42 @@ export default function LeagueAdmin({ session, userRole }) {
                 value={equipoForm.nombre} onChange={e => setEquipoForm({ ...equipoForm, nombre: e.target.value })} />
             </div>
 
+            {/* DISEÑO DE CAMISETA */}
             <div style={s.field}>
-              <label style={s.label}>Color de playera</label>
-              <div style={s.colorGrid}>
-                {COLORES.map(c => (
-                  <div key={c} onClick={() => setEquipoForm({ ...equipoForm, color_playera: c })}
-                    style={{ ...s.colorDot, background: c, boxShadow: equipoForm.color_playera === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none" }} />
-                ))}
-                <input type="color" value={equipoForm.color_playera}
-                  onChange={e => setEquipoForm({ ...equipoForm, color_playera: e.target.value })}
-                  style={s.colorCustom} title="Color personalizado" />
+              <label style={s.label}>Diseño de camiseta</label>
+              <JerseyDesignPicker
+                diseno={equipoForm.diseno_camiseta}
+                color1={equipoForm.color_playera}
+                color2={equipoForm.color_camiseta_2}
+                onChange={({ diseno }) => setEquipoForm({ ...equipoForm, diseno_camiseta: diseno })}
+              />
+            </div>
+
+            {/* COLORES */}
+            <div style={{ display: "flex", gap: 16 }}>
+              <div style={{ ...s.field, flex: 1 }}>
+                <label style={s.label}>Color principal</label>
+                <div style={s.colorGrid}>
+                  {COLORES.map(c => (
+                    <div key={c} onClick={() => setEquipoForm({ ...equipoForm, color_playera: c })}
+                      style={{ ...s.colorDot, background: c, boxShadow: equipoForm.color_playera === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none" }} />
+                  ))}
+                  <input type="color" value={equipoForm.color_playera}
+                    onChange={e => setEquipoForm({ ...equipoForm, color_playera: e.target.value })}
+                    style={s.colorCustom} title="Color personalizado" />
+                </div>
+              </div>
+              <div style={{ ...s.field, flex: 1 }}>
+                <label style={s.label}>Color secundario</label>
+                <div style={s.colorGrid}>
+                  {["#ffffff","#000000","#f5f5f5","#fbbf24","#ef4444","#3b82f6","#10b981","#8b5cf6"].map(c => (
+                    <div key={c} onClick={() => setEquipoForm({ ...equipoForm, color_camiseta_2: c })}
+                      style={{ ...s.colorDot, background: c, boxShadow: equipoForm.color_camiseta_2 === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none", border: c === "#ffffff" ? "1px solid #e5e7eb" : "none" }} />
+                  ))}
+                  <input type="color" value={equipoForm.color_camiseta_2}
+                    onChange={e => setEquipoForm({ ...equipoForm, color_camiseta_2: e.target.value })}
+                    style={s.colorCustom} title="Color secundario personalizado" />
+                </div>
               </div>
             </div>
 
