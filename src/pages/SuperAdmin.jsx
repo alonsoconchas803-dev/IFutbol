@@ -1,6 +1,7 @@
 import Solicitudes from "./Solicitudes";
 import { useState, useEffect } from "react";
 import JerseySVG, { JerseyDesignPicker } from "../components/JerseySVG";
+import PersonalizacionUnidadFields from "../components/PersonalizacionUnidadFields";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -23,6 +24,21 @@ const db = async (path, token, options = {}) => {
   return res.status === 204 ? null : res.json();
 };
 
+const uploadFile = async (bucket, path, file, token) => {
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`, {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": file.type,
+      "x-upsert": "true"
+    },
+    body: file
+  });
+  if (!res.ok) throw new Error("Error al subir imagen");
+  return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
+};
+
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 const TURNOS = ["Mañana", "Tarde", "Noche"];
 const COLORES = ["#e53e3e","#dd6b20","#d69e2e","#38a169","#3182ce","#805ad5","#d53f8c","#2d3748","#319795","#e53e8c"];
@@ -37,8 +53,12 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
   const [modal, setModal] = useState(null); // "cancha" | "liga" | "equipo"
 
   // Formulario canchas
-  const [canchaForm, setCanchaForm] = useState({ nombre: "", direccion: "", num_canchas: 1 });
+  const [canchaForm, setCanchaForm] = useState({ nombre: "", direccion: "", num_canchas: 1, logo_url: "", estilo_tarjeta: "logo_arriba", color_marca: "#4f8f2f", lema: "", portada_url: "", tamano_logo: "mediano", forma_logo: "cuadrado", intensidad_fondo: "medio" });
   const [editCanchaId, setEditCanchaId] = useState(null);
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoPreview, setLogoPreview] = useState(null);
+  const [portadaFile, setPortadaFile] = useState(null);
+  const [portadaPreview, setPortadaPreview] = useState(null);
 
   // Equipos
   const [equipos, setEquipos] = useState([]);
@@ -47,7 +67,7 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
   const [editEquipoId, setEditEquipoId] = useState(null);
 
   // Formulario ligas
-  const [ligaForm, setLigaForm] = useState({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: "", temporada: "" });
+  const [ligaForm, setLigaForm] = useState({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: "", temporada: "", color_marca: "#4f8f2f" });
   const [editLigaId, setEditLigaId] = useState(null);
 
   const token = session?.access_token;
@@ -79,14 +99,31 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
     if (!canchaForm.nombre) return showToast("El nombre es obligatorio", "err");
     setLoading(true);
     try {
+      let logo_url = canchaForm.logo_url;
+      if (logoFile) {
+        const ext = logoFile.name.split(".").pop();
+        const path = `logos-unidades/${Date.now()}.${ext}`;
+        logo_url = await uploadFile("imagenes", path, logoFile, token);
+      }
+      let portada_url = canchaForm.portada_url;
+      if (portadaFile) {
+        const ext = portadaFile.name.split(".").pop();
+        const path = `portadas-unidades/${Date.now()}.${ext}`;
+        portada_url = await uploadFile("imagenes", path, portadaFile, token);
+      }
+      const payload = { ...canchaForm, logo_url, portada_url };
       if (editCanchaId) {
-        await db(`/canchas?id=eq.${editCanchaId}`, token, { method: "PATCH", body: JSON.stringify(canchaForm) });
+        await db(`/canchas?id=eq.${editCanchaId}`, token, { method: "PATCH", body: JSON.stringify(payload) });
         showToast("Unidad deportiva actualizada ✓");
       } else {
-        await db("/canchas", token, { method: "POST", body: JSON.stringify(canchaForm) });
+        await db("/canchas", token, { method: "POST", body: JSON.stringify(payload) });
         showToast("Unidad deportiva registrada ✓");
       }
-      setCanchaForm({ nombre: "", direccion: "", num_canchas: 1 });
+      setCanchaForm({ nombre: "", direccion: "", num_canchas: 1, logo_url: "", estilo_tarjeta: "logo_arriba", color_marca: "#4f8f2f", lema: "", portada_url: "", tamano_logo: "mediano", forma_logo: "cuadrado", intensidad_fondo: "medio" });
+      setLogoFile(null);
+      setLogoPreview(null);
+      setPortadaFile(null);
+      setPortadaPreview(null);
       setEditCanchaId(null);
       setModal(null);
       cargarCanchas();
@@ -104,7 +141,23 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
   };
 
   const editarCancha = (c) => {
-    setCanchaForm({ nombre: c.nombre, direccion: c.direccion || "", num_canchas: c.num_canchas });
+    setCanchaForm({
+      nombre: c.nombre,
+      direccion: c.direccion || "",
+      num_canchas: c.num_canchas,
+      logo_url: c.logo_url || "",
+      estilo_tarjeta: c.estilo_tarjeta || "logo_arriba",
+      color_marca: c.color_marca || "#4f8f2f",
+      lema: c.lema || "",
+      portada_url: c.portada_url || "",
+      tamano_logo: c.tamano_logo || "mediano",
+      forma_logo: c.forma_logo || "cuadrado",
+      intensidad_fondo: c.intensidad_fondo || "medio"
+    });
+    setLogoFile(null);
+    setLogoPreview(c.logo_url || null);
+    setPortadaFile(null);
+    setPortadaPreview(c.portada_url || null);
     setEditCanchaId(c.id);
     setModal("cancha");
   };
@@ -121,7 +174,7 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
         await db("/ligas", token, { method: "POST", body: JSON.stringify({ ...ligaForm, activa: true }) });
         showToast("Liga creada ✓");
       }
-      setLigaForm({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: "", temporada: "" });
+      setLigaForm({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: "", temporada: "", color_marca: "#4f8f2f" });
       setEditLigaId(null);
       setModal(null);
       cargarLigas();
@@ -139,7 +192,7 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
   };
 
   const editarLiga = (l) => {
-    setLigaForm({ nombre: l.nombre, dia: l.dia, turno: l.turno, cancha_id: l.cancha_id, temporada: l.temporada || "" });
+    setLigaForm({ nombre: l.nombre, dia: l.dia, turno: l.turno, cancha_id: l.cancha_id, temporada: l.temporada || "", color_marca: l.color_marca || "#4f8f2f" });
     setEditLigaId(l.id);
     setModal("liga");
   };
@@ -220,7 +273,7 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
         <div>
           <div style={s.secHeader}>
             <span style={s.secCount}>{canchas.length} unidades deportivas registradas</span>
-            <button style={s.btnAdd} onClick={() => { setCanchaForm({ nombre: "", direccion: "", num_canchas: 1 }); setEditCanchaId(null); setModal("cancha"); }}>
+            <button style={s.btnAdd} onClick={() => { setCanchaForm({ nombre: "", direccion: "", num_canchas: 1, logo_url: "", estilo_tarjeta: "logo_arriba", color_marca: "#4f8f2f", lema: "", portada_url: "", tamano_logo: "mediano", forma_logo: "cuadrado", intensidad_fondo: "medio" }); setLogoFile(null); setLogoPreview(null); setPortadaFile(null); setPortadaPreview(null); setEditCanchaId(null); setModal("cancha"); }}>
               + Nueva unidad deportiva
             </button>
           </div>
@@ -236,7 +289,11 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
               {canchas.map(c => (
                 <div key={c.id} style={s.card} className="sa-card">
                   <div style={s.cardTop}>
-                    <div style={s.cardIcon}>🏟️</div>
+                    <div style={s.cardIcon}>
+                      {c.logo_url
+                        ? <img src={c.logo_url} alt={c.nombre} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "inherit" }} />
+                        : "🏟️"}
+                    </div>
                     <div style={s.cardActions}>
                       <button style={s.btnEdit} onClick={() => editarCancha(c)}>✏️</button>
                       <button style={s.btnDel} onClick={() => eliminarCancha(c.id)}>🗑️</button>
@@ -260,7 +317,7 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
         <div>
           <div style={s.secHeader}>
             <span style={s.secCount}>{ligas.length} ligas registradas</span>
-            <button style={s.btnAdd} onClick={() => { setLigaForm({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: "", temporada: "" }); setEditLigaId(null); setModal("liga"); }}
+            <button style={s.btnAdd} onClick={() => { setLigaForm({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: "", temporada: "", color_marca: "#4f8f2f" }); setEditLigaId(null); setModal("liga"); }}
               disabled={canchas.length === 0}>
               + Nueva liga
             </button>
@@ -409,8 +466,9 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
       {/* ── MODAL CANCHA ── */}
       {modal === "cancha" && (
         <div style={s.overlay} onClick={() => setModal(null)}>
-          <div style={s.modalBox} onClick={e => e.stopPropagation()}>
+          <div style={{ ...s.modalBox, maxWidth: 560, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
             <h3 style={s.modalTitle}>{editCanchaId ? "Editar unidad deportiva" : "Nueva unidad deportiva"}</h3>
+
             <div style={s.field}>
               <label style={s.label}>Nombre de la unidad deportiva *</label>
               <input style={s.input} placeholder="ej. Canchas Manzano"
@@ -426,6 +484,16 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
               <input style={s.input} type="number" min="1" max="20"
                 value={canchaForm.num_canchas} onChange={e => setCanchaForm({ ...canchaForm, num_canchas: +e.target.value })} />
             </div>
+
+            <div style={{ borderTop: "1px solid #e5e7eb", margin: "8px 0 18px", paddingTop: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#111827", marginBottom: 14 }}>🎨 Personalización</div>
+              <PersonalizacionUnidadFields
+                form={canchaForm} setForm={setCanchaForm}
+                logoPreview={logoPreview} setLogoFile={setLogoFile} setLogoPreview={setLogoPreview}
+                portadaPreview={portadaPreview} setPortadaFile={setPortadaFile} setPortadaPreview={setPortadaPreview}
+              />
+            </div>
+
             <div style={s.modalActions}>
               <button style={s.btnCancel} onClick={() => setModal(null)}>Cancelar</button>
               <button style={s.btnSave} onClick={guardarCancha} disabled={loading}>
@@ -545,6 +613,23 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
               <label style={s.label}>Temporada (opcional)</label>
               <input style={s.input} placeholder="ej. 2025-A"
                 value={ligaForm.temporada} onChange={e => setLigaForm({ ...ligaForm, temporada: e.target.value })} />
+            </div>
+            <div style={s.field}>
+              <label style={s.label}>Color del torneo</label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                {["#4f8f2f","#3182ce","#e53e3e","#dd6b20","#d69e2e","#805ad5","#d53f8c","#0ea5e9","#14b8a6","#1f2937"].map(c => (
+                  <div key={c} onClick={() => setLigaForm({ ...ligaForm, color_marca: c })}
+                    style={{ width: 30, height: 30, borderRadius: "50%", background: c, cursor: "pointer",
+                      boxShadow: ligaForm.color_marca === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none" }} />
+                ))}
+                <input type="color" value={ligaForm.color_marca || "#4f8f2f"}
+                  onChange={e => setLigaForm({ ...ligaForm, color_marca: e.target.value })}
+                  style={{ width: 30, height: 30, borderRadius: "50%", border: "none", cursor: "pointer", padding: 0 }}
+                  title="Color personalizado" />
+              </div>
+              <div style={{ marginTop: 10, height: 40, borderRadius: 10, background: `linear-gradient(135deg, ${ligaForm.color_marca} 0%, ${ligaForm.color_marca}88 100%)`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 700, textShadow: "0 1px 2px rgba(0,0,0,0.3)" }}>
+                Vista previa del header
+              </div>
             </div>
             <div style={s.modalActions}>
               <button style={s.btnCancel} onClick={() => setModal(null)}>Cancelar</button>

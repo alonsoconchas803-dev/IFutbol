@@ -25,9 +25,20 @@ const db = async (path, token, options = {}) => {
   return res.status === 204 ? null : res.json();
 };
 
-export default function Referee({ session }) {
+export default function Referee({ session, setTopbarBack }) {
   const [partidos, setPartidos] = useState([]);
   const [partidoActivo, setPartidoActivo] = useState(null);
+
+  // Sincroniza el botón "← back" con el topbar
+  useEffect(() => {
+    if (!setTopbarBack) return;
+    if (partidoActivo) {
+      setTopbarBack({ label: "Mis partidos", onClick: () => setPartidoActivo(null) });
+    } else {
+      setTopbarBack(null);
+    }
+    return () => setTopbarBack(null);
+  }, [partidoActivo, setTopbarBack]);
   const [ficha, setFicha] = useState(null);
   const [jugadoresLocal, setJugadoresLocal] = useState([]);
   const [jugadoresVisitante, setJugadoresVisitante] = useState([]);
@@ -282,8 +293,6 @@ export default function Referee({ session }) {
       ) : (
         // ── FICHA DEL PARTIDO ──
         <div>
-          <button style={s.backBtn} onClick={() => setPartidoActivo(null)}>← Volver a mis partidos</button>
-
           {cerrada && (
             <div style={s.cerradaBanner}>🔒 Esta ficha está cerrada y ya no puede ser editada</div>
           )}

@@ -2,6 +2,7 @@ import ScheduleGenerator from "./ScheduleGenerator";
 import FichaGenerator from "./FichaGenerator";
 import { useState, useEffect } from "react";
 import JerseySVG, { JerseyDesignPicker } from "../components/JerseySVG";
+import PersonalizacionUnidadFields from "../components/PersonalizacionUnidadFields";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -42,7 +43,7 @@ const uploadFile = async (bucket, path, file, token) => {
 const COLORES = ["#e53e3e","#dd6b20","#d69e2e","#38a169","#3182ce","#805ad5","#d53f8c","#2d3748"];
 const POSICIONES = ["Portero","Defensa","Mediocampista","Delantero"];
 
-export default function LeagueAdmin({ session, userRole, seccionInicial = "equipos" }) {
+export default function LeagueAdmin({ session, userRole, seccionInicial = "equipos", setTopbarBack }) {
   const [seccion, setSeccion] = useState(seccionInicial);
   const [ligas, setLigas] = useState([]);
   const [ligaSeleccionada, setLigaSeleccionada] = useState(null);
@@ -62,6 +63,17 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
 
   // Árbitros
   const [arbitros, setArbitros] = useState([]);
+
+  // Personalización de la unidad
+  const [miUnidad, setMiUnidad] = useState(null);
+  const [personalizarForm, setPersonalizarForm] = useState({ logo_url: "", estilo_tarjeta: "logo_arriba", color_marca: "#4f8f2f", lema: "", portada_url: "", tamano_logo: "mediano", forma_logo: "cuadrado", intensidad_fondo: "medio" });
+  const [personalizarLogoFile, setPersonalizarLogoFile] = useState(null);
+  const [personalizarLogoPreview, setPersonalizarLogoPreview] = useState(null);
+  const [personalizarPortadaFile, setPersonalizarPortadaFile] = useState(null);
+  const [personalizarPortadaPreview, setPersonalizarPortadaPreview] = useState(null);
+
+  // Color del torneo activo
+  const [colorLigaForm, setColorLigaForm] = useState("#4f8f2f");
 
   const token = session?.access_token;
 
@@ -154,7 +166,81 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
     } catch (e) { showToast(e.message, "err"); }
   };
 
-  useEffect(() => { cargarLigas(); }, []);
+  // ── CARGAR MI UNIDAD ─────────────────────────────────────────
+  const cargarMiUnidad = async () => {
+    if (!userRole?.cancha_id) return;
+    try {
+      const data = await db(`/canchas?id=eq.${userRole.cancha_id}&select=*`, token);
+      if (data?.[0]) setMiUnidad(data[0]);
+    } catch (e) { showToast(e.message, "err"); }
+  };
+
+  // ── GUARDAR PERSONALIZACIÓN ──────────────────────────────────
+  const guardarPersonalizacion = async () => {
+    if (!miUnidad) return;
+    setLoading(true);
+    try {
+      let logo_url = personalizarForm.logo_url;
+      if (personalizarLogoFile) {
+        const ext = personalizarLogoFile.name.split(".").pop();
+        const path = `logos-unidades/${Date.now()}.${ext}`;
+        logo_url = await uploadFile("imagenes", path, personalizarLogoFile, token);
+      }
+      let portada_url = personalizarForm.portada_url;
+      if (personalizarPortadaFile) {
+        const ext = personalizarPortadaFile.name.split(".").pop();
+        const path = `portadas-unidades/${Date.now()}.${ext}`;
+        portada_url = await uploadFile("imagenes", path, personalizarPortadaFile, token);
+      }
+      const payload = { ...personalizarForm, logo_url, portada_url };
+      await db(`/canchas?id=eq.${miUnidad.id}`, token, { method: "PATCH", body: JSON.stringify(payload) });
+      showToast("Personalización guardada ✓");
+      setMiUnidad({ ...miUnidad, ...payload });
+      setPersonalizarLogoFile(null);
+      setPersonalizarPortadaFile(null);
+      setModal(null);
+    } catch (e) { showToast(e.message, "err"); }
+    setLoading(false);
+  };
+
+  // ── GUARDAR COLOR DE LIGA ────────────────────────────────────
+  const guardarColorLiga = async () => {
+    if (!ligaSeleccionada) return;
+    setLoading(true);
+    try {
+      await db(`/ligas?id=eq.${ligaSeleccionada.id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ color_marca: colorLigaForm })
+      });
+      showToast("Color del torneo actualizado ✓");
+      const actualizada = { ...ligaSeleccionada, color_marca: colorLigaForm };
+      setLigaSeleccionada(actualizada);
+      setLigas(ligas.map(l => l.id === actualizada.id ? actualizada : l));
+      setModal(null);
+    } catch (e) { showToast(e.message, "err"); }
+    setLoading(false);
+  };
+
+  const abrirPersonalizar = () => {
+    if (!miUnidad) return;
+    setPersonalizarForm({
+      logo_url: miUnidad.logo_url || "",
+      estilo_tarjeta: miUnidad.estilo_tarjeta || "logo_arriba",
+      color_marca: miUnidad.color_marca || "#4f8f2f",
+      lema: miUnidad.lema || "",
+      portada_url: miUnidad.portada_url || "",
+      tamano_logo: miUnidad.tamano_logo || "mediano",
+      forma_logo: miUnidad.forma_logo || "cuadrado",
+      intensidad_fondo: miUnidad.intensidad_fondo || "medio"
+    });
+    setPersonalizarLogoFile(null);
+    setPersonalizarLogoPreview(miUnidad.logo_url || null);
+    setPersonalizarPortadaFile(null);
+    setPersonalizarPortadaPreview(miUnidad.portada_url || null);
+    setModal("personalizar");
+  };
+
+  useEffect(() => { cargarLigas(); cargarMiUnidad(); }, []);
   useEffect(() => {
     if (ligaSeleccionada) {
       cargarEquipos(ligaSeleccionada.id);
@@ -165,6 +251,17 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
   useEffect(() => {
     if (seccion === "arbitros" && ligaSeleccionada) cargarArbitros();
   }, [seccion, ligaSeleccionada]);
+
+  // Back button del topbar cuando hay un equipo abierto en detalle
+  useEffect(() => {
+    if (!setTopbarBack) return;
+    if (seccion === "detalle" && equipoDetalle) {
+      setTopbarBack({ label: "Equipos", onClick: () => { setSeccion("equipos"); setEquipoDetalle(null); } });
+    } else {
+      setTopbarBack(null);
+    }
+    return () => setTopbarBack(null);
+  }, [seccion, equipoDetalle, setTopbarBack]);
 
   // ── GUARDAR EQUIPO ────────────────────────────────────────────
   const guardarEquipo = async () => {
@@ -235,10 +332,24 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
 
       {/* ENCABEZADO */}
       <div style={s.header}>
-        <div>
-          <h2 style={s.title}>Panel Admin de Unidad 🏟️</h2>
-          <p style={s.sub}>Gestiona equipos, jugadores y árbitros de tu unidad deportiva</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          {miUnidad?.logo_url && (
+            <div style={{ width: 52, height: 52, borderRadius: 12, overflow: "hidden", flexShrink: 0, boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}>
+              <img src={miUnidad.logo_url} alt={miUnidad.nombre} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            </div>
+          )}
+          <div>
+            <h2 style={s.title}>{miUnidad?.nombre ? `${miUnidad.nombre} 🏟️` : "Panel Admin de Unidad 🏟️"}</h2>
+            <p style={s.sub}>Gestiona equipos, jugadores y árbitros de tu unidad deportiva</p>
+          </div>
         </div>
+        {miUnidad && (
+          <button
+            onClick={abrirPersonalizar}
+            style={{ background: "#fff", border: "1px solid #d1d5db", borderRadius: 10, padding: "8px 14px", color: "#374151", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+            🎨 Personalizar mi unidad
+          </button>
+        )}
       </div>
 
       {/* SELECTOR DE LIGA */}
@@ -248,12 +359,20 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
           {ligas.map(l => (
             <button key={l.id}
               onClick={() => { setLigaSeleccionada(l); setEquipoDetalle(null); setSeccion("equipos"); }}
-              style={{ ...s.ligaTab, ...(ligaSeleccionada?.id === l.id ? s.ligaTabActive : {}) }}>
+              style={{ ...s.ligaTab, ...(ligaSeleccionada?.id === l.id ? s.ligaTabActive : {}), borderLeft: `4px solid ${l.color_marca || "#4f8f2f"}` }}>
               🏆 {l.nombre}
             </button>
           ))}
           {ligas.length === 0 && <span style={{ color: "#666", fontSize: 13 }}>No hay ligas activas. Pídele al Super Admin que cree una.</span>}
         </div>
+        {ligaSeleccionada && (
+          <button
+            onClick={() => { setColorLigaForm(ligaSeleccionada.color_marca || "#4f8f2f"); setModal("color_liga"); }}
+            style={{ background: "#fff", border: "1px solid #d1d5db", borderRadius: 10, padding: "8px 14px", color: "#374151", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
+            title="Cambiar color del torneo">
+            🎨 Color del torneo
+          </button>
+        )}
       </div>
 
       {ligaSeleccionada && (
@@ -319,7 +438,6 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
           {/* ── DETALLE EQUIPO ── */}
           {seccion === "detalle" && equipoDetalle && (
             <div>
-              <button style={s.backBtn} onClick={() => { setSeccion("equipos"); setEquipoDetalle(null); }}>← Volver a equipos</button>
               <div style={{ ...s.detalleHeader, borderLeft: `5px solid ${equipoDetalle.color_playera || "#3182ce"}` }}>
                 <div style={s.escudoWrapLg}>
                   {equipoDetalle.escudo_url
@@ -487,6 +605,73 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
         </>
       )}
 
+      {/* ── MODAL PERSONALIZAR UNIDAD ── */}
+      {modal === "personalizar" && miUnidad && (
+        <div style={s.overlay} onClick={() => setModal(null)}>
+          <div style={{ ...s.modalBox, maxWidth: 560, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+            <h3 style={s.modalTitle}>🎨 Personalizar {miUnidad.nombre}</h3>
+
+            <PersonalizacionUnidadFields
+              form={personalizarForm} setForm={setPersonalizarForm}
+              logoPreview={personalizarLogoPreview} setLogoFile={setPersonalizarLogoFile} setLogoPreview={setPersonalizarLogoPreview}
+              portadaPreview={personalizarPortadaPreview} setPortadaFile={setPersonalizarPortadaFile} setPortadaPreview={setPersonalizarPortadaPreview}
+            />
+
+            <div style={s.modalActions}>
+              <button style={s.btnCancel} onClick={() => setModal(null)}>Cancelar</button>
+              <button style={s.btnSave} onClick={guardarPersonalizacion} disabled={loading}>
+                {loading ? "Guardando..." : "Guardar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL COLOR DE LIGA ── */}
+      {modal === "color_liga" && ligaSeleccionada && (
+        <div style={s.overlay} onClick={() => setModal(null)}>
+          <div style={{ ...s.modalBox, maxWidth: 440 }} onClick={e => e.stopPropagation()}>
+            <h3 style={s.modalTitle}>🎨 Color de {ligaSeleccionada.nombre}</h3>
+            <p style={{ fontSize: 13, color: "#6b7280", marginTop: -12, marginBottom: 18 }}>
+              Aparece como gradiente en el header cuando entras al torneo.
+            </p>
+
+            <div style={s.field}>
+              <label style={s.label}>Elige un color</label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                {["#4f8f2f","#3182ce","#e53e3e","#dd6b20","#d69e2e","#805ad5","#d53f8c","#0ea5e9","#14b8a6","#1f2937"].map(c => (
+                  <div key={c} onClick={() => setColorLigaForm(c)}
+                    style={{ width: 32, height: 32, borderRadius: "50%", background: c, cursor: "pointer",
+                      boxShadow: colorLigaForm === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none" }} />
+                ))}
+                <input type="color" value={colorLigaForm}
+                  onChange={e => setColorLigaForm(e.target.value)}
+                  style={{ width: 32, height: 32, borderRadius: "50%", border: "none", cursor: "pointer", padding: 0 }}
+                  title="Color personalizado" />
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 22 }}>
+              <label style={s.label}>Vista previa</label>
+              <div style={{ height: 80, borderRadius: 14, background: `linear-gradient(135deg, ${colorLigaForm} 0%, ${colorLigaForm}88 100%)`, display: "flex", alignItems: "center", padding: "0 22px", gap: 14, color: "#fff", boxShadow: `0 4px 14px ${colorLigaForm}55` }}>
+                <div style={{ fontSize: 30, width: 48, height: 48, background: "rgba(255,255,255,0.18)", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>🏆</div>
+                <div>
+                  <div style={{ fontSize: 11, opacity: 0.7, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>{miUnidad?.nombre || "Unidad"}</div>
+                  <div style={{ fontSize: 17, fontWeight: 900, textShadow: "0 1px 2px rgba(0,0,0,0.3)" }}>{ligaSeleccionada.nombre}</div>
+                </div>
+              </div>
+            </div>
+
+            <div style={s.modalActions}>
+              <button style={s.btnCancel} onClick={() => setModal(null)}>Cancelar</button>
+              <button style={s.btnSave} onClick={guardarColorLiga} disabled={loading}>
+                {loading ? "Guardando..." : "Guardar color"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── MODAL EQUIPO ── */}
       {modal === "equipo" && (
         <div style={s.overlay} onClick={() => setModal(null)}>
@@ -578,7 +763,7 @@ const GREEN = "#4f8f2f";
 
 const s = {
   wrap: {},
-  header: { marginBottom: 20 },
+  header: { marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" },
   title: { fontSize: 26, fontWeight: 800, color: "#111827", letterSpacing: -0.8, marginBottom: 4 },
   sub: { color: "#6b7280", fontSize: 14 },
   ligaSelector: { display: "flex", alignItems: "center", gap: 14, marginBottom: 24, flexWrap: "wrap" },

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import "./ifutbol.css";
 import SuperAdmin from "./pages/SuperAdmin";
 import LeagueAdmin from "./pages/LeagueAdmin";
@@ -85,11 +85,16 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen]   = useState(false);
   const [toast, setToast]               = useState(null);
   const [canchas, setCanchas]           = useState([]);
+  const [topbarBack, setTopbarBack]     = useState(null);
 
   const showToast = (msg, tipo = "ok") => {
     setToast({ msg, tipo });
     setTimeout(() => setToast(null), 3500);
   };
+
+  // Callbacks estables — evitan que useEffect en hijos entren en loop infinito
+  const goHome = useCallback(() => setScreen("home"), []);
+  const goDashboard = useCallback((sec) => { setDashSeccion(sec || null); setScreen("dashboard"); }, []);
 
   useEffect(() => {
     db("/canchas?select=*&order=created_at.asc").then(d => setCanchas(d || []));
@@ -144,8 +149,9 @@ export default function App() {
       <DashboardLayout
         session={session} userRole={userRole} jugadorData={jugadorData}
         onLogout={handleLogout} toast={toast} showToast={showToast}
-        onHome={() => setScreen("home")} initials={initials()}
+        onHome={goHome} initials={initials()}
         seccionInicial={dashSeccion}
+        topbarBack={topbarBack} setTopbarBack={setTopbarBack}
       />
     );
   }
@@ -154,9 +160,10 @@ export default function App() {
     return (
       <PublicLayout session={session} userRole={userRole} sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen} setModal={setModal} onLogout={handleLogout}
-        initials={initials()} toast={toast} onHome={() => setScreen("home")}
-        onDashboard={sec => { setDashSeccion(sec || null); setScreen("dashboard"); }}>
-        <UnidadPage cancha={unidadActiva} onBack={() => setScreen("home")} />
+        initials={initials()} toast={toast} onHome={goHome}
+        onDashboard={goDashboard}
+        topbarBack={topbarBack}>
+        <UnidadPage cancha={unidadActiva} onBack={goHome} setTopbarBack={setTopbarBack} />
         <Modals modal={modal} setModal={setModal} onLogin={handleLogin} showToast={showToast} />
       </PublicLayout>
     );
@@ -165,9 +172,10 @@ export default function App() {
   return (
     <PublicLayout session={session} userRole={userRole} sidebarOpen={sidebarOpen}
       setSidebarOpen={setSidebarOpen} setModal={setModal} onLogout={handleLogout}
-      initials={initials()} toast={toast} onHome={() => setScreen("home")}
-      onDashboard={sec => { setDashSeccion(sec || null); setScreen("dashboard"); }}>
-      <HomePage canchas={canchas} onVerUnidad={c => { setUnidadActiva(c); setScreen("unidad"); setSidebarOpen(false); }} />
+      initials={initials()} toast={toast} onHome={goHome}
+      onDashboard={goDashboard}
+      topbarBack={topbarBack}>
+      <HomePage canchas={canchas} onVerUnidad={c => { setUnidadActiva(c); setScreen("unidad"); setSidebarOpen(false); setTopbarBack(null); }} />
       <Modals modal={modal} setModal={setModal} onLogin={handleLogin} showToast={showToast} />
     </PublicLayout>
   );
@@ -186,7 +194,7 @@ function Modals({ modal, setModal, onLogin, showToast }) {
 // ─────────────────────────────────────────────────────────────────
 // DASHBOARD LAYOUT (con navegación lateral funcional)
 // ─────────────────────────────────────────────────────────────────
-function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, showToast, onHome, initials, seccionInicial }) {
+function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, showToast, onHome, initials, seccionInicial, topbarBack, setTopbarBack }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const rol = userRole?.rol;
   const roleInfo = ROLES_INFO[rol] || { label:"Usuario", icon:"👤", color:"#666" };
@@ -202,8 +210,8 @@ function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, show
       if (activeSection === "solicitudes") return <Solicitudes session={session} />;
       return <SuperAdmin session={session} seccionInicial={SUPER_MAP[activeSection] || "stats"} />;
     }
-    if (rol === "league_admin") return <LeagueAdmin session={session} userRole={userRole} seccionInicial={LEAGUE_MAP[activeSection] || "equipos"} />;
-    if (rol === "referee") return <Referee session={session} />;
+    if (rol === "league_admin") return <LeagueAdmin session={session} userRole={userRole} seccionInicial={LEAGUE_MAP[activeSection] || "equipos"} setTopbarBack={setTopbarBack} />;
+    if (rol === "referee") return <Referee session={session} setTopbarBack={setTopbarBack} />;
     if (rol === "player") return <PlayerProfile session={session} seccionInicial={PLAYER_MAP[activeSection] || "perfil"} />;
     return null;
   };
@@ -221,6 +229,7 @@ function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, show
             <div style={s.brandIcon}><BallIcon /></div>
             <span style={s.brandName}>IFútbol</span>
           </div>
+          {topbarBack && <TopbarBackBtn back={topbarBack} />}
         </div>
         <div style={s.topRight}>
           <div style={{ ...s.pill, background:"rgba(255,255,255,0.18)", color:"#fff", border:"1px solid rgba(255,255,255,0.35)" }}>
@@ -276,7 +285,16 @@ function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, show
 // ─────────────────────────────────────────────────────────────────
 // PUBLIC LAYOUT
 // ─────────────────────────────────────────────────────────────────
-function PublicLayout({ children, session, userRole, sidebarOpen, setSidebarOpen, setModal, onLogout, initials, toast, onHome, onDashboard }) {
+function TopbarBackBtn({ back }) {
+  return (
+    <button onClick={back.onClick} title={back.label}
+      style={{ background:"rgba(255,255,255,0.18)", border:"1px solid rgba(255,255,255,0.35)", color:"#fff", borderRadius:8, padding:"6px 12px", fontSize:13, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", gap:6, whiteSpace:"nowrap", maxWidth:220, overflow:"hidden", textOverflow:"ellipsis" }}>
+      ← <span style={{ overflow:"hidden", textOverflow:"ellipsis" }}>{back.label}</span>
+    </button>
+  );
+}
+
+function PublicLayout({ children, session, userRole, sidebarOpen, setSidebarOpen, setModal, onLogout, initials, toast, onHome, onDashboard, topbarBack }) {
   const roleInfo = ROLES_INFO[userRole?.rol] || null;
   return (
     <div style={s.root}>
@@ -290,6 +308,7 @@ function PublicLayout({ children, session, userRole, sidebarOpen, setSidebarOpen
             <div style={{ ...s.brandIcon, background:"rgba(255,255,255,0.2)", border:"1.5px solid rgba(255,255,255,0.35)" }}><BallIcon /></div>
             <span style={{ ...s.brandName, color:"white" }}>IFútbol</span>
           </div>
+          {topbarBack && <TopbarBackBtn back={topbarBack} />}
         </div>
         <div style={s.topRight}>
           {roleInfo && <div style={{ ...s.pill, background:"rgba(255,255,255,0.18)", color:"white", border:"1px solid rgba(255,255,255,0.3)" }}>{roleInfo.icon} {roleInfo.label}</div>}
@@ -316,9 +335,11 @@ function PublicLayout({ children, session, userRole, sidebarOpen, setSidebarOpen
             {userRole?.rol === "player" ? <>
               <button className="sb-btn" onClick={() => { onDashboard("perfil"); setSidebarOpen(false); }}>⚽ Mi Perfil</button>
               <button className="sb-btn" onClick={() => { onDashboard("ligas"); setSidebarOpen(false); }}>🏆 Mis Ligas</button>
-            </> : (
-              <button className="sb-btn" onClick={() => { onDashboard(); setSidebarOpen(false); }}>📊 Mi panel</button>
-            )}
+            </> : (MENU[userRole?.rol] || []).map(item => (
+              <button key={item.key} className="sb-btn" onClick={() => { onDashboard(item.key); setSidebarOpen(false); }}>
+                {item.icon} {item.label}
+              </button>
+            ))}
             <div style={{ flex:1 }} />
             <button className="sb-btn danger" onClick={() => { onLogout(); setSidebarOpen(false); }}>🚪 Cerrar sesión</button>
           </>}
@@ -340,6 +361,84 @@ function PublicLayout({ children, session, userRole, sidebarOpen, setSidebarOpen
 }
 
 // ─────────────────────────────────────────────────────────────────
+// UNIDAD CARD (tarjeta de la unidad en HomePage)
+// ─────────────────────────────────────────────────────────────────
+const TAMANO_LOGO_PX = { pequeno: 56, mediano: 72, grande: 96 };
+const INTENSIDAD_FONDO_CFG = {
+  claro:  { blur: 6,  brightness: 0.75, alphaTop: 0.05, alphaBot: 0.35 },
+  medio:  { blur: 10, brightness: 0.55, alphaTop: 0.15, alphaBot: 0.55 },
+  oscuro: { blur: 14, brightness: 0.35, alphaTop: 0.30, alphaBot: 0.75 },
+};
+
+// Hex → rgb para usar opacidades del color de marca sin perder cuerpo
+function hexToRgb(hex) {
+  const h = (hex || "#4f8f2f").replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+// Aclara un color mezclándolo con blanco (pct: 0=igual, 1=blanco)
+function lightenHex(hex, pct) {
+  const [r, g, b] = hexToRgb(hex);
+  const mix = (c) => Math.round(c + (255 - c) * pct);
+  return "#" + [mix(r), mix(g), mix(b)].map(n => n.toString(16).padStart(2, "0")).join("");
+}
+
+function UnidadCard({ c, onClick }) {
+  const estilo  = c.estilo_tarjeta || "logo_arriba";
+  const color   = c.color_marca || "#4f8f2f";
+  const tamano  = TAMANO_LOGO_PX[c.tamano_logo] || TAMANO_LOGO_PX.mediano;
+  const radius  = c.forma_logo === "circulo" ? "50%" : 14;
+  const fondoSrc = estilo === "fondo_esquina" ? (c.portada_url || c.logo_url) : null;
+  const fondo    = !!fondoSrc;
+  const intCfg   = INTENSIDAD_FONDO_CFG[c.intensidad_fondo] || INTENSIDAD_FONDO_CFG.medio;
+  const [r, g, b] = hexToRgb(color);
+  const colorBg10 = `rgba(${r},${g},${b},0.12)`;
+
+  // ── Variante FONDO + ESQUINA ──
+  if (fondo) {
+    return (
+      <div className="ud-card" onClick={onClick} style={{ position:"relative", overflow:"hidden", borderTop:`3px solid ${color}` }}>
+        <div style={{ position:"absolute", inset:0, backgroundImage:`url(${fondoSrc})`, backgroundSize:"cover", backgroundPosition:"center", filter:`blur(${intCfg.blur}px) brightness(${intCfg.brightness})`, transform:"scale(1.1)", zIndex:0 }} />
+        <div style={{ position:"absolute", inset:0, background:`linear-gradient(180deg, rgba(0,0,0,${intCfg.alphaTop}) 0%, rgba(0,0,0,${intCfg.alphaBot}) 100%)`, zIndex:0 }} />
+        {c.logo_url && (
+          <div style={{ position:"absolute", top:12, right:12, width:48, height:48, borderRadius: c.forma_logo === "circulo" ? "50%" : 10, overflow:"hidden", boxShadow:"0 2px 8px rgba(0,0,0,0.4)", background:"#fff", zIndex:1, display:"flex", alignItems:"center", justifyContent:"center" }}>
+            <img src={c.logo_url} alt={c.nombre} style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+          </div>
+        )}
+        <div style={{ position:"relative", zIndex:1, marginTop: 60 }}>
+          <div style={{ fontSize:16, fontWeight:800, color:"#fff", marginBottom:3, textShadow:"0 1px 3px rgba(0,0,0,0.6)" }}>{c.nombre}</div>
+          {c.lema && <div style={{ fontSize:12, color:"rgba(255,255,255,0.92)", fontStyle:"italic", marginBottom:6, textShadow:"0 1px 2px rgba(0,0,0,0.5)" }}>{c.lema}</div>}
+          <div style={{ fontSize:13, color:"rgba(255,255,255,0.85)", marginBottom:14, textShadow:"0 1px 2px rgba(0,0,0,0.5)" }}>{c.direccion || "Ver torneos →"}</div>
+          <div style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:12, color:"#fff", fontWeight:700, background:"rgba(255,255,255,0.18)", padding:"3px 10px", borderRadius:99, backdropFilter:"blur(4px)" }}>⚽ {c.num_canchas} {c.num_canchas===1?"cancha":"canchas"}</div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Variante LOGO ARRIBA (con portada opcional como banner) ──
+  const conPortada = !!c.portada_url;
+  return (
+    <div className="ud-card" onClick={onClick} style={{ position:"relative", overflow:"hidden", borderTop:`3px solid ${color}`, padding: conPortada ? 0 : undefined }}>
+      {conPortada && (
+        <div style={{ height:90, backgroundImage:`url(${c.portada_url})`, backgroundSize:"cover", backgroundPosition:"center" }} />
+      )}
+      <div style={{ padding: conPortada ? "0 18px 18px" : 0 }}>
+        <div style={{ width: tamano, height: tamano, borderRadius: radius, background: c.logo_url ? "#fff" : colorBg10, display:"flex", alignItems:"center", justifyContent:"center", fontSize: Math.round(tamano*0.45), marginBottom:14, marginTop: conPortada ? -tamano/2 : 0, overflow:"hidden", boxShadow: conPortada ? "0 4px 12px rgba(0,0,0,0.15)" : "none", border: conPortada ? "3px solid #fff" : "none" }}>
+          {c.logo_url
+            ? <img src={c.logo_url} alt={c.nombre} style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+            : "🏟️"}
+        </div>
+        <div style={{ fontSize:16, fontWeight:800, color:"var(--text)", marginBottom: c.lema ? 3 : 5 }}>{c.nombre}</div>
+        {c.lema && <div style={{ fontSize:12, color: color, fontStyle:"italic", fontWeight:600, marginBottom:6 }}>{c.lema}</div>}
+        <div style={{ fontSize:13, color:"var(--text-sub)", marginBottom:14 }}>{c.direccion || "Ver torneos →"}</div>
+        <div style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:12, color: color, fontWeight:700, background: colorBg10, padding:"3px 10px", borderRadius:99 }}>⚽ {c.num_canchas} {c.num_canchas===1?"cancha":"canchas"}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
 // HOME PAGE
 // ─────────────────────────────────────────────────────────────────
 function HomePage({ canchas, onVerUnidad }) {
@@ -351,14 +450,7 @@ function HomePage({ canchas, onVerUnidad }) {
         <p style={{ color:"rgba(255,255,255,0.78)", fontSize:14, margin:0 }}>Selecciona una unidad para ver sus torneos y estadísticas</p>
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(220px, 1fr))", gap:16 }}>
-        {canchas.map(c => (
-          <div key={c.id} className="ud-card" onClick={() => onVerUnidad(c)}>
-            <div style={{ width:44, height:44, borderRadius:12, background:"var(--green-light)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, marginBottom:14 }}>🏟️</div>
-            <div style={{ fontSize:16, fontWeight:800, color:"var(--text)", marginBottom:5 }}>{c.nombre}</div>
-            <div style={{ fontSize:13, color:"var(--text-sub)", marginBottom:14 }}>{c.direccion || "Ver torneos →"}</div>
-            <div style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:12, color:"var(--green)", fontWeight:700, background:"var(--green-light)", padding:"3px 10px", borderRadius:99 }}>⚽ {c.num_canchas} {c.num_canchas===1?"cancha":"canchas"}</div>
-          </div>
-        ))}
+        {canchas.map(c => <UnidadCard key={c.id} c={c} onClick={() => onVerUnidad(c)} />)}
         <div style={{ background:"white", borderRadius:"var(--radius-md)", padding:20, boxShadow:"var(--shadow-md)", border:"1px solid var(--border)", minHeight:180, display:"flex", flexDirection:"column" }}>
           <div style={{ fontSize:11, fontWeight:700, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:1, marginBottom:12 }}>Publicidad</div>
           <div style={{ flex:1, background:"var(--bg)", borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", color:"var(--text-muted)", fontSize:13, padding:20, textAlign:"center" }}>
@@ -379,7 +471,7 @@ function HomePage({ canchas, onVerUnidad }) {
 // ─────────────────────────────────────────────────────────────────
 // UNIDAD PAGE
 // ─────────────────────────────────────────────────────────────────
-function UnidadPage({ cancha, onBack }) {
+function UnidadPage({ cancha, onBack, setTopbarBack }) {
   const [torneos, setTorneos] = useState([]);
   const [torneoActivo, setTorneoActivo] = useState(null);
   const [seccion, setSeccion] = useState("partidos");
@@ -397,6 +489,17 @@ function UnidadPage({ cancha, onBack }) {
       setLoading(false);
     });
   }, [cancha.id]);
+
+  // Sincroniza el botón "← back" del topbar con el estado actual
+  useEffect(() => {
+    if (!setTopbarBack) return;
+    if (torneoActivo) {
+      setTopbarBack({ label: cancha.nombre, onClick: () => setTorneoActivo(null) });
+    } else {
+      setTopbarBack({ label: "Inicio", onClick: onBack });
+    }
+    return () => setTopbarBack(null);
+  }, [torneoActivo, cancha.nombre, onBack, setTopbarBack]);
 
   const cargarDatos = async (ligaId) => {
     setLoading(true);
@@ -455,13 +558,22 @@ function UnidadPage({ cancha, onBack }) {
 
   // Vista: selección de torneo (cards)
   if (!torneoActivo) {
+    const colorMarca = cancha.color_marca || "#4f8f2f";
+    const radiusLogo = cancha.forma_logo === "circulo" ? "50%" : 16;
     return (
       <div className="animate-in">
-        <button className="btn btn-ghost" style={{ fontSize:13, padding:"7px 16px", marginBottom:20 }} onClick={onBack}>← Volver</button>
-        <div style={{ display:"flex", alignItems:"center", gap:18, marginBottom:24 }}>
-          <div style={{ fontSize:40, width:68, height:68, background:"var(--green-light)", borderRadius:16, display:"flex", alignItems:"center", justifyContent:"center" }}>🏟️</div>
+        {cancha.portada_url && (
+          <div style={{ height:140, borderRadius:"var(--radius-lg)", marginBottom: cancha.logo_url ? 0 : 20, backgroundImage:`url(${cancha.portada_url})`, backgroundSize:"cover", backgroundPosition:"center", boxShadow:"0 4px 16px rgba(0,0,0,0.12)" }} />
+        )}
+        <div style={{ display:"flex", alignItems:"center", gap:18, marginBottom:24, marginTop: cancha.portada_url ? -34 : 0, paddingLeft: cancha.portada_url ? 18 : 0 }}>
+          <div style={{ fontSize:40, width:68, height:68, background: cancha.logo_url ? "#fff" : `${colorMarca}22`, borderRadius: radiusLogo, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", border: cancha.portada_url ? "3px solid #fff" : "none", boxShadow: cancha.portada_url ? "0 4px 12px rgba(0,0,0,0.2)" : "none", flexShrink:0 }}>
+            {cancha.logo_url
+              ? <img src={cancha.logo_url} alt={cancha.nombre} style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+              : "🏟️"}
+          </div>
           <div>
-            <h1 style={{ fontSize:26, fontWeight:900, color:"var(--text)", letterSpacing:-0.8, marginBottom:4 }}>{cancha.nombre}</h1>
+            <h1 style={{ fontSize:26, fontWeight:900, color:"var(--text)", letterSpacing:-0.8, marginBottom: cancha.lema ? 2 : 4 }}>{cancha.nombre}</h1>
+            {cancha.lema && <div style={{ fontSize:13, color: colorMarca, fontStyle:"italic", fontWeight:600, marginBottom:4 }}>{cancha.lema}</div>}
             <p style={{ color:"var(--text-muted)", fontSize:14, margin:0 }}>{cancha.direccion} · {cancha.num_canchas} {cancha.num_canchas===1?"cancha":"canchas"}</p>
           </div>
         </div>
@@ -489,13 +601,15 @@ function UnidadPage({ cancha, onBack }) {
   }
 
   // Vista: estadísticas del torneo seleccionado
+  const torneoColor = torneoActivo.color_marca || "#4f8f2f";
+  const torneoColorClaro = lightenHex(torneoColor, 0.35);
+  const torneoRgb = hexToRgb(torneoColor);
   return (
     <div className="animate-in">
-      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:20 }}>
-        <button className="btn btn-ghost" style={{ fontSize:13, padding:"7px 16px" }} onClick={() => setTorneoActivo(null)}>← {cancha.nombre}</button>
+      <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:14 }}>
         <button className="btn btn-ghost" style={{ fontSize:13, padding:"7px 14px" }} onClick={() => cargarDatos(torneoActivo.id)} title="Actualizar datos">🔄 Actualizar</button>
       </div>
-      <div style={{ background:"linear-gradient(135deg,#4f8f2f 0%,#7fbf4d 100%)", borderRadius:18, padding:"22px 28px", marginBottom:24, boxShadow:"0 4px 16px rgba(79,143,47,0.35)", display:"flex", alignItems:"center", justifyContent:"space-between", gap:16 }}>
+      <div style={{ background:`linear-gradient(135deg,${torneoColor} 0%,${torneoColorClaro} 100%)`, borderRadius:18, padding:"22px 28px", marginBottom:24, boxShadow:`0 4px 16px rgba(${torneoRgb[0]},${torneoRgb[1]},${torneoRgb[2]},0.35)`, display:"flex", alignItems:"center", justifyContent:"space-between", gap:16 }}>
         <div style={{ display:"flex", alignItems:"center", gap:16 }}>
           <div style={{ fontSize:38, width:62, height:62, background:"rgba(255,255,255,0.18)", borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>🏆</div>
           <div>
