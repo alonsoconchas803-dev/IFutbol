@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import "./ifutbol.css";
 import SuperAdmin from "./pages/SuperAdmin";
 import LeagueAdmin from "./pages/LeagueAdmin";
@@ -6,9 +6,14 @@ import Referee from "./pages/Referee";
 import PlayerProfile from "./pages/PlayerProfile";
 import Solicitudes from "./pages/Solicitudes";
 import JerseySVG from "./components/JerseySVG";
+import IFutbolLogo from "./components/IFutbolLogo";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
+
+// Capitaliza la primera letra de cada palabra (respeta tildes y ñ; soporta guión)
+export const toTitleCase = (s) =>
+  String(s || "").replace(/(^|[\s\-])(\p{Ll})/gu, (_, sep, c) => sep + c.toUpperCase());
 
 const api = async (path, options = {}) => {
   const res = await fetch(`${SUPABASE_URL}${path}`, {
@@ -47,7 +52,7 @@ const ROLES_INFO = {
   super_admin:  { label: "Super Admin",   icon: "👑", color: "#4f8f2f" },
   league_admin: { label: "Admin de Unidad", icon: "🏟️", color: "#3b82f6" },
   referee:      { label: "Árbitro",       icon: "🟡", color: "#f59e0b" },
-  player:       { label: "Jugador",       icon: "⚽", color: "#8b5cf6" },
+  player:       { label: "Jugador",       icon: "🏃", color: "#8b5cf6" },
 };
 
 const MENU = {
@@ -55,7 +60,8 @@ const MENU = {
     { icon:"👑", label:"Panel Admin",         key:"panel" },
     { icon:"🏟️", label:"Unidades Deportivas", key:"canchas" },
     { icon:"🏆", label:"Torneos",             key:"torneos" },
-    { icon:"📋", label:"Solicitudes",         key:"solicitudes" },
+    { icon:"📋", label:"Resultados",          key:"resultados" },
+    { icon:"📨", label:"Solicitudes",         key:"solicitudes" },
   ],
   league_admin: [
     { icon:"👕", label:"Equipos",    key:"equipos" },
@@ -63,13 +69,15 @@ const MENU = {
     { icon:"📅", label:"Calendario", key:"calendario" },
     { icon:"🟡", label:"Árbitros",   key:"arbitros" },
     { icon:"📄", label:"Fichas",     key:"fichas" },
+    { icon:"📋", label:"Resultados", key:"resultados" },
   ],
   referee: [
     { icon:"🟡", label:"Mis Partidos", key:"partidos" },
   ],
   player: [
-    { icon:"⚽", label:"Mi Perfil",  key:"perfil" },
-    { icon:"🏆", label:"Mis Ligas",  key:"ligas" },
+    { icon:"🏃", label:"Mi Perfil",        key:"perfil" },
+    { icon:"🏆", label:"Mis Torneos",      key:"ligas" },
+    { icon:"📊", label:"Mis Estadísticas", key:"estadisticas" },
   ],
 };
 
@@ -195,15 +203,15 @@ function Modals({ modal, setModal, onLogin, showToast }) {
 // DASHBOARD LAYOUT (con navegación lateral funcional)
 // ─────────────────────────────────────────────────────────────────
 function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, showToast, onHome, initials, seccionInicial, topbarBack, setTopbarBack }) {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const rol = userRole?.rol;
   const roleInfo = ROLES_INFO[rol] || { label:"Usuario", icon:"👤", color:"#666" };
   const menuItems = MENU[rol] || [];
   const [activeSection, setActiveSection] = useState(seccionInicial || menuItems[0]?.key || "panel");
 
-  const SUPER_MAP  = { panel:"stats", canchas:"canchas", torneos:"ligas", solicitudes:"solicitudes" };
-  const LEAGUE_MAP = { equipos:"equipos", jugadores:"jugadores", calendario:"calendario", arbitros:"arbitros", fichas:"fichas" };
-  const PLAYER_MAP = { perfil:"perfil", ligas:"ligas" };
+  const SUPER_MAP  = { panel:"stats", canchas:"canchas", torneos:"ligas", solicitudes:"solicitudes", resultados:"resultados" };
+  const LEAGUE_MAP = { equipos:"equipos", jugadores:"jugadores", calendario:"calendario", arbitros:"arbitros", fichas:"fichas", resultados:"resultados" };
+  const PLAYER_MAP = { perfil:"perfil", ligas:"ligas", estadisticas:"estadisticas" };
 
   const renderContent = () => {
     if (rol === "super_admin") {
@@ -216,6 +224,8 @@ function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, show
     return null;
   };
 
+  const goTo = (key) => { setActiveSection(key); setDrawerOpen(false); };
+
   return (
     <div style={{ display:"flex", flexDirection:"column", minHeight:"100vh", background:"var(--bg)" }}>
       <style>{css}</style>
@@ -224,60 +234,63 @@ function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, show
       {/* TOPBAR */}
       <header style={s.topbar}>
         <div style={s.topLeft}>
-          <button className="ham-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>☰</button>
+          <button className="ham-btn" onClick={() => setDrawerOpen(true)} aria-label="Abrir menú">☰</button>
           <div style={s.brand} onClick={onHome} className="clickable">
-            <div style={s.brandIcon}><BallIcon /></div>
-            <span style={s.brandName}>IFútbol</span>
+            <IFutbolLogo color="#FFFFFF" height={26} />
           </div>
-          {topbarBack && <TopbarBackBtn back={topbarBack} />}
         </div>
         <div style={s.topRight}>
-          <div style={{ ...s.pill, background:"rgba(255,255,255,0.18)", color:"#fff", border:"1px solid rgba(255,255,255,0.35)" }}>
-            {roleInfo.icon} {roleInfo.label}
-          </div>
+          {topbarBack && <TopbarBackBtn back={topbarBack} />}
         </div>
       </header>
 
-      <div style={{ display:"flex", flex:1 }}>
-        {/* SIDEBAR */}
-        <aside style={{ width:sidebarOpen?220:0, overflow:"hidden", transition:"width 0.25s ease", background:"white", borderRight:"1px solid var(--border)", display:"flex", flexDirection:"column", position:"sticky", top:60, height:"calc(100vh - 60px)", flexShrink:0 }}>
-          <nav style={{ flex:1, padding:"14px 10px", display:"flex", flexDirection:"column", gap:3 }}>
-            <div className="nav-item" onClick={onHome}>
-              <span style={{ fontSize:17, width:22, textAlign:"center", flexShrink:0 }}>🏠</span>
-              <span>Inicio</span>
-            </div>
-            {menuItems.map(({ icon, label, key }) => (
-              <div key={key}
-                className={`nav-item ${activeSection === key ? "nav-item-active" : ""}`}
-                onClick={() => setActiveSection(key)}>
-                <span style={{ fontSize:17, width:22, textAlign:"center", flexShrink:0 }}>{icon}</span>
-                <span>{label}</span>
-              </div>
-            ))}
-            <div style={{ flex:1 }} />
-            <div className="nav-item" style={{ color:"#ef4444" }} onClick={onLogout}>
-              <span style={{ fontSize:17, width:22, textAlign:"center", flexShrink:0 }}>🚪</span>
-              <span>Cerrar sesión</span>
-            </div>
-          </nav>
-          <div style={s.sbFooter}>
-            <Avatar initials={initials} size={36} />
-            <div style={{ overflow:"hidden" }}>
-              <div style={{ fontSize:12, fontWeight:700, color:"var(--text)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                {session?.user?.email?.split("@")[0]}
-              </div>
-              <div style={{ fontSize:11, color:"var(--text-muted)" }}>{roleInfo.label}</div>
-            </div>
-          </div>
-        </aside>
+      {/* OVERLAY del drawer */}
+      {drawerOpen && <div style={s.overlay} onClick={() => setDrawerOpen(false)} />}
 
-        {/* CONTENIDO */}
-        <main style={{ flex:1, overflow:"auto", padding:"32px 36px" }}>
-          <div style={{ maxWidth:960, margin:"0 auto" }} className="animate-in" key={activeSection}>
-            {renderContent()}
+      {/* DRAWER */}
+      <aside style={{ ...s.sidebar, transform: drawerOpen ? "translateX(0)" : "translateX(-110%)" }}>
+        {/* Header del drawer con avatar + usuario + rol */}
+        <div style={s.drawerHeader}>
+          <Avatar initials={initials} size={44} />
+          <div style={{ overflow:"hidden", flex:1 }}>
+            <div style={{ fontSize:14, fontWeight:700, color:"var(--text)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+              {session?.user?.email?.split("@")[0]}
+            </div>
+            <div style={{ fontSize:11, color:roleInfo.color, fontWeight:600, marginTop:2 }}>
+              {roleInfo.icon} {roleInfo.label}
+            </div>
           </div>
-        </main>
-      </div>
+          <button onClick={() => setDrawerOpen(false)} aria-label="Cerrar menú"
+            style={{ background:"var(--bg)", border:"1px solid var(--border)", borderRadius:8, width:32, height:32, cursor:"pointer", fontSize:16, color:"var(--text-sub)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✕</button>
+        </div>
+
+        <nav style={{ flex:1, padding:"10px 10px", display:"flex", flexDirection:"column", gap:3, overflowY:"auto" }}>
+          <div className="nav-item" onClick={() => { onHome(); setDrawerOpen(false); }}>
+            <span style={{ fontSize:17, width:22, textAlign:"center", flexShrink:0 }}>🏠</span>
+            <span>Inicio</span>
+          </div>
+          {menuItems.map(({ icon, label, key }) => (
+            <div key={key}
+              className={`nav-item ${activeSection === key ? "nav-item-active" : ""}`}
+              onClick={() => goTo(key)}>
+              <span style={{ fontSize:17, width:22, textAlign:"center", flexShrink:0 }}>{icon}</span>
+              <span>{label}</span>
+            </div>
+          ))}
+          <div style={{ flex:1 }} />
+          <div className="nav-item" style={{ color:"#ef4444" }} onClick={() => { onLogout(); setDrawerOpen(false); }}>
+            <span style={{ fontSize:17, width:22, textAlign:"center", flexShrink:0 }}>🚪</span>
+            <span>Cerrar sesión</span>
+          </div>
+        </nav>
+      </aside>
+
+      {/* CONTENIDO */}
+      <main style={s.main}>
+        <div className="animate-in" key={activeSection}>
+          {renderContent()}
+        </div>
+      </main>
     </div>
   );
 }
@@ -286,10 +299,13 @@ function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, show
 // PUBLIC LAYOUT
 // ─────────────────────────────────────────────────────────────────
 function TopbarBackBtn({ back }) {
+  // Solo flecha (SVG con stroke grueso, en línea con el logo iFutbol).
   return (
-    <button onClick={back.onClick} title={back.label}
-      style={{ background:"rgba(255,255,255,0.18)", border:"1px solid rgba(255,255,255,0.35)", color:"#fff", borderRadius:8, padding:"6px 12px", fontSize:13, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", gap:6, whiteSpace:"nowrap", maxWidth:220, overflow:"hidden", textOverflow:"ellipsis" }}>
-      ← <span style={{ overflow:"hidden", textOverflow:"ellipsis" }}>{back.label}</span>
+    <button onClick={back.onClick} title={back.label || "Volver"} aria-label={back.label || "Volver"}
+      style={{ background:"rgba(255,255,255,0.16)", border:"1px solid rgba(255,255,255,0.32)", color:"#fff", borderRadius:6, width:28, height:26, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", padding:0 }}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <polyline points="15 18 9 12 15 6"/>
+      </svg>
     </button>
   );
 }
@@ -305,14 +321,11 @@ function PublicLayout({ children, session, userRole, sidebarOpen, setSidebarOpen
         <div style={s.topLeft}>
           <button className="ham-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>☰</button>
           <div style={s.brand} onClick={onHome} className="clickable">
-            <div style={{ ...s.brandIcon, background:"rgba(255,255,255,0.2)", border:"1.5px solid rgba(255,255,255,0.35)" }}><BallIcon /></div>
-            <span style={{ ...s.brandName, color:"white" }}>IFútbol</span>
+            <IFutbolLogo color="#FFFFFF" height={26} />
           </div>
-          {topbarBack && <TopbarBackBtn back={topbarBack} />}
         </div>
         <div style={s.topRight}>
-          {roleInfo && <div style={{ ...s.pill, background:"rgba(255,255,255,0.18)", color:"white", border:"1px solid rgba(255,255,255,0.3)" }}>{roleInfo.icon} {roleInfo.label}</div>}
-          {session && <button className="btn btn-outline" style={{ fontSize:13, padding:"7px 16px", color:"white", borderColor:"rgba(255,255,255,0.55)", background:"rgba(255,255,255,0.12)" }} onClick={onDashboard}>Mi panel</button>}
+          {topbarBack && <TopbarBackBtn back={topbarBack} />}
         </div>
       </header>
 
@@ -320,10 +333,7 @@ function PublicLayout({ children, session, userRole, sidebarOpen, setSidebarOpen
 
       <aside style={{ ...s.sidebar, transform: sidebarOpen ? "translateX(0)" : "translateX(-110%)" }}>
         <div style={{ padding:"20px 16px 12px" }}>
-          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            <div style={s.brandIcon}><BallIcon /></div>
-            <span style={{ fontSize:16, fontWeight:800, color:"var(--text)" }}>IFútbol</span>
-          </div>
+          <IFutbolLogo color="#4f8f2f" height={24} />
         </div>
         <nav style={{ flex:1, padding:"8px 10px", display:"flex", flexDirection:"column", gap:3 }}>
           <button className="sb-btn" onClick={() => { onHome(); setSidebarOpen(false); }}>🏠 Inicio</button>
@@ -482,6 +492,7 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
   const [goleadores, setGoleadores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedCell, setSelectedCell] = useState(null); // [rowIdx, colIdx]
+  const [jornadaSel, setJornadaSel] = useState(null); // Jornada seleccionada en el tab "partidos"
 
   useEffect(() => {
     db(`/ligas?cancha_id=eq.${cancha.id}&activa=eq.true&select=*&order=nombre`).then(data => {
@@ -556,42 +567,135 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
   const seleccionarTorneo = t => { setTorneoActivo(t); setSeccion("partidos"); cargarDatos(t.id); };
   const tabs = [["partidos","📅 Partidos"],["tabla","📊 Tabla"],["goleadores","🥇 Goleadores"],["equipos","👕 Equipos"],["ofensiva","⚔️ Mejor ofensiva"],["defensiva","🛡️ Mejor defensiva"],["fairplay","🤝 Fair play"]];
 
+  // Click en tab: cambia sección y recarga datos.
+  const onTabClick = (key) => {
+    setSeccion(key);
+    if (torneoActivo) cargarDatos(torneoActivo.id);
+  };
+
+  // Partidos agrupados por jornada (ordenados por número de jornada)
+  const jornadasAgrupadas = useMemo(() => {
+    if (!calendario || calendario.length === 0) return [];
+    const porJornada = {};
+    calendario.forEach(p => {
+      const j = p.jornada;
+      if (!j) return;
+      if (!porJornada[j.id]) porJornada[j.id] = { jornada: j, partidos: [] };
+      porJornada[j.id].partidos.push(p);
+    });
+    return Object.values(porJornada).sort((a, b) => (a.jornada.numero || 0) - (b.jornada.numero || 0));
+  }, [calendario]);
+
+  // Jornada actual = primera con partidos no cerrados; si todas cerradas, la última.
+  const jornadaActual = useMemo(() => {
+    if (jornadasAgrupadas.length === 0) return null;
+    const pendiente = jornadasAgrupadas.find(({ partidos }) => partidos.some(p => !p.ficha_partido?.cerrada));
+    return (pendiente?.jornada || jornadasAgrupadas[jornadasAgrupadas.length - 1]?.jornada)?.numero ?? null;
+  }, [jornadasAgrupadas]);
+
+  // Sincroniza jornadaSel con jornadaActual cuando cambian los datos
+  // (siempre que el usuario no haya seleccionado manualmente una válida).
+  useEffect(() => {
+    if (jornadaActual == null) { setJornadaSel(null); return; }
+    const existeSel = jornadasAgrupadas.some(g => g.jornada.numero === jornadaSel);
+    if (!existeSel) setJornadaSel(jornadaActual);
+  }, [jornadaActual, jornadasAgrupadas, jornadaSel]);
+
   // Vista: selección de torneo (cards)
   if (!torneoActivo) {
     const colorMarca = cancha.color_marca || "#4f8f2f";
     const radiusLogo = cancha.forma_logo === "circulo" ? "50%" : 16;
     return (
       <div className="animate-in">
-        {cancha.portada_url && (
-          <div style={{ height:140, borderRadius:"var(--radius-lg)", marginBottom: cancha.logo_url ? 0 : 20, backgroundImage:`url(${cancha.portada_url})`, backgroundSize:"cover", backgroundPosition:"center", boxShadow:"0 4px 16px rgba(0,0,0,0.12)" }} />
+        {/*
+          Patrón "perfil con portada":
+          - Imagen como contenedor relativo.
+          - Logo absoluto, anclado a la esquina inferior izquierda, sobresaliendo de la imagen.
+          - Todo el texto (nombre, lema, dirección) queda DEBAJO de la imagen sobre fondo plano,
+            por lo que siempre es legible sin pelear con los colores de la portada.
+        */}
+        {cancha.portada_url ? (
+          /*
+            Portada con logo + card glassmorphism al lado.
+            Ambos viven sobre la imagen, anclados al borde inferior y sobresaliendo (-30px).
+            La card usa backdrop-filter blur para que se intuya la imagen detrás
+            pero el texto queda perfectamente legible.
+          */
+          <div style={{ position:"relative", height:140, borderRadius:"var(--radius-lg)", backgroundImage:`url(${cancha.portada_url})`, backgroundSize:"cover", backgroundPosition:"center", boxShadow:"0 4px 16px rgba(0,0,0,0.12)", marginBottom: 50 }}>
+            <div style={{ position:"absolute", left:12, right:12, bottom:-30, display:"flex", alignItems:"flex-end", gap:10 }}>
+              {/* Logo */}
+              <div style={{ width:75, height:75, background: cancha.logo_url ? "#fff" : `${colorMarca}22`, borderRadius: radiusLogo, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", border:"3px solid #fff", boxShadow:"0 4px 12px rgba(0,0,0,0.22)", fontSize:44, flexShrink:0 }}>
+                {cancha.logo_url
+                  ? <img src={cancha.logo_url} alt={cancha.nombre} style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+                  : "🏟️"}
+              </div>
+              {/* Card glassmorphism */}
+              <div style={{
+                flex:1, minWidth:0,
+                background:"rgba(255,255,255,0.62)",
+                backdropFilter:"blur(14px) saturate(160%)",
+                WebkitBackdropFilter:"blur(14px) saturate(160%)",
+                border:"1px solid rgba(255,255,255,0.7)",
+                borderLeft:`6px solid ${colorMarca}`,
+                borderRadius:"var(--radius-md)",
+                padding:"7px 10px",
+                boxShadow:"0 4px 14px rgba(0,0,0,0.18)",
+              }}>
+                <h1 style={{ fontSize:14, fontWeight:900, color:"#0f172a", letterSpacing:-0.3, margin:0, marginBottom: cancha.lema?1:2, lineHeight:1.1, wordBreak:"break-word" }}>{cancha.nombre}</h1>
+                {cancha.lema && <div style={{ fontSize:10, color:colorMarca, fontStyle:"italic", fontWeight:700, marginBottom:1, lineHeight:1.15 }}>{cancha.lema}</div>}
+                <p style={{ color:"#1f2937", fontSize:10.5, margin:0, fontWeight:500, lineHeight:1.2, display:"flex", alignItems:"flex-start", gap:3 }}>
+                  <span style={{ fontSize:10 }}>📍</span>
+                  <span style={{ overflow:"hidden", textOverflow:"ellipsis" }}>{cancha.direccion}</span>
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Sin portada: logo + card blanca normal en disposición horizontal */
+          <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20 }}>
+            <div style={{ fontSize:44, width:75, height:75, background: cancha.logo_url ? "#fff" : `${colorMarca}22`, borderRadius: radiusLogo, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", flexShrink:0 }}>
+              {cancha.logo_url
+                ? <img src={cancha.logo_url} alt={cancha.nombre} style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+                : "🏟️"}
+            </div>
+            <div style={{
+              flex:1, minWidth:0,
+              background:"#ffffff",
+              borderRadius:"var(--radius-md)",
+              padding:"8px 12px",
+              borderLeft:`6px solid ${colorMarca}`,
+              boxShadow:"var(--shadow-md)",
+            }}>
+              <h1 style={{ fontSize:15, fontWeight:900, color:"var(--text)", letterSpacing:-0.4, margin:0, marginBottom: cancha.lema?2:3, lineHeight:1.15 }}>{cancha.nombre}</h1>
+              {cancha.lema && <div style={{ fontSize:11, color:colorMarca, fontStyle:"italic", fontWeight:600, marginBottom:2 }}>{cancha.lema}</div>}
+              <p style={{ color:"var(--text-sub)", fontSize:11.5, margin:0, display:"flex", alignItems:"center", gap:4 }}>
+                <span style={{ fontSize:11, lineHeight:1 }}>📍</span>
+                <span>{cancha.direccion}</span>
+              </p>
+            </div>
+          </div>
         )}
-        <div style={{ display:"flex", alignItems:"center", gap:18, marginBottom:24, marginTop: cancha.portada_url ? -34 : 0, paddingLeft: cancha.portada_url ? 18 : 0 }}>
-          <div style={{ fontSize:40, width:68, height:68, background: cancha.logo_url ? "#fff" : `${colorMarca}22`, borderRadius: radiusLogo, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", border: cancha.portada_url ? "3px solid #fff" : "none", boxShadow: cancha.portada_url ? "0 4px 12px rgba(0,0,0,0.2)" : "none", flexShrink:0 }}>
-            {cancha.logo_url
-              ? <img src={cancha.logo_url} alt={cancha.nombre} style={{ width:"100%", height:"100%", objectFit:"contain" }} />
-              : "🏟️"}
-          </div>
-          <div>
-            <h1 style={{ fontSize:26, fontWeight:900, color:"var(--text)", letterSpacing:-0.8, marginBottom: cancha.lema ? 2 : 4 }}>{cancha.nombre}</h1>
-            {cancha.lema && <div style={{ fontSize:13, color: colorMarca, fontStyle:"italic", fontWeight:600, marginBottom:4 }}>{cancha.lema}</div>}
-            <p style={{ color:"var(--text-muted)", fontSize:14, margin:0 }}>{cancha.direccion} · {cancha.num_canchas} {cancha.num_canchas===1?"cancha":"canchas"}</p>
-          </div>
-        </div>
-        <div style={{ marginBottom:20, padding:"16px 22px", background:"var(--green)", borderRadius:"var(--radius-lg)", boxShadow:"0 4px 16px rgba(79,143,47,0.3)" }}>
-          <h2 style={{ fontSize:17, fontWeight:800, color:"white", margin:"0 0 4px" }}>Torneos activos</h2>
-          <p style={{ fontSize:13, color:"rgba(255,255,255,0.78)", margin:0 }}>Selecciona un torneo para ver sus estadísticas</p>
+        <div style={{ marginBottom:20, padding:"12px 18px", background:"var(--green)", borderRadius:"var(--radius-lg)", boxShadow:"0 4px 16px rgba(79,143,47,0.3)" }}>
+          <h2 style={{ fontSize:17, fontWeight:800, color:"white", margin:0 }}>Torneos</h2>
         </div>
         {loading ? <div style={{ padding:60, textAlign:"center" }}><div className="spinner"/></div> : (
           torneos.length === 0
             ? <EmptyState icon="🏆" txt="No hay torneos activos en esta unidad"/>
-            : <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(240px, 1fr))", gap:16 }}>
+            : <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                 {torneos.map(t => (
-                  <div key={t.id} className="ud-card" onClick={() => seleccionarTorneo(t)}>
-                    <div style={{ width:44, height:44, borderRadius:12, background:"var(--green-light)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, marginBottom:14 }}>🏆</div>
-                    <div style={{ fontSize:16, fontWeight:800, color:"var(--text)", marginBottom:6 }}>{t.nombre}</div>
-                    {(t.dia||t.turno) && <div style={{ fontSize:13, color:"var(--text-sub)", marginBottom:6 }}>{[t.dia, t.turno].filter(Boolean).join(" · ")}</div>}
-                    {t.temporada && <div style={{ fontSize:12, color:"var(--text-muted)", marginBottom:10 }}>Temporada {t.temporada}</div>}
-                    <div style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:12, color:"var(--green)", fontWeight:700, background:"var(--green-light)", padding:"3px 10px", borderRadius:99 }}>Ver estadísticas →</div>
+                  <div key={t.id} className="ud-card" onClick={() => seleccionarTorneo(t)}
+                       style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px" }}>
+                    <div style={{ width:40, height:40, borderRadius:10, background:"var(--green-light)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🏆</div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:14, fontWeight:800, color:"var(--text)", lineHeight:1.2, marginBottom:2, wordBreak:"break-word" }}>{t.nombre}</div>
+                      {(() => {
+                        const meta = [t.dia, t.turno, t.temporada ? `Temp. ${t.temporada}` : null].filter(Boolean).join(" · ");
+                        return meta ? <div style={{ fontSize:11.5, color:"var(--text-sub)", lineHeight:1.25 }}>{meta}</div> : null;
+                      })()}
+                    </div>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink:0 }}>
+                      <polyline points="9 6 15 12 9 18"/>
+                    </svg>
                   </div>
                 ))}
               </div>
@@ -606,153 +710,209 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
   const torneoRgb = hexToRgb(torneoColor);
   return (
     <div className="animate-in">
-      <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:14 }}>
-        <button className="btn btn-ghost" style={{ fontSize:13, padding:"7px 14px" }} onClick={() => cargarDatos(torneoActivo.id)} title="Actualizar datos">🔄 Actualizar</button>
-      </div>
-      <div style={{ background:`linear-gradient(135deg,${torneoColor} 0%,${torneoColorClaro} 100%)`, borderRadius:18, padding:"22px 28px", marginBottom:24, boxShadow:`0 4px 16px rgba(${torneoRgb[0]},${torneoRgb[1]},${torneoRgb[2]},0.35)`, display:"flex", alignItems:"center", justifyContent:"space-between", gap:16 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:16 }}>
-          <div style={{ fontSize:38, width:62, height:62, background:"rgba(255,255,255,0.18)", borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>🏆</div>
-          <div>
-            <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", fontWeight:700, textTransform:"uppercase", letterSpacing:0.6, marginBottom:3 }}>{cancha.nombre}</div>
-            <h1 style={{ fontSize:22, fontWeight:900, color:"#fff", letterSpacing:-0.5, margin:"0 0 4px" }}>{torneoActivo.nombre}</h1>
-            <p style={{ color:"rgba(255,255,255,0.75)", fontSize:13, margin:0 }}>{[torneoActivo.dia, torneoActivo.turno, torneoActivo.temporada ? `Temp. ${torneoActivo.temporada}` : null].filter(Boolean).join(" · ")}</p>
+      {/*
+        Tarjeta de torneo activo — 3 columnas en una fila:
+          [izq] nombre unidad + logo
+          [centro] nombre liga + día/turno/temp en líneas
+          [der] stats verticales (equipos + jornada actual)
+      */}
+      <div style={{ background:`linear-gradient(135deg,${torneoColor} 0%,${torneoColorClaro} 100%)`, borderRadius:14, padding:"14px 14px", marginBottom:18, boxShadow:`0 4px 16px rgba(${torneoRgb[0]},${torneoRgb[1]},${torneoRgb[2]},0.3)`, color:"#fff", display:"grid", gridTemplateColumns:"auto 1fr auto", gap:12, alignItems:"center" }}>
+        {/* Izquierda: nombre unidad + logo (centrados vertical y horizontalmente) */}
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6, minWidth:0 }}>
+          <div style={{ fontSize:10.5, fontWeight:800, textTransform:"uppercase", letterSpacing:0.7, lineHeight:1.15, textAlign:"center", maxWidth:78, wordBreak:"break-word", color:"rgba(255,255,255,0.95)" }}>
+            {cancha.nombre}
+          </div>
+          <div style={{ width:58, height:58, background: cancha.logo_url ? "#fff" : "rgba(255,255,255,0.18)", borderRadius: cancha.forma_logo === "circulo" ? "50%" : 12, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", fontSize:30, flexShrink:0 }}>
+            {cancha.logo_url
+              ? <img src={cancha.logo_url} alt="" style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+              : "🏟️"}
           </div>
         </div>
-        <div style={{ display:"flex", gap:24, flexShrink:0 }}>
-          {[[equipos.length,"equipos"],[calendario.length,"partidos"]].map(([n,l])=>(
-            <div key={l} style={{ textAlign:"center" }}>
-              <div style={{ fontSize:26, fontWeight:900, color:"#fff", lineHeight:1 }}>{n}</div>
-              <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:3 }}>{l}</div>
-            </div>
-          ))}
+
+        {/* Centro: nombre liga + meta en líneas separadas */}
+        <div style={{ minWidth:0 }}>
+          <h1 style={{ fontSize:16, fontWeight:900, color:"#fff", letterSpacing:-0.3, margin:"0 0 6px", lineHeight:1.15, wordBreak:"break-word" }}>
+            {torneoActivo.nombre}
+          </h1>
+          <div style={{ display:"flex", flexDirection:"column", gap:1, fontSize:11.5, color:"rgba(255,255,255,0.82)", lineHeight:1.3 }}>
+            {torneoActivo.dia && <div>{torneoActivo.dia}</div>}
+            {torneoActivo.turno && <div>{torneoActivo.turno}</div>}
+            {torneoActivo.temporada && <div>Temp. {torneoActivo.temporada}</div>}
+          </div>
+        </div>
+
+        {/* Derecha: stats verticales */}
+        <div style={{ display:"flex", flexDirection:"column", gap:8, flexShrink:0, paddingLeft:6, borderLeft:"1px solid rgba(255,255,255,0.22)", paddingTop:2, paddingBottom:2 }}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:20, fontWeight:900, color:"#fff", lineHeight:1 }}>{equipos.length}</div>
+            <div style={{ fontSize:9.5, color:"rgba(255,255,255,0.75)", marginTop:1, textTransform:"uppercase", letterSpacing:0.4 }}>equipos</div>
+          </div>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:20, fontWeight:900, color:"#fff", lineHeight:1 }}>{jornadaActual ?? "—"}</div>
+            <div style={{ fontSize:9.5, color:"rgba(255,255,255,0.75)", marginTop:1, textTransform:"uppercase", letterSpacing:0.4 }}>jornada</div>
+          </div>
         </div>
       </div>
-      <div className="ifutbol-tabs" style={{ overflowX:"auto" }}>
-        {tabs.map(([key,label])=><button key={key} className={`ifutbol-tab ${seccion===key?"active":""}`} onClick={()=>setSeccion(key)}>{label}</button>)}
+
+      <div className="ifutbol-tabs">
+        {tabs.map(([key,label])=><button key={key} className={`ifutbol-tab ${seccion===key?"active":""}`} onClick={()=>onTabClick(key)}>{label}</button>)}
       </div>
       {loading?<div style={{ padding:60, textAlign:"center" }}><div className="spinner"/></div>:<>
           {seccion==="tabla"&&(clasificacion.length===0?<EmptyState icon="📊" txt="No hay partidos jugados aún"/>:
-            <div style={{ background:"white", borderRadius:"var(--radius-md)", overflow:"hidden", boxShadow:"var(--shadow-md)" }}
-              onClick={e=>{ if(e.target===e.currentTarget||e.target.tagName==="DIV"&&e.target===e.currentTarget) setSelectedCell(null); }}>
-              <table className="ifutbol-table" style={{ userSelect:"none" }}>
-                <thead><tr>
-                  {["#","Equipo","PJ","G","E","D","GF","GC","DIF","PTS"].map((h,ci)=>(
-                    <th key={h} style={{ textAlign: ci<=1?"left":"center",
-                      background: selectedCell&&selectedCell[1]===ci ? "rgba(0,0,0,0.18)" : undefined,
-                      transition:"background 0.15s" }}>
-                      {h}
-                    </th>
-                  ))}
-                </tr></thead>
-                <tbody>{clasificacion.map((r,ri)=>{
-                  const cells = [
-                    <td key={0} style={{ background: selectedCell&&(selectedCell[0]===ri||selectedCell[1]===0) ? selectedCell[0]===ri&&selectedCell[1]===0?"rgba(79,143,47,0.2)":"rgba(79,143,47,0.07)" : undefined, transition:"background 0.15s", cursor:"pointer" }} onClick={()=>setSelectedCell(selectedCell&&selectedCell[0]===ri&&selectedCell[1]===0?null:[ri,0])}>
-                      <span className="rank-badge" style={{ background:ri===0?"#FFD700":ri===1?"#C0C0C0":ri===2?"#CD7F32":"#f3f4f6",color:ri<3?"#111":"#777" }}>{ri+1}</span>
-                    </td>,
-                    <td key={1} style={{ background: selectedCell&&(selectedCell[0]===ri||selectedCell[1]===1) ? selectedCell[0]===ri&&selectedCell[1]===1?"rgba(79,143,47,0.2)":"rgba(79,143,47,0.07)" : undefined, transition:"background 0.15s", cursor:"pointer" }} onClick={()=>setSelectedCell(selectedCell&&selectedCell[0]===ri&&selectedCell[1]===1?null:[ri,1])}>
-                      <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-                        {r.equipo.escudo_url?<img src={r.equipo.escudo_url} style={{ width:28,height:28,borderRadius:6,objectFit:"cover" }} alt=""/>:<div style={{ width:12,height:12,borderRadius:"50%",background:r.equipo.color_playera||"#999" }}/>}
-                        <span style={{ fontWeight:600 }}>{r.equipo.nombre}</span>
-                      </div>
-                    </td>,
-                    ...[
-                      [r.pj,{}],
-                      [r.g,{color:"#16a34a",fontWeight:700}],
-                      [r.e,{color:"#ca8a04",fontWeight:700}],
-                      [r.d,{color:"#dc2626",fontWeight:700}],
-                      [r.gf,{}],
-                      [r.gc,{}],
-                      [r.gf-r.gc>0?`+${r.gf-r.gc}`:r.gf-r.gc,{color:(r.gf-r.gc)>0?"#16a34a":(r.gf-r.gc)<0?"#dc2626":"#666"}],
-                      [r.pts,{fontWeight:800,fontSize:17,color:r.equipo.color_playera||"var(--green)"}],
-                    ].map(([val,style],idx)=>{
-                      const ci=idx+2;
-                      const isRow=selectedCell&&selectedCell[0]===ri;
-                      const isCol=selectedCell&&selectedCell[1]===ci;
-                      const isBoth=isRow&&isCol;
-                      return(
-                        <td key={ci} style={{ textAlign:"center", ...style,
-                          background: isBoth?"rgba(79,143,47,0.22)":isRow||isCol?"rgba(79,143,47,0.07)":undefined,
-                          transition:"background 0.15s", cursor:"pointer" }}
-                          onClick={()=>setSelectedCell(isBoth?null:[ri,ci])}>
-                          {val}
-                        </td>
-                      );
-                    }),
-                  ];
-                  return <tr key={r.equipo.id}>{cells}</tr>;
-                })}</tbody>
-              </table>
-            </div>
-          )}
-          {seccion==="partidos"&&(calendario.length===0?<EmptyState icon="📅" txt="No hay partidos programados aún"/>:
-            <div style={{ display:"flex",flexDirection:"column",gap:16 }}>
-              {Object.values(calendario.reduce((acc,p)=>{
-                const jId=p.jornada_id;
-                if(!acc[jId]) acc[jId]={jornada:p.jornada,ps:[]};
-                acc[jId].ps.push(p);
-                return acc;
-              },{})).sort((a,b)=>(a.jornada?.numero||0)-(b.jornada?.numero||0))
-              .map(({jornada,ps})=>(
-                <div key={jornada?.id||Math.random()} style={{ background:"white",borderRadius:"var(--radius-md)",overflow:"hidden",boxShadow:"var(--shadow-sm)",border:"1px solid var(--border)" }}>
-                  <div style={{ background:"var(--surface-soft,#f9fafb)",padding:"10px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid var(--border)" }}>
-                    <span style={{ fontWeight:700,fontSize:13 }}>Jornada {jornada?.numero}</span>
-                    <span style={{ fontSize:12,color:"var(--text-muted)" }}>{jornada?.fecha||"Fecha por definir"}</span>
-                  </div>
-                  <div style={{ padding:"10px 14px",display:"flex",flexDirection:"column",gap:8 }}>
-                    {ps.map(p=>{
-                      const fichaOk=p.ficha_partido?.cerrada;
-                      const f=fichaOk?p.ficha_partido:null;
-                      return(
-                        <div key={p.id} style={{ padding:"12px 14px",background:"#f9fafb",borderRadius:10,border:"1px solid var(--border)" }}>
-                          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:4 }}>
-                            {/* Equipo local */}
-                            <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:4,flex:1,minWidth:0 }}>
-                              <JerseySVG
-                                diseno={p.equipos_local?.diseno_camiseta||"solido"}
-                                color1={p.equipos_local?.color_playera||"#999"}
-                                color2={p.equipos_local?.color_camiseta_2||"#fff"}
-                                escudoUrl={p.equipos_local?.escudo_url||null}
-                                size={44}
-                              />
-                              <span style={{ fontWeight:700,fontSize:13,textAlign:"center",lineHeight:1.2 }}>{p.equipos_local?.nombre}</span>
-                            </div>
-
-                            {/* Marcador o VS */}
-                            <div style={{ textAlign:"center",padding:"0 8px",flexShrink:0 }}>
-                              {f?(
-                                <div style={{ fontSize:24,fontWeight:900,lineHeight:1 }}>
-                                  <span style={{ color:f.goles_local>f.goles_visitante?"#16a34a":"var(--text)" }}>{f.goles_local}</span>
-                                  <span style={{ color:"#d1d5db",fontSize:18,margin:"0 4px" }}>-</span>
-                                  <span style={{ color:f.goles_visitante>f.goles_local?"#16a34a":"var(--text)" }}>{f.goles_visitante}</span>
-                                </div>
-                              ):(
-                                <span style={{ fontSize:12,color:"var(--text-muted)",fontWeight:800,letterSpacing:1 }}>VS</span>
-                              )}
-                              <div style={{ fontSize:10,color:"var(--text-muted)",marginTop:4,whiteSpace:"nowrap" }}>
-                                ⏰ {p.hora||"—"} · Campo {p.cancha_numero||"—"}
-                              </div>
-                              {fichaOk&&<div style={{ fontSize:10,color:"var(--green)",fontWeight:700,marginTop:2 }}>✓ Jugado</div>}
-                            </div>
-
-                            {/* Equipo visitante */}
-                            <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:4,flex:1,minWidth:0 }}>
-                              <JerseySVG
-                                diseno={p.equipos_visitante?.diseno_camiseta||"solido"}
-                                color1={p.equipos_visitante?.color_playera||"#999"}
-                                color2={p.equipos_visitante?.color_camiseta_2||"#fff"}
-                                escudoUrl={p.equipos_visitante?.escudo_url||null}
-                                size={44}
-                              />
-                              <span style={{ fontWeight:700,fontSize:13,textAlign:"center",lineHeight:1.2 }}>{p.equipos_visitante?.nombre}</span>
-                            </div>
-                          </div>
-                        </div>
+            <>
+              {/* Hint sutil — sólo si la tabla excede el ancho del marco */}
+              <div style={{ fontSize:9, color:"#bcc1c6", textAlign:"center", marginBottom:6, letterSpacing:0.3, fontWeight:500 }}>
+                ← desliza para ver más estadísticas →
+              </div>
+              <div style={{ background:"white", borderRadius:"var(--radius-md)", overflowX:"auto", overflowY:"hidden", boxShadow:"var(--shadow-md)", WebkitOverflowScrolling:"touch" }}
+                onClick={e=>{ if(e.target===e.currentTarget||e.target.tagName==="DIV"&&e.target===e.currentTarget) setSelectedCell(null); }}>
+                <table className="ifutbol-table" style={{ userSelect:"none", minWidth:440 }}>
+                  <thead><tr>
+                    {["#","Equipo","PJ","G","E","D","GF","GC","DIF","PTS"].map((h,ci)=>{
+                      const pin = ci===0?"pin-rank":ci===1?"pin-equipo":ci===9?"pin-pts":undefined;
+                      const selBg = selectedCell&&selectedCell[1]===ci ? "rgba(0,0,0,0.18)" : undefined;
+                      return (
+                        <th key={h} className={pin} style={{ textAlign: ci<=1?"left":"center",
+                          background: selBg || (pin?"#4f8f2f":undefined),
+                          transition:"background 0.15s" }}>
+                          {h}
+                        </th>
                       );
                     })}
+                  </tr></thead>
+                  <tbody>{clasificacion.map((r,ri)=>{
+                    const baseBg = (isRow,isCol,isBoth) => isBoth?"rgba(79,143,47,0.22)":isRow||isCol?"rgba(79,143,47,0.07)":"#ffffff";
+                    const cells = [
+                      <td key={0} className="pin-rank"
+                          style={{ background: baseBg(selectedCell&&selectedCell[0]===ri, selectedCell&&selectedCell[1]===0, selectedCell&&selectedCell[0]===ri&&selectedCell[1]===0), transition:"background 0.15s", cursor:"pointer", textAlign:"center" }}
+                          onClick={()=>setSelectedCell(selectedCell&&selectedCell[0]===ri&&selectedCell[1]===0?null:[ri,0])}>
+                        <span className="rank-badge" style={{ background:ri===0?"#FFD700":ri===1?"#C0C0C0":ri===2?"#CD7F32":"#f3f4f6",color:ri<3?"#111":"#777" }}>{ri+1}</span>
+                      </td>,
+                      <td key={1} className="pin-equipo"
+                          style={{ background: baseBg(selectedCell&&selectedCell[0]===ri, selectedCell&&selectedCell[1]===1, selectedCell&&selectedCell[0]===ri&&selectedCell[1]===1), transition:"background 0.15s", cursor:"pointer" }}
+                          onClick={()=>setSelectedCell(selectedCell&&selectedCell[0]===ri&&selectedCell[1]===1?null:[ri,1])}>
+                        <div style={{ display:"flex",alignItems:"center",gap:4 }}>
+                          {r.equipo.escudo_url?<img src={r.equipo.escudo_url} style={{ width:18,height:18,borderRadius:4,objectFit:"cover",flexShrink:0 }} alt=""/>:<div style={{ width:9,height:9,borderRadius:"50%",background:r.equipo.color_playera||"#999",flexShrink:0 }}/>}
+                          <span style={{ fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",fontSize:11 }}>{r.equipo.nombre}</span>
+                        </div>
+                      </td>,
+                      ...[
+                        [r.pj,{}],
+                        [r.g,{color:"#16a34a",fontWeight:700}],
+                        [r.e,{color:"#ca8a04",fontWeight:700}],
+                        [r.d,{color:"#dc2626",fontWeight:700}],
+                        [r.gf,{}],
+                        [r.gc,{}],
+                        [r.gf-r.gc>0?`+${r.gf-r.gc}`:r.gf-r.gc,{color:(r.gf-r.gc)>0?"#16a34a":(r.gf-r.gc)<0?"#dc2626":"#666"}],
+                        [r.pts,{fontWeight:800,fontSize:13,color:r.equipo.color_playera||"var(--green)"}],
+                      ].map(([val,style],idx)=>{
+                        const ci=idx+2;
+                        const isRow=selectedCell&&selectedCell[0]===ri;
+                        const isCol=selectedCell&&selectedCell[1]===ci;
+                        const isBoth=isRow&&isCol;
+                        const pin = ci===9 ? "pin-pts" : undefined;
+                        return(
+                          <td key={ci} className={pin} style={{ textAlign:"center", ...style,
+                            background: pin ? baseBg(isRow,isCol,isBoth) : (isBoth?"rgba(79,143,47,0.22)":isRow||isCol?"rgba(79,143,47,0.07)":undefined),
+                            transition:"background 0.15s", cursor:"pointer" }}
+                            onClick={()=>setSelectedCell(isBoth?null:[ri,ci])}>
+                            {val}
+                          </td>
+                        );
+                      }),
+                    ];
+                    return <tr key={r.equipo.id}>{cells}</tr>;
+                  })}</tbody>
+                </table>
+              </div>
+            </>
+          )}
+          {seccion==="partidos"&&(jornadasAgrupadas.length===0?<EmptyState icon="📅" txt="No hay partidos programados aún"/>:
+            (() => {
+              const grupoSel = jornadasAgrupadas.find(g => g.jornada.numero === jornadaSel) || jornadasAgrupadas[0];
+              return (
+                <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                  {/* Selector de jornada — solo si hay más de 1 */}
+                  {jornadasAgrupadas.length > 1 && (
+                    <div style={{ display:"flex", gap:6, overflowX:"auto", WebkitOverflowScrolling:"touch", paddingBottom:2 }}>
+                      {jornadasAgrupadas.map(({ jornada }) => {
+                        const activa = jornada.numero === jornadaSel;
+                        return (
+                          <button key={jornada.id} onClick={() => setJornadaSel(jornada.numero)}
+                            style={{
+                              border:`1.5px solid ${activa?"var(--green)":"var(--border)"}`,
+                              background: activa?"var(--green)":"white",
+                              color: activa?"#fff":"var(--text)",
+                              borderRadius:99, padding:"6px 14px", fontSize:12, fontWeight:700,
+                              cursor:"pointer", whiteSpace:"nowrap", flexShrink:0, minHeight:32,
+                              fontFamily:"'DM Sans',sans-serif", transition:"all 0.15s",
+                            }}>
+                            J{jornada.numero}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Tarjeta de jornada seleccionada */}
+                  <div style={{ background:"white", borderRadius:"var(--radius-md)", overflow:"hidden", boxShadow:"var(--shadow-sm)", border:"1px solid var(--border)" }}>
+                    <div style={{ background:"#f9fafb", padding:"8px 14px", display:"flex", justifyContent:"space-between", alignItems:"center", borderBottom:"1px solid var(--border)" }}>
+                      <span style={{ fontWeight:700, fontSize:12.5 }}>Jornada {grupoSel.jornada.numero}</span>
+                      <span style={{ fontSize:11, color:"var(--text-muted)" }}>{grupoSel.jornada.fecha||"Fecha por definir"}</span>
+                    </div>
+                    <div style={{ padding:"8px 10px", display:"flex", flexDirection:"column", gap:6 }}>
+                      {grupoSel.partidos.map(p => {
+                        const fichaOk = p.ficha_partido?.cerrada;
+                        const f = fichaOk ? p.ficha_partido : null;
+                        return (
+                          <div key={p.id} style={{ padding:"8px 10px", background:"#f9fafb", borderRadius:9, border:"1px solid var(--border)" }}>
+                            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:4 }}>
+                              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, flex:1, minWidth:0 }}>
+                                <JerseySVG
+                                  diseno={p.equipos_local?.diseno_camiseta||"solido"}
+                                  color1={p.equipos_local?.color_playera||"#999"}
+                                  color2={p.equipos_local?.color_camiseta_2||"#fff"}
+                                  escudoUrl={p.equipos_local?.escudo_url||null}
+                                  size={34}
+                                />
+                                <span style={{ fontWeight:700, fontSize:11.5, textAlign:"center", lineHeight:1.15, wordBreak:"break-word" }}>{p.equipos_local?.nombre}</span>
+                              </div>
+
+                              <div style={{ textAlign:"center", padding:"0 6px", flexShrink:0, minWidth:64 }}>
+                                {f ? (
+                                  <div style={{ fontSize:20, fontWeight:900, lineHeight:1 }}>
+                                    <span style={{ color:f.goles_local>f.goles_visitante?"#16a34a":"var(--text)" }}>{f.goles_local}</span>
+                                    <span style={{ color:"#d1d5db", fontSize:15, margin:"0 3px" }}>-</span>
+                                    <span style={{ color:f.goles_visitante>f.goles_local?"#16a34a":"var(--text)" }}>{f.goles_visitante}</span>
+                                  </div>
+                                ) : (
+                                  <span style={{ fontSize:11.5, color:"var(--text-muted)", fontWeight:800, letterSpacing:1 }}>VS</span>
+                                )}
+                                <div style={{ fontSize:9.5, color:"var(--text-muted)", marginTop:3, whiteSpace:"nowrap" }}>
+                                  ⏰ {p.hora?.substring(0,5)||"—"} · C{p.cancha_numero||"—"}
+                                </div>
+                                {fichaOk && <div style={{ fontSize:9.5, color:"var(--green)", fontWeight:700, marginTop:1 }}>✓ Jugado</div>}
+                              </div>
+
+                              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, flex:1, minWidth:0 }}>
+                                <JerseySVG
+                                  diseno={p.equipos_visitante?.diseno_camiseta||"solido"}
+                                  color1={p.equipos_visitante?.color_playera||"#999"}
+                                  color2={p.equipos_visitante?.color_camiseta_2||"#fff"}
+                                  escudoUrl={p.equipos_visitante?.escudo_url||null}
+                                  size={34}
+                                />
+                                <span style={{ fontWeight:700, fontSize:11.5, textAlign:"center", lineHeight:1.15, wordBreak:"break-word" }}>{p.equipos_visitante?.nombre}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
-              ))}
-            </div>
+              );
+            })()
           )}
           {seccion==="goleadores"&&(goleadores.length===0?<EmptyState icon="🥇" txt="No hay goles registrados aún"/>:
             <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
@@ -772,43 +932,61 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
             </div>
           )}
           {seccion==="equipos"&&(equipos.length===0?<EmptyState icon="👕" txt="No hay equipos registrados"/>:
-            <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(160px,1fr))",gap:14 }}>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
               {equipos.map(eq=>{const st=clasificacion.find(c=>c.equipo.id===eq.id);return(
-                <div key={eq.id} style={{ background:"white",borderRadius:"var(--radius-md)",padding:"18px 14px",textAlign:"center",boxShadow:"var(--shadow-md)",borderTop:`4px solid ${eq.color_playera||"var(--green)"}` }}>
-                  <div style={{ display:"flex",justifyContent:"center",marginBottom:10 }}>
-                    {eq.escudo_url?<img src={eq.escudo_url} style={{ width:52,height:52,borderRadius:10,objectFit:"cover" }} alt=""/>:<div style={{ width:52,height:52,borderRadius:10,background:eq.color_playera||"var(--green)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:800,color:"white" }}>{eq.nombre[0]}</div>}
+                <div key={eq.id} style={{ background:"white",borderRadius:"var(--radius-md)",padding:"10px 8px",textAlign:"center",boxShadow:"var(--shadow-sm)",border:"1px solid var(--border)",borderTop:`3px solid ${eq.color_playera||"var(--green)"}` }}>
+                  <div style={{ display:"flex",justifyContent:"center",marginBottom:6 }}>
+                    {eq.escudo_url
+                      ? <img src={eq.escudo_url} style={{ width:38,height:38,borderRadius:8,objectFit:"cover" }} alt=""/>
+                      : <div style={{ width:38,height:38,borderRadius:8,background:eq.color_playera||"var(--green)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:800,color:"white" }}>{eq.nombre[0]}</div>}
                   </div>
-                  <div style={{ fontWeight:700,fontSize:14,marginBottom:10 }}>{eq.nombre}</div>
-                  {st&&<div style={{ display:"flex",justifyContent:"center",gap:14 }}>
+                  <div style={{ fontWeight:700,fontSize:12,marginBottom:6,lineHeight:1.2,wordBreak:"break-word" }}>{eq.nombre}</div>
+                  {st&&<div style={{ display:"flex",justifyContent:"center",gap:10 }}>
                     {[[st.pts,"pts","var(--green)"],[st.g,"V","#16a34a"],[st.d,"D","#dc2626"]].map(([n,l,c])=>(
-                      <div key={l} style={{ textAlign:"center" }}><div style={{ fontWeight:800,color:c,fontSize:16 }}>{n}</div><div style={{ fontSize:10,color:"var(--text-muted)" }}>{l}</div></div>
+                      <div key={l} style={{ textAlign:"center" }}>
+                        <div style={{ fontWeight:800,color:c,fontSize:13,lineHeight:1 }}>{n}</div>
+                        <div style={{ fontSize:9,color:"var(--text-muted)",marginTop:1,textTransform:"uppercase",letterSpacing:0.3 }}>{l}</div>
+                      </div>
                     ))}
                   </div>}
                 </div>
               );})}
             </div>
           )}
-          {seccion==="ofensiva"&&<TablaEspecial titulo="⚔️ Mejor ofensiva" datos={[...clasificacion].sort((a,b)=>(b.pj>0?b.gf/b.pj:0)-(a.pj>0?a.gf/a.pj:0))} campo="gf" label="Goles anotados"/>}
-          {seccion==="defensiva"&&<TablaEspecial titulo="🛡️ Mejor defensiva" datos={[...clasificacion].sort((a,b)=>(a.pj>0?a.gc/a.pj:999)-(b.pj>0?b.gc/b.pj:999))} campo="gc" label="Goles concedidos"/>}
-          {seccion==="fairplay"&&<TablaEspecial titulo="🤝 Fair play" datos={[...clasificacion].sort((a,b)=>(a.pj>0?a.faltas/a.pj:999)-(b.pj>0?b.faltas/b.pj:999))} campo="faltas" label="Faltas cometidas"/>}
+          {seccion==="ofensiva"&&<TablaEspecial titulo="⚔️ Mejor ofensiva" datos={[...clasificacion].sort((a,b)=>(b.pj>0?b.gf/b.pj:0)-(a.pj>0?a.gf/a.pj:0))} campo="gf" labelCorto="GF" labelLargo="Goles a favor"/>}
+          {seccion==="defensiva"&&<TablaEspecial titulo="🛡️ Mejor defensiva" datos={[...clasificacion].sort((a,b)=>(a.pj>0?a.gc/a.pj:999)-(b.pj>0?b.gc/b.pj:999))} campo="gc" labelCorto="GC" labelLargo="Goles en contra"/>}
+          {seccion==="fairplay"&&<TablaEspecial titulo="🤝 Fair play" datos={[...clasificacion].sort((a,b)=>(a.pj>0?a.faltas/a.pj:999)-(b.pj>0?b.faltas/b.pj:999))} campo="faltas" labelCorto="FC" labelLargo="Faltas cometidas"/>}
         </>}
     </div>
   );
 }
 
-function TablaEspecial({ titulo, datos, campo, label }) {
+function TablaEspecial({ titulo, datos, campo, labelCorto, labelLargo }) {
   if (!datos.length) return <EmptyState icon="📊" txt="No hay datos suficientes aún"/>;
   return (
     <div style={{ background:"white",borderRadius:"var(--radius-md)",overflow:"hidden",boxShadow:"var(--shadow-md)" }}>
-      <div style={{ padding:"14px 20px",borderBottom:"1px solid var(--border)",fontWeight:700,fontSize:15 }}>{titulo}</div>
+      <div style={{ padding:"10px 12px",borderBottom:"1px solid var(--border)" }}>
+        <div style={{ fontWeight:700,fontSize:13 }}>{titulo}</div>
+        <div style={{ fontSize:10,color:"var(--text-muted)",marginTop:2 }}>
+          <b>{labelCorto}</b>: {labelLargo} · <b>PROM</b>: promedio por partido
+        </div>
+      </div>
       <table className="ifutbol-table">
-        <thead><tr><th>#</th><th>Equipo</th><th>PJ</th><th>{label}</th><th>Promedio/partido</th></tr></thead>
+        <thead><tr>
+          <th>#</th>
+          <th style={{ textAlign:"left" }}>Equipo</th>
+          <th>PJ</th>
+          <th>{labelCorto}</th>
+          <th>PROM</th>
+        </tr></thead>
         <tbody>{datos.map((r,i)=>{const val=r[campo]||0;const prom=r.pj>0?(val/r.pj).toFixed(1):"0.0";return(
           <tr key={r.equipo.id}>
-            <td><span className="rank-badge" style={{ background:i===0?"#FFD700":i===1?"#C0C0C0":i===2?"#CD7F32":"#f3f4f6",color:i<3?"#111":"#888" }}>{i+1}</span></td>
-            <td><div style={{ display:"flex",alignItems:"center",gap:10 }}>
-              {r.equipo.escudo_url?<img src={r.equipo.escudo_url} style={{ width:26,height:26,borderRadius:6,objectFit:"cover" }} alt=""/>:<div style={{ width:10,height:10,borderRadius:"50%",background:r.equipo.color_playera||"#999" }}/>}
-              <span style={{ fontWeight:600 }}>{r.equipo.nombre}</span>
+            <td style={{ textAlign:"center" }}><span className="rank-badge" style={{ background:i===0?"#FFD700":i===1?"#C0C0C0":i===2?"#CD7F32":"#f3f4f6",color:i<3?"#111":"#888" }}>{i+1}</span></td>
+            <td><div style={{ display:"flex",alignItems:"center",gap:6 }}>
+              {r.equipo.escudo_url
+                ? <img src={r.equipo.escudo_url} style={{ width:18,height:18,borderRadius:4,objectFit:"cover",flexShrink:0 }} alt=""/>
+                : <div style={{ width:9,height:9,borderRadius:"50%",background:r.equipo.color_playera||"#999",flexShrink:0 }}/>}
+              <span style={{ fontWeight:600,fontSize:11,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{r.equipo.nombre}</span>
             </div></td>
             <td style={{ textAlign:"center" }}>{r.pj}</td>
             <td style={{ textAlign:"center",fontWeight:700 }}>{val}</td>
@@ -871,10 +1049,22 @@ function RegisterPlayerModal({ onClose, showToast, onLogin }) {
       const token = data.session?.access_token||data.access_token;
       const userId = data.user?.id||data.id;
       if (token) {
-        const jugRes = await fetch(`${SUPABASE_URL}/rest/v1/jugadores`,{method:"POST",headers:{"apikey":SUPABASE_KEY,"Authorization":`Bearer ${token}`,"Content-Type":"application/json","Prefer":"return=representation"},body:JSON.stringify({user_id:userId,nombre_completo:form.nombre_completo,fecha_nacimiento:form.fecha_nacimiento||null,domicilio:form.domicilio,posicion_preferida:form.posicion_preferida})});
+        const jugRes = await fetch(`${SUPABASE_URL}/rest/v1/jugadores`,{method:"POST",headers:{"apikey":SUPABASE_KEY,"Authorization":`Bearer ${token}`,"Content-Type":"application/json","Prefer":"return=representation"},body:JSON.stringify({user_id:userId,nombre_completo:form.nombre_completo,fecha_nacimiento:form.fecha_nacimiento||null,domicilio:form.domicilio,posicion_preferida:form.posicion_preferida,numero_preferido:form.numero_camiseta?+form.numero_camiseta:null,nombre_camiseta_preferido:form.nombre_camiseta?.trim()?form.nombre_camiseta.trim().toUpperCase():null})});
         const jugData = await jugRes.json();
+        if (!jugRes.ok) {
+          setError(jugData?.message || "No se pudo crear el perfil de jugador");
+          setLoading(false);
+          return;
+        }
         const afiliado = Array.isArray(jugData)?jugData[0]?.numero_afiliado:jugData?.numero_afiliado;
-        setSuccess(afiliado||"AF-?????");
+        if (!afiliado) {
+          setError("No se generó el número de afiliado. Intenta de nuevo.");
+          setLoading(false);
+          return;
+        }
+        setSuccess(afiliado);
+      } else {
+        setError("Confirma tu correo y vuelve a entrar para completar el registro.");
       }
     } else { setError(data.msg||data.error_description||"Error al registrarse"); }
     setLoading(false);
@@ -913,11 +1103,11 @@ function RegisterPlayerModal({ onClose, showToast, onLogin }) {
           </div>
         </div>
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px" }}>
-          <div style={{ gridColumn:"1/-1",marginBottom:14 }}><Field label="Nombre completo *"><input className="form-input" type="text" placeholder="Juan Pérez" value={form.nombre_completo} onChange={e=>setForm({...form,nombre_completo:e.target.value})}/></Field></div>
+          <div style={{ gridColumn:"1/-1",marginBottom:14 }}><Field label="Nombre completo *"><input className="form-input" type="text" placeholder="Juan Pérez" value={form.nombre_completo} onChange={e=>setForm({...form,nombre_completo:toTitleCase(e.target.value)})}/></Field></div>
           <div style={{ marginBottom:14 }}><Field label="Fecha de nacimiento"><input className="form-input" type="date" value={form.fecha_nacimiento} onChange={e=>setForm({...form,fecha_nacimiento:e.target.value})}/></Field></div>
           <div style={{ marginBottom:14 }}><Field label="Posición preferida"><select className="form-input" value={form.posicion_preferida} onChange={e=>setForm({...form,posicion_preferida:e.target.value})}>{POSITIONS.map(p=><option key={p}>{p}</option>)}</select></Field></div>
-          <div style={{ marginBottom:14 }}><Field label="Número en camiseta"><input className="form-input" type="number" min="1" max="99" placeholder="ej. 10" value={form.numero_camiseta} onChange={e=>setForm({...form,numero_camiseta:e.target.value})}/></Field></div>
-          <div style={{ marginBottom:14 }}><Field label="Nombre al reverso"><input className="form-input" type="text" placeholder="GARCÍA" value={form.nombre_camiseta} onChange={e=>setForm({...form,nombre_camiseta:e.target.value.toUpperCase()})}/></Field></div>
+          <div style={{ marginBottom:14 }}><Field label="Número preferido (1-99)"><input className="form-input" type="number" min="1" max="99" placeholder="ej. 10" value={form.numero_camiseta} onChange={e=>setForm({...form,numero_camiseta:e.target.value})}/></Field></div>
+          <div style={{ marginBottom:14 }}><Field label="Nombre en camiseta"><input className="form-input" type="text" placeholder="GARCÍA" value={form.nombre_camiseta} onChange={e=>setForm({...form,nombre_camiseta:e.target.value.toUpperCase()})}/></Field></div>
           <div style={{ gridColumn:"1/-1",marginBottom:14 }}><Field label="Domicilio"><input className="form-input" type="text" placeholder="Calle, Ciudad" value={form.domicilio} onChange={e=>setForm({...form,domicilio:e.target.value})}/></Field></div>
           <div style={{ gridColumn:"1/-1",marginBottom:14 }}><Field label="Correo electrónico *"><input className="form-input" type="email" placeholder="tu@correo.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></Field></div>
           <div style={{ marginBottom:14 }}><Field label="Contraseña *"><input className="form-input" type="password" placeholder="Mín. 6 caracteres" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></Field></div>
@@ -996,7 +1186,7 @@ function RegisterStaffModal({ onClose, showToast }) {
       <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:420 }}>
         <ModalHeader title="Solicitud de registro" subtitle="Tu solicitud será revisada por el administrador" onClose={onClose}/>
         {error&&<div style={m.err}>⚠️ {error}</div>}
-        <Field label="Nombre completo *"><input className="form-input" type="text" placeholder="Juan Pérez" value={form.nombre_completo} onChange={e=>setForm({...form,nombre_completo:e.target.value})}/></Field>
+        <Field label="Nombre completo *"><input className="form-input" type="text" placeholder="Juan Pérez" value={form.nombre_completo} onChange={e=>setForm({...form,nombre_completo:toTitleCase(e.target.value)})}/></Field>
         <div style={{ marginBottom:16 }}>
           <label className="form-label">Me registro como *</label>
           <div style={{ display:"flex",gap:10 }}>
@@ -1042,32 +1232,24 @@ function Avatar({ initials, size=38 }) {
   );
 }
 
-function BallIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10"/>
-      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-      <path d="M2 12h20"/>
-    </svg>
-  );
-}
-
 // ─────────────────────────────────────────────────────────────────
 // STYLES
 // ─────────────────────────────────────────────────────────────────
 const s = {
   root: { display:"flex",flexDirection:"column",minHeight:"100vh",background:"var(--bg)" },
-  topbar: { display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0 20px",height:60,background:"var(--green)",borderBottom:"1px solid var(--green-dark)",position:"sticky",top:0,zIndex:200,boxShadow:"0 2px 12px rgba(0,0,0,0.18)" },
-  topLeft: { display:"flex",alignItems:"center",gap:14 },
-  topRight: { display:"flex",alignItems:"center",gap:10 },
+  topbar: { display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0 12px",height:56,background:"var(--green)",borderBottom:"1px solid var(--green-dark)",position:"sticky",top:0,zIndex:200,boxShadow:"0 2px 12px rgba(0,0,0,0.18)" },
+  topLeft: { display:"flex",alignItems:"center",gap:10 },
+  topRight: { display:"flex",alignItems:"center",gap:8 },
   brand: { display:"flex",alignItems:"center",gap:10,cursor:"pointer" },
-  brandIcon: { width:34,height:34,borderRadius:9,background:"linear-gradient(135deg,#4f8f2f,#7fbf4d)",display:"flex",alignItems:"center",justifyContent:"center" },
-  brandName: { fontSize:19,fontWeight:800,color:"var(--text)",letterSpacing:-0.5 },
   pill: { padding:"5px 12px",borderRadius:"var(--radius-full)",fontSize:12,fontWeight:700 },
-  overlay: { position:"fixed",inset:0,background:"rgba(0,0,0,0.28)",zIndex:299,backdropFilter:"blur(2px)" },
-  sidebar: { position:"fixed",top:60,left:0,bottom:0,width:260,background:"white",borderRight:"1px solid var(--border)",zIndex:300,display:"flex",flexDirection:"column",transition:"transform 0.25s ease",boxShadow:"4px 0 24px rgba(0,0,0,0.08)" },
+  // Overlay del drawer: cubre todo el viewport (no solo el marco) para que clicks fuera del root también cierren.
+  overlay: { position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:299,backdropFilter:"blur(2px)" },
+  // Drawer: position fixed para no scroll-jacking. 85% del ancho del viewport, anclado al borde izquierdo del marco
+  // (en PC con marco visible queda al borde izquierdo del viewport — la vista de PC se ignora por diseño).
+  sidebar: { position:"fixed",top:0,left:0,bottom:0,width:"85%",maxWidth:400,background:"white",zIndex:300,display:"flex",flexDirection:"column",transition:"transform 0.25s ease",boxShadow:"4px 0 24px rgba(0,0,0,0.18)" },
+  drawerHeader: { padding:"16px 14px 14px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",gap:12,background:"linear-gradient(135deg, rgba(127,191,77,0.10), rgba(79,143,47,0.05))" },
   sbFooter: { padding:"14px 16px",borderTop:"1px solid var(--border)",display:"flex",alignItems:"center",gap:12 },
-  main: { flex:1,padding:"28px 32px",maxWidth:1100,margin:"0 auto",width:"100%" },
+  main: { flex:1,padding:"16px 14px",width:"100%" },
 };
 
 const m = {
@@ -1077,18 +1259,19 @@ const m = {
 };
 
 const css = `
-  .ham-btn{background:transparent;border:none;cursor:pointer;padding:6px 10px;border-radius:8px;font-size:20px;color:rgba(255,255,255,0.85);display:flex;align-items:center;transition:background 0.15s;}
-  .ham-btn:hover{background:rgba(255,255,255,0.12);}
+  .ham-btn{background:transparent;border:none;cursor:pointer;padding:0;border-radius:8px;font-size:22px;color:rgba(255,255,255,0.95);display:flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;transition:background 0.15s;}
+  .ham-btn:hover,.ham-btn:active{background:rgba(255,255,255,0.18);}
   .clickable{transition:opacity 0.15s;cursor:pointer;}
   .clickable:hover{opacity:0.8;}
-  .sb-btn{display:flex;align-items:center;gap:12px;width:100%;padding:11px 14px;border-radius:10px;border:none;background:transparent;color:var(--text);font-size:14px;font-weight:600;cursor:pointer;text-align:left;transition:all 0.15s;font-family:'DM Sans',sans-serif;}
-  .sb-btn:hover{background:var(--green-light);color:var(--green);}
-  .sb-btn.danger:hover{background:#fef2f2;color:#dc2626;}
-  .nav-item{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:10px;cursor:pointer;color:var(--text-sub);font-size:14px;font-weight:500;transition:all 0.15s;font-family:'DM Sans',sans-serif;}
-  .nav-item:hover{background:var(--green-light);color:var(--green);}
+  .sb-btn{display:flex;align-items:center;gap:12px;width:100%;min-height:44px;padding:11px 14px;border-radius:10px;border:none;background:transparent;color:var(--text);font-size:14px;font-weight:600;cursor:pointer;text-align:left;transition:all 0.15s;font-family:'DM Sans',sans-serif;}
+  .sb-btn:hover,.sb-btn:active{background:var(--green-light);color:var(--green);}
+  .sb-btn.danger:hover,.sb-btn.danger:active{background:#fef2f2;color:#dc2626;}
+  .nav-item{display:flex;align-items:center;gap:12px;min-height:44px;padding:11px 14px;border-radius:10px;cursor:pointer;color:var(--text-sub);font-size:14px;font-weight:500;transition:all 0.15s;font-family:'DM Sans',sans-serif;}
+  .nav-item:hover,.nav-item:active{background:var(--green-light);color:var(--green);}
   .nav-item-active{background:var(--green-light)!important;color:var(--green)!important;font-weight:700!important;}
-  .ud-card{background:white;border-radius:var(--radius-md);padding:22px 20px;box-shadow:var(--shadow-md);border:1px solid var(--border);cursor:pointer;transition:transform 0.2s,box-shadow 0.2s;}
-  .ud-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg);border-color:var(--green-accent);}
+  .ud-card{background:white;border-radius:var(--radius-md);padding:14px 14px;box-shadow:var(--shadow-md);border:1px solid var(--border);cursor:pointer;transition:box-shadow 0.18s,background 0.15s,border-color 0.18s;}
+  .ud-card:hover{box-shadow:var(--shadow-lg);border-color:var(--green-accent);}
+  .ud-card:active{background:#f9fafb;}
   .torneo-btn{background:white;border:1.5px solid var(--border);border-radius:var(--radius-full);padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;color:var(--text-sub);transition:all 0.2s;font-family:'DM Sans',sans-serif;}
   .torneo-btn:hover{border-color:var(--green);color:var(--green);}
   .torneo-btn.active{background:var(--green-light);border-color:var(--green);color:var(--green);}

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import JerseySVG from "../components/JerseySVG";
+import IFutbolLogo from "../components/IFutbolLogo";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -25,7 +26,11 @@ const PRINT_CSS = `
 
   @media print {
     body * { visibility: hidden !important; }
-    #ifb-fichas-root, #ifb-fichas-root * { visibility: visible !important; }
+    #ifb-fichas-root, #ifb-fichas-root * {
+      visibility: visible !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
     #ifb-fichas-root {
       position: absolute !important;
       top: 0 !important; left: 0 !important; right: 0 !important;
@@ -134,23 +139,29 @@ function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, is
   );
 
   return (
-    <div className="ifb-ficha-pagina" style={{ fontFamily: "Arial, sans-serif", pageBreakAfter: isLast ? "avoid" : "always" }}>
+    <div className="ifb-ficha-pagina" style={{
+      fontFamily: "Arial, sans-serif",
+      pageBreakAfter: isLast ? "avoid" : "always",
+      minHeight: "262mm",
+      display: "flex",
+      flexDirection: "column",
+    }}>
 
       {/* ── ENCABEZADO ── */}
-      <div style={{ display: "flex", background: "#1e293b", color: "white", alignItems: "stretch" }}>
-        <div style={{ padding: "3mm 4mm", display: "flex", alignItems: "center", gap: "2mm", borderRight: "0.5pt solid #334155", flexShrink: 0 }}>
-          <span style={{ fontSize: "9pt", fontWeight: 900, color: "#4ade80", letterSpacing: -0.3 }}>IFútbol</span>
+      <div style={{ display: "flex", background: "white", color: "#111827", alignItems: "stretch", borderBottom: "2.5pt solid #4f8f2f" }}>
+        <div style={{ padding: "3mm 4mm", display: "flex", alignItems: "center", gap: "2mm", borderRight: "0.5pt solid #e5e7eb", flexShrink: 0 }}>
+          <IFutbolLogo color="#4f8f2f" height={14} />
         </div>
         <div style={{ flex: 1, padding: "2.5mm 4mm" }}>
-          <div style={{ fontSize: "8.5pt", fontWeight: 800, lineHeight: 1.2 }}>{liga?.nombre}</div>
-          <div style={{ fontSize: "7pt", color: "#94a3b8", marginTop: "0.5mm" }}>
+          <div style={{ fontSize: "8.5pt", fontWeight: 800, lineHeight: 1.2, color: "#111827" }}>{liga?.nombre}</div>
+          <div style={{ fontSize: "7pt", color: "#6b7280", marginTop: "0.5mm" }}>
             {liga?.canchas?.nombre || "Unidad Deportiva"}
           </div>
         </div>
-        <div style={{ padding: "2.5mm 4mm", textAlign: "right", borderLeft: "0.5pt solid #334155", flexShrink: 0 }}>
-          <div style={{ fontSize: "8pt", fontWeight: 800 }}>Jornada {jornada?.numero ?? "—"}</div>
-          <div style={{ fontSize: "6.5pt", color: "#94a3b8", marginTop: "0.5mm" }}>📅 {fmtFecha(jornada?.fecha)}</div>
-          <div style={{ fontSize: "6.5pt", color: "#94a3b8" }}>⏰ {fmtHora(partido.hora)}  ·  Campo {partido.cancha_numero ?? "—"}</div>
+        <div style={{ padding: "2.5mm 4mm", textAlign: "right", borderLeft: "0.5pt solid #e5e7eb", flexShrink: 0 }}>
+          <div style={{ fontSize: "8pt", fontWeight: 800, color: "#3B6D11" }}>Jornada {jornada?.numero ?? "—"}</div>
+          <div style={{ fontSize: "6.5pt", color: "#6b7280", marginTop: "0.5mm" }}>📅 {fmtFecha(jornada?.fecha)}</div>
+          <div style={{ fontSize: "6.5pt", color: "#6b7280" }}>⏰ {fmtHora(partido.hora)}  ·  Campo {partido.cancha_numero ?? "—"}</div>
         </div>
       </div>
 
@@ -160,9 +171,9 @@ function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, is
           <span style={{ fontSize: "10pt", fontWeight: 900, color: "#111827" }}>{eqL?.nombre}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "1.5mm", flexShrink: 0 }}>
-          <span style={{ border: "1.5pt solid #374151", width: "13mm", height: "13mm", display: "inline-block", borderRadius: "2mm" }} />
-          <span style={{ fontSize: "14pt", fontWeight: 900, color: "#374151", lineHeight: 1 }}>:</span>
-          <span style={{ border: "1.5pt solid #374151", width: "13mm", height: "13mm", display: "inline-block", borderRadius: "2mm" }} />
+          <span style={{ border: "1.5pt solid #111827", width: "13mm", height: "13mm", display: "inline-block", borderRadius: "2mm" }} />
+          <span style={{ fontSize: "14pt", fontWeight: 900, color: "#111827", lineHeight: 1 }}>:</span>
+          <span style={{ border: "1.5pt solid #111827", width: "13mm", height: "13mm", display: "inline-block", borderRadius: "2mm" }} />
         </div>
         <div style={{ flex: 1, textAlign: "left" }}>
           <span style={{ fontSize: "10pt", fontWeight: 900, color: "#111827" }}>{eqV?.nombre}</span>
@@ -171,25 +182,25 @@ function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, is
 
       {/* ── CABECERAS DE EQUIPO ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderBottom: "0.8pt solid #e5e7eb" }}>
-        <div style={{ padding: "2mm 3mm", display: "flex", alignItems: "center", gap: "3mm", borderRight: "0.5pt solid #e5e7eb", borderTop: `3pt solid ${eqL?.color_playera || "#3182ce"}` }}>
-          <JerseySVG diseno={eqL?.diseno_camiseta || "solido"} color1={eqL?.color_playera || "#3182ce"} color2={eqL?.color_camiseta_2 || "#fff"} size={22} />
+        <div style={{ padding: "2mm 3mm", display: "flex", alignItems: "center", gap: "3mm", borderRight: "0.5pt solid #e5e7eb", borderTop: `3pt solid ${eqL?.color_playera || "#4f8f2f"}` }}>
+          <JerseySVG diseno={eqL?.diseno_camiseta || "solido"} color1={eqL?.color_playera || "#4f8f2f"} color2={eqL?.color_camiseta_2 || "#fff"} size={22} />
           <span style={{ fontSize: "8pt", fontWeight: 800, color: "#111827" }}>{eqL?.nombre}</span>
         </div>
-        <div style={{ padding: "2mm 3mm", display: "flex", alignItems: "center", gap: "3mm", justifyContent: "flex-end", borderTop: `3pt solid ${eqV?.color_playera || "#e53e3e"}` }}>
+        <div style={{ padding: "2mm 3mm", display: "flex", alignItems: "center", gap: "3mm", justifyContent: "flex-end", borderTop: `3pt solid ${eqV?.color_playera || "#6b7280"}` }}>
           <span style={{ fontSize: "8pt", fontWeight: 800, color: "#111827" }}>{eqV?.nombre}</span>
-          <JerseySVG diseno={eqV?.diseno_camiseta || "solido"} color1={eqV?.color_playera || "#e53e3e"} color2={eqV?.color_camiseta_2 || "#fff"} size={22} />
+          <JerseySVG diseno={eqV?.diseno_camiseta || "solido"} color1={eqV?.color_playera || "#6b7280"} color2={eqV?.color_camiseta_2 || "#fff"} size={22} />
         </div>
       </div>
 
       {/* ── TABLA DE JUGADORES ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
         <div style={{ borderRight: "1pt solid #e5e7eb" }}>
-          {columnaHeader(eqL?.color_playera || "#3182ce")}
-          {jLocal.map((j, i) => <Fila key={i} j={j} idx={i} color={eqL?.color_playera || "#3182ce"} />)}
+          {columnaHeader(eqL?.color_playera || "#4f8f2f")}
+          {jLocal.map((j, i) => <Fila key={i} j={j} idx={i} color={eqL?.color_playera || "#4f8f2f"} />)}
         </div>
         <div>
-          {columnaHeader(eqV?.color_playera || "#e53e3e")}
-          {jVisit.map((j, i) => <Fila key={i} j={j} idx={i} color={eqV?.color_playera || "#e53e3e"} />)}
+          {columnaHeader(eqV?.color_playera || "#6b7280")}
+          {jVisit.map((j, i) => <Fila key={i} j={j} idx={i} color={eqV?.color_playera || "#6b7280"} />)}
         </div>
       </div>
 
@@ -206,12 +217,17 @@ function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, is
       </div>
 
       {/* ── PIE: OBSERVACIONES + FIRMA ── */}
-      <div style={{ padding: "2.5mm 4mm", borderTop: "0.8pt solid #e5e7eb" }}>
+      <div style={{ padding: "2.5mm 4mm", borderTop: "0.8pt solid #e5e7eb", flex: 1, display: "flex", flexDirection: "column" }}>
         <div style={{ fontSize: "6.5pt", fontWeight: 700, color: "#374151", marginBottom: "2mm" }}>Observaciones:</div>
-        {[1, 2, 3].map(i => (
-          <div key={i} style={{ borderBottom: "0.4pt solid #c4c4c4", marginBottom: "4.5mm" }} />
-        ))}
-        <div style={{ display: "flex", gap: "8mm", marginTop: "1mm" }}>
+
+        {/* Renglones que se estiran para llenar el espacio disponible */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-around", paddingBottom: "2mm" }}>
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} style={{ borderBottom: "0.4pt solid #c4c4c4" }} />
+          ))}
+        </div>
+
+        <div style={{ display: "flex", gap: "8mm", marginTop: "2mm" }}>
           <div style={{ flex: 2 }}>
             <div style={{ borderBottom: "0.7pt solid #374151", marginBottom: "1mm" }} />
             <span style={{ fontSize: "6pt", color: "#6b7280" }}>Nombre del árbitro</span>

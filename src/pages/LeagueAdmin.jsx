@@ -43,6 +43,25 @@ const uploadFile = async (bucket, path, file, token) => {
 const COLORES = ["#e53e3e","#dd6b20","#d69e2e","#38a169","#3182ce","#805ad5","#d53f8c","#2d3748"];
 const POSICIONES = ["Portero","Defensa","Mediocampista","Delantero"];
 
+// Normaliza "1", "00001", "af-1", "AF-00001" → "AF-00001"
+const normalizarAfiliado = (input) => {
+  const limpio = String(input || "").trim().toUpperCase().replace(/^AF-?/, "");
+  if (!limpio) return "";
+  if (/^\d+$/.test(limpio)) return `AF-${limpio.padStart(5, "0")}`;
+  return `AF-${limpio}`;
+};
+
+// Devuelve { dorsal, cambiado } usando el preferido si está libre,
+// o el primer libre disponible (1..99). Si todos están ocupados → null.
+const calcularDorsal = (preferido, ocupados) => {
+  const set = ocupados instanceof Set ? ocupados : new Set(ocupados || []);
+  if (preferido && !set.has(preferido)) return { dorsal: preferido, cambiado: false };
+  for (let i = 1; i <= 99; i++) {
+    if (!set.has(i)) return { dorsal: i, cambiado: !!preferido };
+  }
+  return { dorsal: null, cambiado: false };
+};
+
 export default function LeagueAdmin({ session, userRole, seccionInicial = "equipos", setTopbarBack }) {
   const [seccion, setSeccion] = useState(seccionInicial);
   const [ligas, setLigas] = useState([]);
@@ -74,6 +93,13 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
 
   // Color del torneo activo
   const [colorLigaForm, setColorLigaForm] = useState("#4f8f2f");
+
+  // Resultados (fichas cerradas)
+  const [resultados, setResultados] = useState([]);
+  const [resultadosLoading, setResultadosLoading] = useState(false);
+  const [jugadoresInfo, setJugadoresInfo] = useState({});
+  const [resultadoExpandido, setResultadoExpandido] = useState(null);
+  const [jornadaSelectedRes, setJornadaSelectedRes] = useState(null);
 
   const token = session?.access_token;
 
@@ -124,6 +150,321 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
       );
       setJugadoresEquipo(data || []);
     } catch (e) { showToast(e.message, "err"); }
+  };
+
+  // ── CAPITÁN: asignar / quitar / confirmar ─────────────────────
+  const [modalCapitan, setModalCapitan] = useState(null); // null | "input" | "confirm"
+  const [capitanForm, setCapitanForm] = useState({ numero_afiliado: "", dorsal: "" });
+  const [capitanCandidato, setCapitanCandidato] = useState(null); // { jugador, yaInscrito }
+  const [confirmQuitarCap, setConfirmQuitarCap] = useState(null); // { inscripcionId, nombre }
+
+  // Gestión de jugadores (admin)
+  const [modalJugadores, setModalJugadores] = useState(null); // "anadir_input" | "anadir_confirm" | "eliminar"
+  const [anadirAfiliados, setAnadirAfiliados] = useState("");
+  const [anadirCandidatos, setAnadirCandidatos] = useState([]);
+  const [eliminarJugTarget, setEliminarJugTarget] = useState(null);
+
+  const buscarCandidatoCapitan = async () => {
+    const af = normalizarAfiliado(capitanForm.numero_afiliado);
+    if (!af) return showToast("Ingresa un número de afiliado", "err");
+    if (!equipoDetalle) return;
+    setLoading(true);
+    try {
+      // Buscar jugador por número de afiliado
+      const [jug] = await db(`/jugadores?numero_afiliado=eq.${af}&select=id,nombre_completo,foto_url,numero_afiliado,posicion_preferida,numero_preferido,nombre_camiseta_preferido`, token);
+      if (!jug) {
+        showToast("No existe un jugador con ese número de afiliado", "err");
+        setLoading(false);
+        return;
+      }
+      // Verificar si ya está inscrito en este equipo+liga
+      const inscripciones = await db(
+        `/jugador_equipo?jugador_id=eq.${jug.id}&liga_id=eq.${ligaSeleccionada.id}&select=id,equipo_id,dorsal,nombre_camiseta`,
+        token
+      );
+      const enEsteEquipo = (inscripciones || []).find(i => i.equipo_id === equipoDetalle.id);
+      const enOtroEquipoLiga = (inscripciones || []).find(i => i.equipo_id !== equipoDetalle.id);
+      if (enOtroEquipoLiga) {
+        showToast("Ese jugador ya pertenece a otro equipo de esta liga", "err");
+        setLoading(false);
+        return;
+      }
+      setCapitanCandidato({ jugador: jug, yaInscrito: enEsteEquipo || null });
+      setModalCapitan("confirm");
+    } catch (e) { showToast(e.message, "err"); }
+    setLoading(false);
+  };
+
+  const confirmarCapitan = async () => {
+    if (!capitanCandidato || !equipoDetalle) return;
+    setLoading(true);
+    try {
+      const { jugador, yaInscrito } = capitanCandidato;
+      if (yaInscrito) {
+        // Solo marcar es_capitan=true en la inscripción existente
+        await db(`/jugador_equipo?id=eq.${yaInscrito.id}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ es_capitan: true })
+        });
+      } else {
+        // Crear inscripción con es_capitan=true
+        const ocupados = new Set(jugadoresEquipo.map(je => je.dorsal).filter(Boolean));
+        let dorsalFinal = null;
+        let avisoDorsal = "";
+        if (capitanForm.dorsal) {
+          const dManual = +capitanForm.dorsal;
+          if (ocupados.has(dManual)) {
+            showToast(`El dorsal ${dManual} ya está en uso en este equipo`, "err");
+            setLoading(false);
+            return;
+          }
+          dorsalFinal = dManual;
+        } else {
+          const { dorsal, cambiado } = calcularDorsal(jugador.numero_preferido, ocupados);
+          if (!dorsal) {
+            showToast("No quedan dorsales libres en el equipo", "err");
+            setLoading(false);
+            return;
+          }
+          dorsalFinal = dorsal;
+          if (cambiado) {
+            avisoDorsal = ` Su preferido (#${jugador.numero_preferido}) estaba ocupado, se asignó #${dorsal}.`;
+          }
+        }
+        const nombreCamiseta = (jugador.nombre_camiseta_preferido?.trim() || jugador.nombre_completo.split(" ").slice(-1)[0] || jugador.nombre_completo).toUpperCase();
+        await db("/jugador_equipo", token, {
+          method: "POST",
+          body: JSON.stringify({
+            jugador_id: jugador.id,
+            equipo_id: equipoDetalle.id,
+            liga_id: ligaSeleccionada.id,
+            dorsal: dorsalFinal,
+            nombre_camiseta: nombreCamiseta,
+            es_capitan: true,
+            activo: true,
+          })
+        });
+        showToast(`👑 Capitán asignado.${avisoDorsal}`);
+        setModalCapitan(null);
+        setCapitanForm({ numero_afiliado: "", dorsal: "" });
+        setCapitanCandidato(null);
+        await cargarJugadoresEquipo(equipoDetalle.id, ligaSeleccionada.id);
+        setLoading(false);
+        return;
+      }
+      showToast("👑 Capitán asignado");
+      setModalCapitan(null);
+      setCapitanForm({ numero_afiliado: "", dorsal: "" });
+      setCapitanCandidato(null);
+      await cargarJugadoresEquipo(equipoDetalle.id, ligaSeleccionada.id);
+    } catch (e) {
+      const msg = String(e.message || "");
+      if (msg.includes("jugador_equipo_unico_capitan_por_equipo")) {
+        showToast("Este equipo ya tiene un capitán asignado", "err");
+      } else {
+        showToast(e.message, "err");
+      }
+    }
+    setLoading(false);
+  };
+
+  // ── RESULTADOS (FICHAS CERRADAS) ──────────────────────────────
+  const cargarResultados = async () => {
+    if (!ligaSeleccionada) return;
+    setResultadosLoading(true);
+    try {
+      const jornadas = await db(`/jornadas?liga_id=eq.${ligaSeleccionada.id}&select=id,numero,fecha&order=numero`, token);
+      const jornadaIds = (jornadas || []).map(j => j.id);
+      if (jornadaIds.length === 0) { setResultados([]); setResultadosLoading(false); return; }
+
+      const partidos = await db(
+        `/partidos?jornada_id=in.(${jornadaIds.join(",")})&select=id,jornada_id,equipo_local_id,equipo_visitante_id,jornadas(numero,fecha),ficha_partido(*)`,
+        token
+      );
+
+      const cerradas = (partidos || []).filter(p => {
+        const f = Array.isArray(p.ficha_partido) ? p.ficha_partido[0] : p.ficha_partido;
+        return f?.cerrada;
+      });
+
+      const equipoIds = new Set();
+      cerradas.forEach(p => { equipoIds.add(p.equipo_local_id); equipoIds.add(p.equipo_visitante_id); });
+      const equipos = equipoIds.size > 0
+        ? await db(`/equipos?id=in.(${[...equipoIds].join(",")})&select=id,nombre,color_playera,escudo_url`, token)
+        : [];
+      const equiposMap = Object.fromEntries(equipos.map(e => [e.id, e]));
+
+      const jugIds = new Set();
+      cerradas.forEach(p => {
+        const f = Array.isArray(p.ficha_partido) ? p.ficha_partido[0] : p.ficha_partido;
+        (f?.asistencia || []).forEach(id => jugIds.add(id));
+        (f?.goleadores || []).forEach(g => g.jugador_id && jugIds.add(g.jugador_id));
+      });
+      const jugadores = jugIds.size > 0
+        ? await db(`/jugadores?id=in.(${[...jugIds].join(",")})&select=id,nombre_completo,numero_afiliado,foto_url`, token)
+        : [];
+      const jugadoresMap = Object.fromEntries(jugadores.map(j => [j.id, j]));
+
+      // Necesitamos también los dorsales del jugador en su equipo para esta liga
+      const inscripciones = jugIds.size > 0
+        ? await db(`/jugador_equipo?liga_id=eq.${ligaSeleccionada.id}&jugador_id=in.(${[...jugIds].join(",")})&select=jugador_id,equipo_id,dorsal,nombre_camiseta`, token)
+        : [];
+      const inscMap = {};
+      inscripciones.forEach(i => { inscMap[`${i.jugador_id}_${i.equipo_id}`] = i; });
+
+      setJugadoresInfo({ jug: jugadoresMap, insc: inscMap });
+      const procesados = cerradas.map(p => {
+        const ficha = Array.isArray(p.ficha_partido) ? p.ficha_partido[0] : p.ficha_partido;
+        return {
+          id: p.id,
+          local: equiposMap[p.equipo_local_id],
+          visitante: equiposMap[p.equipo_visitante_id],
+          jornada: p.jornadas?.numero,
+          fecha: p.jornadas?.fecha,
+          ficha,
+        };
+      }).sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "") || (b.jornada || 0) - (a.jornada || 0));
+      setResultados(procesados);
+      // Selección por defecto: la jornada más alta con fichas cerradas
+      const jornadasUnicas = [...new Set(procesados.map(r => r.jornada).filter(Boolean))].sort((a, b) => b - a);
+      setJornadaSelectedRes(jornadasUnicas[0] ?? null);
+    } catch (e) { showToast(e.message, "err"); }
+    setResultadosLoading(false);
+  };
+
+  // ── AÑADIR JUGADORES (ADMIN) ──────────────────────────────────
+  const buscarCandidatosAdmin = async () => {
+    if (!equipoDetalle || !ligaSeleccionada) return;
+    const afs = anadirAfiliados
+      .split(/[,\s\n]+/)
+      .map(normalizarAfiliado)
+      .filter(Boolean);
+    if (afs.length === 0) return showToast("Ingresa al menos un número de afiliado", "err");
+    if (jugadoresEquipo.length + afs.length > 17)
+      return showToast(`Máximo 17 jugadores por equipo. Quedan ${17 - jugadoresEquipo.length} cupos.`, "err");
+
+    setLoading(true);
+    try {
+      const idsActuales = new Set(jugadoresEquipo.map(j => j.jugadores?.numero_afiliado));
+      const enLiga = await db(
+        `/jugador_equipo?liga_id=eq.${ligaSeleccionada.id}&select=jugador_id,equipo_id`,
+        token
+      );
+      const idsEnLiga = new Set((enLiga || []).map(e => e.jugador_id));
+
+      const dorsalesOcupados = new Set(jugadoresEquipo.map(j => j.dorsal).filter(Boolean));
+
+      const candidatos = [];
+      const errores = [];
+      for (const af of afs) {
+        if (idsActuales.has(af)) { errores.push(`${af}: ya está en este equipo`); continue; }
+        const [jug] = await db(
+          `/jugadores?numero_afiliado=eq.${af}&select=id,nombre_completo,foto_url,numero_afiliado,posicion_preferida,numero_preferido,nombre_camiseta_preferido`,
+          token
+        );
+        if (!jug) { errores.push(`${af}: no existe`); continue; }
+        if (idsEnLiga.has(jug.id)) { errores.push(`${af} (${jug.nombre_completo}): ya inscrito en otro equipo de la liga`); continue; }
+        const { dorsal, cambiado } = calcularDorsal(jug.numero_preferido, dorsalesOcupados);
+        if (!dorsal) { errores.push(`${af}: no quedan dorsales libres en el equipo`); continue; }
+        dorsalesOcupados.add(dorsal);
+        const nombreCam = (jug.nombre_camiseta_preferido?.trim() || jug.nombre_completo.split(" ").slice(-1)[0] || jug.nombre_completo).toUpperCase();
+        candidatos.push({
+          ...jug,
+          nombre_camiseta_sugerido: nombreCam,
+          dorsal_asignado: dorsal,
+          dorsal_cambiado: cambiado,
+        });
+      }
+
+      if (errores.length > 0) showToast(errores.join(" · "), "err");
+      if (candidatos.length === 0) { setLoading(false); return; }
+
+      setAnadirCandidatos(candidatos);
+      setModalJugadores("anadir_confirm");
+    } catch (e) { showToast(e.message, "err"); }
+    setLoading(false);
+  };
+
+  const confirmarAnadirAdmin = async () => {
+    if (!equipoDetalle || anadirCandidatos.length === 0) return;
+    setLoading(true);
+    try {
+      const payload = anadirCandidatos.map(c => ({
+        jugador_id: c.id,
+        equipo_id: equipoDetalle.id,
+        liga_id: ligaSeleccionada.id,
+        dorsal: c.dorsal_asignado,
+        nombre_camiseta: c.nombre_camiseta_sugerido,
+        es_capitan: false,
+        activo: true,
+      }));
+      await db("/jugador_equipo", token, { method: "POST", body: JSON.stringify(payload) });
+      const cambios = anadirCandidatos.filter(c => c.dorsal_cambiado).length;
+      const baseMsg = `✓ ${anadirCandidatos.length} jugador${anadirCandidatos.length === 1 ? "" : "es"} añadido${anadirCandidatos.length === 1 ? "" : "s"}`;
+      showToast(cambios > 0 ? `${baseMsg}. ${cambios} con dorsal alternativo.` : baseMsg);
+      setModalJugadores(null);
+      setAnadirAfiliados("");
+      setAnadirCandidatos([]);
+      await cargarJugadoresEquipo(equipoDetalle.id, ligaSeleccionada.id);
+    } catch (e) { showToast(e.message, "err"); }
+    setLoading(false);
+  };
+
+  // ── ELIMINAR JUGADOR (ADMIN) ──────────────────────────────────
+  const eliminarJugadorAdmin = async () => {
+    if (!eliminarJugTarget || !equipoDetalle || !ligaSeleccionada) return;
+    setLoading(true);
+    try {
+      const jugadorId = eliminarJugTarget.jugador_id;
+      const jornadas = await db(`/jornadas?liga_id=eq.${ligaSeleccionada.id}&select=id`, token);
+      const jornadaIds = (jornadas || []).map(j => j.id);
+      if (jornadaIds.length > 0) {
+        const partidos = await db(
+          `/partidos?jornada_id=in.(${jornadaIds.join(",")})&select=id`,
+          token
+        );
+        const partidoIds = (partidos || []).map(p => p.id);
+        if (partidoIds.length > 0) {
+          const fichas = await db(
+            `/ficha_partido?partido_id=in.(${partidoIds.join(",")})&cerrada=eq.false&select=id,goleadores,asistencia`,
+            token
+          );
+          for (const f of fichas || []) {
+            const goleadores = Array.isArray(f.goleadores) ? f.goleadores.filter(g => g.jugador_id !== jugadorId) : [];
+            const asistencia = Array.isArray(f.asistencia) ? f.asistencia.filter(a => a !== jugadorId) : [];
+            await db(`/ficha_partido?id=eq.${f.id}`, token, {
+              method: "PATCH",
+              body: JSON.stringify({ goleadores, asistencia })
+            });
+          }
+        }
+      }
+      await db(`/jugador_equipo?id=eq.${eliminarJugTarget.id}`, token, { method: "DELETE" });
+      showToast("Jugador eliminado del equipo");
+      setModalJugadores(null);
+      setEliminarJugTarget(null);
+      await cargarJugadoresEquipo(equipoDetalle.id, ligaSeleccionada.id);
+    } catch (e) { showToast(e.message, "err"); }
+    setLoading(false);
+  };
+
+  const quitarCapitan = (inscripcionId, nombre) => {
+    setConfirmQuitarCap({ inscripcionId, nombre });
+  };
+
+  const confirmarQuitarCapitan = async () => {
+    if (!confirmQuitarCap) return;
+    setLoading(true);
+    try {
+      await db(`/jugador_equipo?id=eq.${confirmQuitarCap.inscripcionId}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ es_capitan: false })
+      });
+      showToast("Capitanía retirada");
+      setConfirmQuitarCap(null);
+      await cargarJugadoresEquipo(equipoDetalle.id, ligaSeleccionada.id);
+    } catch (e) { showToast(e.message, "err"); }
+    setLoading(false);
   };
 
   // ── CARGAR ÁRBITROS ───────────────────────────────────────────
@@ -252,6 +593,10 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
     if (seccion === "arbitros" && ligaSeleccionada) cargarArbitros();
   }, [seccion, ligaSeleccionada]);
 
+  useEffect(() => {
+    if (seccion === "resultados" && ligaSeleccionada) cargarResultados();
+  }, [seccion, ligaSeleccionada]);
+
   // Back button del topbar cuando hay un equipo abierto en detalle
   useEffect(() => {
     if (!setTopbarBack) return;
@@ -354,11 +699,11 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
 
       {/* SELECTOR DE LIGA */}
       <div style={s.ligaSelector}>
-        <span style={s.ligaLabel}>Liga activa:</span>
+        <span style={s.ligaLabel}>Torneos:</span>
         <div style={s.ligaTabs}>
           {ligas.map(l => (
             <button key={l.id}
-              onClick={() => { setLigaSeleccionada(l); setEquipoDetalle(null); setSeccion("equipos"); }}
+              onClick={() => { setLigaSeleccionada(l); setEquipoDetalle(null); if (seccion === "detalle") setSeccion("equipos"); }}
               style={{ ...s.ligaTab, ...(ligaSeleccionada?.id === l.id ? s.ligaTabActive : {}), borderLeft: `4px solid ${l.color_marca || "#4f8f2f"}` }}>
               🏆 {l.nombre}
             </button>
@@ -377,16 +722,6 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
 
       {ligaSeleccionada && (
         <>
-          {/* TABS */}
-          <div style={s.tabs}>
-            {[["equipos","👕","Equipos"],["jugadores","👥","Jugadores"],["calendario","📅","Calendario"],["arbitros","🟡","Árbitros"],["fichas","📄","Fichas"]].map(([key, icon, label]) => (
-              <button key={key} onClick={() => { setSeccion(key); setEquipoDetalle(null); }}
-                style={{ ...s.tab, ...(seccion === key || (seccion === "detalle" && key === "equipos") ? s.tabActive : {}) }}>
-                {icon} {label}
-              </button>
-            ))}
-          </div>
-
           {/* ── SECCIÓN EQUIPOS ── */}
           {(seccion === "equipos") && (
             <div>
@@ -436,7 +771,9 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
           )}
 
           {/* ── DETALLE EQUIPO ── */}
-          {seccion === "detalle" && equipoDetalle && (
+          {seccion === "detalle" && equipoDetalle && (() => {
+            const capitanActual = jugadoresEquipo.find(j => j.es_capitan);
+            return (
             <div>
               <div style={{ ...s.detalleHeader, borderLeft: `5px solid ${equipoDetalle.color_playera || "#3182ce"}` }}>
                 <div style={s.escudoWrapLg}>
@@ -444,29 +781,73 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                     ? <img src={equipoDetalle.escudo_url} alt="escudo" style={s.escudoImgLg} />
                     : <div style={{ ...s.escudoPlaceholderLg, background: equipoDetalle.color_playera || "#3182ce" }}>{equipoDetalle.nombre[0]}</div>}
                 </div>
-                <div>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <h3 style={s.detalleNombre}>{equipoDetalle.nombre}</h3>
                   <p style={s.detalleMeta}>{ligaSeleccionada.nombre} · {jugadoresEquipo.length} jugadores</p>
                 </div>
               </div>
 
+              {/* BLOQUE CAPITÁN */}
+              <div style={s.capitanBox}>
+                {capitanActual ? (
+                  <>
+                    <div style={s.capitanInfo}>
+                      <div style={s.capitanCrown}>👑</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={s.capitanLabel}>Capitán del equipo</div>
+                        <div style={s.capitanNombre}>{capitanActual.jugadores?.nombre_completo}</div>
+                        <div style={s.capitanMeta}>#{capitanActual.jugadores?.numero_afiliado}</div>
+                      </div>
+                    </div>
+                    <button style={s.btnQuitarCap} onClick={() => quitarCapitan(capitanActual.id, capitanActual.jugadores?.nombre_completo)}>
+                      Quitar capitanía
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div style={s.capitanInfo}>
+                      <div style={s.capitanCrown}>👑</div>
+                      <div>
+                        <div style={s.capitanLabel}>Sin capitán asignado</div>
+                        <div style={s.capitanMeta}>Asigna a un jugador para que gestione el equipo</div>
+                      </div>
+                    </div>
+                    <button style={s.btnAsignarCap} onClick={() => { setCapitanForm({ numero_afiliado: "", dorsal: "" }); setCapitanCandidato(null); setModalCapitan("input"); }}>
+                      + Asignar capitán
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div style={s.secHeader}>
+                <span style={s.secCount}>{jugadoresEquipo.length} / 17 jugadores</span>
+                <button style={s.btnAdd}
+                  onClick={() => { setAnadirAfiliados(""); setAnadirCandidatos([]); setModalJugadores("anadir_input"); }}
+                  disabled={jugadoresEquipo.length >= 17}>
+                  + Añadir jugadores
+                </button>
+              </div>
+
               {jugadoresEquipo.length === 0 ? (
                 <div style={s.empty}>
-                  <div style={s.emptyIcon}>👤</div>
+                  <div style={s.emptyIcon}>🏃</div>
                   <div style={s.emptyTxt}>No hay jugadores inscritos en este equipo aún</div>
-                  <p style={{ color: "#555", fontSize: 13 }}>Los jugadores se inscriben ellos mismos desde su perfil</p>
+                  <p style={{ color: "#555", fontSize: 13 }}>Añádelos con su número de afiliado</p>
                 </div>
               ) : (
                 <div style={s.jugadorList}>
                   {jugadoresEquipo.map(je => (
-                    <div key={je.id} style={s.jugadorRow}>
+                    <div key={je.id} style={{ ...s.jugadorRow, ...(je.es_capitan ? s.jugadorRowCap : {}) }}>
                       <div style={s.jugadorAvatar}>
                         {je.jugadores?.foto_url
                           ? <img src={je.jugadores.foto_url} alt="foto" style={s.jugadorFoto} />
-                          : <div style={s.jugadorFotoPlaceholder}>⚽</div>}
+                          : <div style={s.jugadorFotoPlaceholder}>🏃</div>}
                       </div>
                       <div style={s.jugadorInfo}>
-                        <div style={s.jugadorNombre}>{je.jugadores?.nombre_completo}</div>
+                        <div style={s.jugadorNombre}>
+                          {je.es_capitan && <span style={{ marginRight: 6 }}>👑</span>}
+                          {je.jugadores?.nombre_completo}
+                        </div>
                         <div style={s.jugadorMeta}>{je.jugadores?.posicion_preferida} · #{je.jugadores?.numero_afiliado}</div>
                       </div>
                       <div style={s.jugadorDorsal}>
@@ -479,12 +860,18 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                         <span style={s.camisetaNombre}>{je.nombre_camiseta || je.jugadores?.nombre_completo?.split(" ")[0]}</span>
                         <span style={s.camisetaLabel}>camiseta</span>
                       </div>
+                      <button style={s.btnEliminarJug}
+                        onClick={() => { setEliminarJugTarget(je); setModalJugadores("eliminar"); }}
+                        title="Eliminar del equipo">
+                        🗑️
+                      </button>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-          )}
+            );
+          })()}
 
           {/* ── SECCIÓN JUGADORES ── */}
           {seccion === "jugadores" && (
@@ -504,7 +891,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                       <div style={s.jugadorAvatar}>
                         {je.jugadores?.foto_url
                           ? <img src={je.jugadores.foto_url} alt="foto" style={s.jugadorFoto} />
-                          : <div style={s.jugadorFotoPlaceholder}>⚽</div>}
+                          : <div style={s.jugadorFotoPlaceholder}>🏃</div>}
                       </div>
                       <div style={s.jugadorInfo}>
                         <div style={s.jugadorNombre}>{je.jugadores?.nombre_completo}</div>
@@ -601,6 +988,181 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
           {seccion === "fichas" && (
             <FichaGenerator session={session} liga={ligaSeleccionada} />
           )}
+
+          {/* ── SECCIÓN RESULTADOS (FICHAS CERRADAS) ── */}
+          {seccion === "resultados" && (() => {
+            const jornadasDisponibles = [...new Set(resultados.map(r => r.jornada).filter(Boolean))].sort((a, b) => b - a);
+            const resultadosFiltrados = jornadaSelectedRes != null
+              ? resultados.filter(r => r.jornada === jornadaSelectedRes)
+              : resultados;
+            return (
+            <div>
+              <div style={s.secHeader}>
+                <span style={s.secCount}>{resultados.length} partido{resultados.length === 1 ? "" : "s"} con ficha cerrada</span>
+                <button style={{ ...s.btnAdd, background:"#f9fafb", color:"#374151", border:"1px solid #e5e7eb" }}
+                  onClick={cargarResultados} disabled={resultadosLoading}>
+                  ↻ Actualizar
+                </button>
+              </div>
+              {resultadosLoading ? (
+                <div style={{ textAlign:"center", padding:60, color:"#6b7280" }}>Cargando…</div>
+              ) : resultados.length === 0 ? (
+                <div style={s.empty}>
+                  <div style={s.emptyIcon}>📋</div>
+                  <div style={s.emptyTxt}>Aún no hay partidos con ficha cerrada</div>
+                  <p style={{ color:"#9ca3af", fontSize:13 }}>Las fichas que el árbitro cierre aparecerán aquí con su detalle.</p>
+                </div>
+              ) : (
+                <>
+                  {/* Selector de jornadas */}
+                  {jornadasDisponibles.length > 0 && (
+                    <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:18, alignItems:"center" }}>
+                      <span style={{ fontSize:13, color:"#6b7280", fontWeight:600 }}>Jornada:</span>
+                      {jornadasDisponibles.map(j => (
+                        <button key={j}
+                          onClick={() => setJornadaSelectedRes(j)}
+                          style={{
+                            background: jornadaSelectedRes === j ? `linear-gradient(135deg, ${GREEN} 0%, #7fbf4d 100%)` : SURFACE,
+                            color: jornadaSelectedRes === j ? "#fff" : "#6b7280",
+                            border: `1px solid ${jornadaSelectedRes === j ? GREEN : BORDER}`,
+                            borderRadius: 20,
+                            padding: "6px 14px",
+                            fontSize: 13,
+                            cursor: "pointer",
+                            fontWeight: jornadaSelectedRes === j ? 800 : 600,
+                            boxShadow: jornadaSelectedRes === j ? "0 3px 10px rgba(79,143,47,0.3)" : "none"
+                          }}>
+                          J{j}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => setJornadaSelectedRes(null)}
+                        style={{
+                          background: jornadaSelectedRes === null ? `linear-gradient(135deg, ${GREEN} 0%, #7fbf4d 100%)` : SURFACE,
+                          color: jornadaSelectedRes === null ? "#fff" : "#6b7280",
+                          border: `1px solid ${jornadaSelectedRes === null ? GREEN : BORDER}`,
+                          borderRadius: 20,
+                          padding: "6px 14px",
+                          fontSize: 13,
+                          cursor: "pointer",
+                          fontWeight: jornadaSelectedRes === null ? 800 : 600,
+                          boxShadow: jornadaSelectedRes === null ? "0 3px 10px rgba(79,143,47,0.3)" : "none"
+                        }}>
+                        Todas
+                      </button>
+                    </div>
+                  )}
+                <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                  {resultadosFiltrados.length === 0 ? (
+                    <div style={s.empty}>
+                      <div style={s.emptyIcon}>📋</div>
+                      <div style={s.emptyTxt}>No hay partidos cerrados en esta jornada</div>
+                    </div>
+                  ) : resultadosFiltrados.map(r => {
+                    const expandido = resultadoExpandido === r.id;
+                    const goleadores = r.ficha?.goleadores || [];
+                    const asistencia = r.ficha?.asistencia || [];
+                    const golesLocal = goleadores.filter(g => g.equipo === r.local?.id);
+                    const golesVisit = goleadores.filter(g => g.equipo === r.visitante?.id);
+                    const asistLocal = asistencia.map(jid => ({ jid, insc: jugadoresInfo.insc?.[`${jid}_${r.local?.id}`], jug: jugadoresInfo.jug?.[jid] })).filter(x => x.insc);
+                    const asistVisit = asistencia.map(jid => ({ jid, insc: jugadoresInfo.insc?.[`${jid}_${r.visitante?.id}`], jug: jugadoresInfo.jug?.[jid] })).filter(x => x.insc);
+                    return (
+                      <div key={r.id} style={s.resultadoCard}>
+                        <div style={s.resultadoTop} onClick={() => setResultadoExpandido(expandido ? null : r.id)}>
+                          <div style={s.resultadoMeta}>
+                            <span style={s.resultadoJornada}>J{r.jornada}</span>
+                            <span style={s.resultadoFecha}>{r.fecha || "Sin fecha"}</span>
+                          </div>
+                          <div style={s.resultadoMid}>
+                            <div style={{ ...s.resEq, justifyContent:"flex-end" }}>
+                              <span style={s.resEqNombre}>{r.local?.nombre || "—"}</span>
+                              <span style={{ ...s.resEqColor, background: r.local?.color_playera || "#9ca3af" }} />
+                            </div>
+                            <div style={s.resMarcador}>
+                              {r.ficha?.goles_local} - {r.ficha?.goles_visitante}
+                            </div>
+                            <div style={s.resEq}>
+                              <span style={{ ...s.resEqColor, background: r.visitante?.color_playera || "#9ca3af" }} />
+                              <span style={s.resEqNombre}>{r.visitante?.nombre || "—"}</span>
+                            </div>
+                          </div>
+                          <div style={s.resExpandIcon}>{expandido ? "▲" : "▼"}</div>
+                        </div>
+                        {expandido && (
+                          <div style={s.resultadoDetalle}>
+                            {/* Goleadores */}
+                            <div style={s.resDetSec}>
+                              <div style={s.resDetTitle}>⚽ Goleadores</div>
+                              {goleadores.length === 0 ? (
+                                <div style={s.resDetEmpty}>Sin goles registrados</div>
+                              ) : (
+                                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                                  <div>
+                                    <div style={s.resDetSubT}>{r.local?.nombre}</div>
+                                    {golesLocal.length === 0 ? <div style={s.resDetMini}>—</div> : golesLocal.map((g, i) => (
+                                      <div key={i} style={s.resDetMini}>
+                                        <strong>#{g.dorsal || "?"}</strong> {g.nombre} <span style={{ color: GREEN, fontWeight: 800 }}>({g.goles})</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div>
+                                    <div style={s.resDetSubT}>{r.visitante?.nombre}</div>
+                                    {golesVisit.length === 0 ? <div style={s.resDetMini}>—</div> : golesVisit.map((g, i) => (
+                                      <div key={i} style={s.resDetMini}>
+                                        <strong>#{g.dorsal || "?"}</strong> {g.nombre} <span style={{ color: GREEN, fontWeight: 800 }}>({g.goles})</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            {/* Asistencia */}
+                            <div style={s.resDetSec}>
+                              <div style={s.resDetTitle}>👥 Asistencia ({asistencia.length})</div>
+                              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                                <div>
+                                  <div style={s.resDetSubT}>{r.local?.nombre} ({asistLocal.length})</div>
+                                  {asistLocal.length === 0 ? <div style={s.resDetMini}>—</div> : asistLocal.map(({jid, insc, jug}) => (
+                                    <div key={jid} style={s.resDetMini}>
+                                      <strong>#{insc?.dorsal || "?"}</strong> {jug?.nombre_completo || "—"}
+                                    </div>
+                                  ))}
+                                </div>
+                                <div>
+                                  <div style={s.resDetSubT}>{r.visitante?.nombre} ({asistVisit.length})</div>
+                                  {asistVisit.length === 0 ? <div style={s.resDetMini}>—</div> : asistVisit.map(({jid, insc, jug}) => (
+                                    <div key={jid} style={s.resDetMini}>
+                                      <strong>#{insc?.dorsal || "?"}</strong> {jug?.nombre_completo || "—"}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                            {/* Faltas y observaciones */}
+                            {(r.ficha?.faltas_local || r.ficha?.faltas_visitante || r.ficha?.observaciones) && (
+                              <div style={s.resDetSec}>
+                                <div style={s.resDetTitle}>📝 Otros</div>
+                                <div style={s.resDetMini}>
+                                  Faltas: {r.local?.nombre} ({r.ficha.faltas_local || 0}) · {r.visitante?.nombre} ({r.ficha.faltas_visitante || 0})
+                                </div>
+                                {r.ficha.observaciones && (
+                                  <div style={{ ...s.resDetMini, marginTop: 6, fontStyle:"italic" }}>
+                                    "{r.ficha.observaciones}"
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                </>
+              )}
+            </div>
+            );
+          })()}
 
         </>
       )}
@@ -752,6 +1314,219 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
           </div>
         </div>
       )}
+
+      {/* ── MODAL ASIGNAR CAPITÁN: paso 1 (input) ── */}
+      {modalCapitan === "input" && equipoDetalle && (
+        <div style={s.overlay} onClick={() => setModalCapitan(null)}>
+          <div style={{ ...s.modalBox, maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <h3 style={s.modalTitle}>👑 Asignar capitán</h3>
+            <p style={{ fontSize: 13, color: "#6b7280", marginTop: -14, marginBottom: 18 }}>
+              Ingresa el número de afiliado del jugador que será capitán de <strong>{equipoDetalle.nombre}</strong>.
+            </p>
+            <div style={s.field}>
+              <label style={s.label}>Número de afiliado *</label>
+              <div style={{ display: "flex", alignItems: "stretch", border: `1px solid ${BORDER}`, borderRadius: 9, background: BASE, overflow: "hidden" }}>
+                <span style={{ display: "flex", alignItems: "center", padding: "0 14px", background: "#f3f4f6", color: "#6b7280", fontSize: 14, fontWeight: 700, borderRight: `1px solid ${BORDER}` }}>AF-</span>
+                <input
+                  style={{ ...s.input, border: "none", borderRadius: 0, background: "transparent", flex: 1 }}
+                  placeholder="00001"
+                  inputMode="numeric"
+                  value={capitanForm.numero_afiliado}
+                  onChange={e => setCapitanForm({ ...capitanForm, numero_afiliado: e.target.value })}
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div style={s.field}>
+              <label style={s.label}>Dorsal (opcional)</label>
+              <input
+                style={s.input}
+                type="number"
+                min="1" max="99"
+                placeholder="Si aún no está inscrito"
+                value={capitanForm.dorsal}
+                onChange={e => setCapitanForm({ ...capitanForm, dorsal: e.target.value })}
+              />
+              <p style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
+                Solo se usa si el jugador no está inscrito en este equipo.
+              </p>
+            </div>
+            <div style={s.modalActions}>
+              <button style={s.btnCancel} onClick={() => setModalCapitan(null)}>Cancelar</button>
+              <button style={s.btnSave} onClick={buscarCandidatoCapitan} disabled={loading}>
+                {loading ? "Buscando..." : "Buscar jugador"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL ASIGNAR CAPITÁN: paso 2 (confirmación) ── */}
+      {modalCapitan === "confirm" && capitanCandidato && equipoDetalle && (
+        <div style={s.overlay} onClick={() => setModalCapitan(null)}>
+          <div style={{ ...s.modalBox, maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <h3 style={s.modalTitle}>Confirmar capitán</h3>
+            <div style={s.confirmCard}>
+              <div style={{ width: 60, height: 60, borderRadius: "50%", overflow: "hidden", background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                {capitanCandidato.jugador.foto_url
+                  ? <img src={capitanCandidato.jugador.foto_url} alt="foto" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  : <span style={{ fontSize: 26 }}>🏃</span>}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#111827", marginBottom: 3 }}>
+                  {capitanCandidato.jugador.nombre_completo}
+                </div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>
+                  #{capitanCandidato.jugador.numero_afiliado}
+                </div>
+                {capitanCandidato.yaInscrito && (
+                  <div style={{ marginTop: 6, fontSize: 11, color: GREEN, fontWeight: 700 }}>
+                    Ya inscrito · dorsal {capitanCandidato.yaInscrito.dorsal || "—"}
+                  </div>
+                )}
+              </div>
+            </div>
+            <p style={{ fontSize: 13, color: "#374151", marginBottom: 22 }}>
+              {capitanCandidato.yaInscrito
+                ? `Se le otorgará el rol de capitán y podrá gestionar la lista de jugadores y la tarjeta del equipo.`
+                : `Se inscribirá en ${equipoDetalle.nombre} con el rol de capitán.`}
+            </p>
+            <div style={s.modalActions}>
+              <button style={s.btnCancel} onClick={() => setModalCapitan("input")}>← Volver</button>
+              <button style={s.btnSave} onClick={confirmarCapitan} disabled={loading}>
+                {loading ? "Asignando..." : "👑 Confirmar capitán"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL AÑADIR JUGADORES: paso 1 (input) ── */}
+      {modalJugadores === "anadir_input" && equipoDetalle && (
+        <div style={s.overlay} onClick={() => setModalJugadores(null)}>
+          <div style={{ ...s.modalBox, maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <h3 style={s.modalTitle}>+ Añadir jugadores a {equipoDetalle.nombre}</h3>
+            <p style={{ fontSize: 13, color: "#6b7280", marginTop: -14, marginBottom: 16 }}>
+              Ingresa uno o varios números de afiliado (sin "AF-"). Sepáralos con coma, espacio o salto de línea.
+            </p>
+            <div style={s.field}>
+              <label style={s.label}>Números de afiliado</label>
+              <textarea
+                style={{ ...s.input, minHeight: 90, resize: "vertical", fontFamily: "inherit" }}
+                placeholder={"00001\n00002\n00003"}
+                inputMode="numeric"
+                value={anadirAfiliados}
+                onChange={e => setAnadirAfiliados(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <p style={{ fontSize: 12, color: "#9ca3af", marginBottom: 8 }}>
+              Cupos disponibles: <strong>{17 - jugadoresEquipo.length}</strong> / 17
+            </p>
+            <div style={s.modalActions}>
+              <button style={s.btnCancel} onClick={() => setModalJugadores(null)}>Cancelar</button>
+              <button style={s.btnSave} onClick={buscarCandidatosAdmin} disabled={loading}>
+                {loading ? "Buscando..." : "Verificar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL AÑADIR JUGADORES: paso 2 (confirmar) ── */}
+      {modalJugadores === "anadir_confirm" && equipoDetalle && (
+        <div style={s.overlay} onClick={() => setModalJugadores(null)}>
+          <div style={{ ...s.modalBox, maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+            <h3 style={s.modalTitle}>Confirmar inscripción</h3>
+            <p style={{ fontSize: 13, color: "#374151", marginBottom: 16 }}>
+              Estos {anadirCandidatos.length} jugador{anadirCandidatos.length === 1 ? "" : "es"} se inscribirán en <strong>{equipoDetalle.nombre}</strong>:
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 300, overflowY: "auto", marginBottom: 18 }}>
+              {anadirCandidatos.map(c => (
+                <div key={c.id} style={s.confirmCard}>
+                  <div style={{ width: 42, height: 42, borderRadius: "50%", background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+                    {c.foto_url
+                      ? <img src={c.foto_url} alt="foto" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      : <span style={{ fontSize: 20 }}>🏃</span>}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{c.nombre_completo}</div>
+                    <div style={{ fontSize: 11, color: "#6b7280" }}>#{c.numero_afiliado} · {c.nombre_camiseta_sugerido}</div>
+                    {c.dorsal_cambiado && (
+                      <div style={{ fontSize: 10, color: "#92400e", marginTop: 3, fontWeight: 600 }}>
+                        ⚠️ Su preferido (#{c.numero_preferido}) ya está ocupado
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0, minWidth: 44 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 8, background: c.dorsal_cambiado ? "#f59e0b" : (equipoDetalle.color_playera || "#3182ce"), color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 900 }}>
+                      {c.dorsal_asignado}
+                    </div>
+                    <div style={{ fontSize: 9, color: "#9ca3af", fontWeight: 700, marginTop: 3, textTransform: "uppercase", letterSpacing: 0.5 }}>Dorsal</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={s.modalActions}>
+              <button style={s.btnCancel} onClick={() => setModalJugadores("anadir_input")}>← Volver</button>
+              <button style={s.btnSave} onClick={confirmarAnadirAdmin} disabled={loading}>
+                {loading ? "Inscribiendo..." : `✓ Inscribir ${anadirCandidatos.length}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL ELIMINAR JUGADOR ── */}
+      {modalJugadores === "eliminar" && eliminarJugTarget && (
+        <div style={s.overlay} onClick={() => setModalJugadores(null)}>
+          <div style={{ ...s.modalBox, maxWidth: 400 }} onClick={e => e.stopPropagation()}>
+            <div style={{ textAlign: "center", marginBottom: 18 }}>
+              <div style={{ fontSize: 42, marginBottom: 10 }}>⚠️</div>
+              <h3 style={{ ...s.modalTitle, marginBottom: 10 }}>¿Eliminar a este jugador?</h3>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#111827", marginBottom: 6 }}>
+                {eliminarJugTarget.jugadores?.nombre_completo}
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>#{eliminarJugTarget.jugadores?.numero_afiliado}</div>
+            </div>
+            <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 10, padding: "12px 14px", fontSize: 12, color: "#991b1b", lineHeight: 1.45, marginBottom: 18 }}>
+              <strong>Aviso:</strong> Saldrá de la lista del equipo y se borrarán todos sus datos en partidos pendientes (asistencia y goles en fichas no cerradas). Las fichas ya cerradas se conservan.
+            </div>
+            <div style={s.modalActions}>
+              <button style={s.btnCancel} onClick={() => setModalJugadores(null)}>Cancelar</button>
+              <button style={{ ...s.btnSave, background: "#dc2626" }} onClick={eliminarJugadorAdmin} disabled={loading}>
+                {loading ? "Eliminando..." : "Sí, eliminar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL QUITAR CAPITANÍA ── */}
+      {confirmQuitarCap && (
+        <div style={s.overlay} onClick={() => setConfirmQuitarCap(null)}>
+          <div style={{ ...s.modalBox, maxWidth: 400 }} onClick={e => e.stopPropagation()}>
+            <div style={{ textAlign: "center", marginBottom: 18 }}>
+              <div style={{ fontSize: 42, marginBottom: 10 }}>👑</div>
+              <h3 style={{ ...s.modalTitle, marginBottom: 10 }}>¿Quitar capitanía?</h3>
+              {confirmQuitarCap.nombre && (
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#111827", marginBottom: 6 }}>
+                  {confirmQuitarCap.nombre}
+                </div>
+              )}
+              <p style={{ color: "#6b7280", fontSize: 13, margin: 0 }}>
+                Dejará de ser capitán pero seguirá inscrito en el equipo. Otro jugador podrá ser asignado como capitán.
+              </p>
+            </div>
+            <div style={s.modalActions}>
+              <button style={s.btnCancel} onClick={() => setConfirmQuitarCap(null)}>Cancelar</button>
+              <button style={{ ...s.btnSave, background: "#dc2626" }} onClick={confirmarQuitarCapitan} disabled={loading}>
+                {loading ? "Quitando..." : "Sí, quitar capitanía"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -769,8 +1544,8 @@ const s = {
   ligaSelector: { display: "flex", alignItems: "center", gap: 14, marginBottom: 24, flexWrap: "wrap" },
   ligaLabel: { fontSize: 13, color: "#6b7280", fontWeight: 600, flexShrink: 0 },
   ligaTabs: { display: "flex", gap: 8, flexWrap: "wrap" },
-  ligaTab: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 20, padding: "7px 16px", color: "#6b7280", fontSize: 13, cursor: "pointer", fontWeight: 500 },
-  ligaTabActive: { background: "#f0fdf4", borderColor: GREEN, color: GREEN },
+  ligaTab: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 20, padding: "7px 16px", color: "#6b7280", fontSize: 13, cursor: "pointer", fontWeight: 500, transition: "transform 0.15s, box-shadow 0.15s" },
+  ligaTabActive: { background: `linear-gradient(135deg, ${GREEN} 0%, #7fbf4d 100%)`, borderColor: GREEN, color: "#fff", fontWeight: 800, boxShadow: "0 4px 12px rgba(79,143,47,0.35)", transform: "translateY(-1px)" },
   tabs: { display: "flex", gap: 4, marginBottom: 24, borderBottom: `1px solid ${BORDER}` },
   tab: { background: "transparent", border: "none", borderBottom: "2px solid transparent", color: "#6b7280", padding: "10px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer", marginBottom: -1 },
   tabActive: { color: GREEN, borderBottomColor: GREEN },
@@ -812,8 +1587,8 @@ const s = {
   empty: { textAlign: "center", padding: "60px 20px" },
   emptyIcon: { fontSize: 48, marginBottom: 16 },
   emptyTxt: { color: "#6b7280", fontSize: 15, marginBottom: 12 },
-  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 },
-  modalBox: { background: "#ffffff", border: `1px solid ${BORDER}`, borderRadius: 18, padding: 32, width: "100%", maxWidth: 440, boxShadow: "0 8px 32px rgba(0,0,0,0.12)" },
+  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16, overflowY: "auto" },
+  modalBox: { background: "#ffffff", border: `1px solid ${BORDER}`, borderRadius: 18, padding: 24, width: "100%", maxWidth: 440, maxHeight: "calc(100vh - 32px)", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.12)" },
   modalTitle: { fontSize: 18, fontWeight: 800, color: "#111827", marginBottom: 22 },
   escudoUpload: { display: "flex", alignItems: "center", gap: 18, marginBottom: 22, background: BASE, borderRadius: 12, padding: 16 },
   escudoUploadPreview: { width: 64, height: 64, borderRadius: 12, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, fontWeight: 800, color: "#fff", overflow: "hidden" },
@@ -830,6 +1605,38 @@ const s = {
   btnEdit: { background: "#f3f4f6", color: "#6b7280", border: `1px solid ${BORDER}`, borderRadius: 7, padding: "5px 9px", fontSize: 13, cursor: "pointer" },
   btnDel: { background: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 7, padding: "5px 9px", fontSize: 13, cursor: "pointer" },
   toast: { position: "fixed", bottom: 28, right: 28, padding: "12px 24px", borderRadius: 12, fontWeight: 700, fontSize: 14, zIndex: 9999 },
+  capitanBox: { background: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)", border: "1px solid #fde68a", borderRadius: 14, padding: "14px 18px", marginBottom: 22, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" },
+  capitanInfo: { display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 },
+  capitanCrown: { fontSize: 26, width: 44, height: 44, borderRadius: 10, background: "rgba(255,255,255,0.6)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  capitanLabel: { fontSize: 11, fontWeight: 700, color: "#92400e", textTransform: "uppercase", letterSpacing: 0.7, marginBottom: 2 },
+  capitanNombre: { fontSize: 15, fontWeight: 800, color: "#111827", marginBottom: 2 },
+  capitanMeta: { fontSize: 12, color: "#6b7280" },
+  btnAsignarCap: { background: "#f59e0b", color: "#fff", border: "none", borderRadius: 10, padding: "9px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" },
+  btnQuitarCap: { background: "#fff", color: "#92400e", border: "1px solid #fde68a", borderRadius: 10, padding: "9px 16px", fontWeight: 600, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap" },
+  jugadorRowCap: { background: "linear-gradient(90deg, #fffbeb 0%, #ffffff 60%)", border: "1px solid #fde68a", borderLeft: "4px solid #f59e0b" },
+  btnEliminarJug: { background: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 8, padding: "6px 10px", fontSize: 14, cursor: "pointer", flexShrink: 0 },
+  confirmCard: { display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", background: "#f9fafb", border: `1px solid ${BORDER}`, borderRadius: 12, marginBottom: 16 },
+  // ── Resultados ──
+  resultadoCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  resultadoTop: { display: "grid", gridTemplateColumns: "auto 1fr auto", alignItems: "center", gap: 14, padding: "12px 16px", cursor: "pointer" },
+  resultadoMeta: { display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, minWidth: 60 },
+  resultadoJornada: { fontSize: 12, fontWeight: 800, color: GREEN, padding: "2px 8px", background: "#f0fdf4", borderRadius: 6, border: "1px solid #c3e6a3" },
+  resultadoFecha: { fontSize: 11, color: "#9ca3af" },
+  resultadoMid: { display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 10 },
+  resEq: { display: "flex", alignItems: "center", gap: 6, minWidth: 0 },
+  resEqNombre: { fontSize: 13, fontWeight: 700, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  resEqColor: { width: 12, height: 12, borderRadius: "50%", flexShrink: 0 },
+  resMarcador: { fontSize: 18, fontWeight: 900, color: "#111827", padding: "4px 10px", background: "#f9fafb", borderRadius: 8 },
+  resExpandIcon: { color: "#9ca3af", fontSize: 11 },
+  resultadoDetalle: { borderTop: `1px solid ${BORDER}`, padding: "16px", background: "linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%)" },
+  resDetSec: { marginBottom: 16, background: "#ffffff", border: `1px solid ${BORDER}`, borderRadius: 12, padding: "12px 14px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" },
+  resDetTitle: { fontSize: 13, fontWeight: 800, color: GREEN, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.6, paddingBottom: 8, borderBottom: `1px solid #f0fdf4` },
+  resDetSubT: { fontSize: 11, fontWeight: 800, color: "#fff", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5, padding: "4px 10px", borderRadius: 6, display: "inline-block" },
+  resDetMini: { fontSize: 13, color: "#374151", padding: "5px 8px", borderRadius: 6, marginBottom: 3, display: "flex", alignItems: "center", gap: 8 },
+  resDetMiniGol: { background: "#f0fdf4", border: "1px solid #c3e6a3" },
+  resDetDorsal: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, color: "#fff", fontWeight: 800, fontSize: 11, flexShrink: 0 },
+  resDetGoles: { background: GREEN, color: "#fff", padding: "2px 8px", borderRadius: 10, fontWeight: 800, fontSize: 11, marginLeft: "auto" },
+  resDetEmpty: { fontSize: 12, color: "#9ca3af", fontStyle: "italic", textAlign: "center", padding: "8px 0" },
 };
 
 const css = `

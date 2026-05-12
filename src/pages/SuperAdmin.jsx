@@ -70,6 +70,13 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
   const [ligaForm, setLigaForm] = useState({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: "", temporada: "", color_marca: "#4f8f2f" });
   const [editLigaId, setEditLigaId] = useState(null);
 
+  // Resultados (fichas cerradas)
+  const [resultados, setResultados] = useState([]);
+  const [resultadosLoading, setResultadosLoading] = useState(false);
+  const [jugadoresInfo, setJugadoresInfo] = useState({ jug: {}, insc: {} });
+  const [resultadoExpandido, setResultadoExpandido] = useState(null);
+  const [filtroLigaRes, setFiltroLigaRes] = useState("todas");
+
   const token = session?.access_token;
 
   const showToast = (msg, tipo = "ok") => {
@@ -93,6 +100,72 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
   };
 
   useEffect(() => { cargarCanchas(); cargarLigas(); }, []);
+
+  // ── RESULTADOS (FICHAS CERRADAS) ──────────────────────────────
+  const cargarResultadosSA = async () => {
+    setResultadosLoading(true);
+    try {
+      const ligasFiltro = filtroLigaRes === "todas" ? "" : `&liga_id=eq.${filtroLigaRes}`;
+      const jornadas = await db(`/jornadas?select=id,numero,fecha,liga_id${ligasFiltro}&order=numero`, token);
+      const jornadaIds = (jornadas || []).map(j => j.id);
+      if (jornadaIds.length === 0) { setResultados([]); setResultadosLoading(false); return; }
+
+      const partidos = await db(
+        `/partidos?jornada_id=in.(${jornadaIds.join(",")})&select=id,jornada_id,equipo_local_id,equipo_visitante_id,jornadas(numero,fecha,liga_id),ficha_partido(*)`,
+        token
+      );
+
+      const cerradas = (partidos || []).filter(p => {
+        const f = Array.isArray(p.ficha_partido) ? p.ficha_partido[0] : p.ficha_partido;
+        return f?.cerrada;
+      });
+
+      const equipoIds = new Set();
+      cerradas.forEach(p => { equipoIds.add(p.equipo_local_id); equipoIds.add(p.equipo_visitante_id); });
+      const equipos = equipoIds.size > 0
+        ? await db(`/equipos?id=in.(${[...equipoIds].join(",")})&select=id,nombre,color_playera,liga_id`, token)
+        : [];
+      const equiposMap = Object.fromEntries(equipos.map(e => [e.id, e]));
+      const ligasMap = Object.fromEntries((ligas || []).map(l => [l.id, l]));
+
+      const jugIds = new Set();
+      cerradas.forEach(p => {
+        const f = Array.isArray(p.ficha_partido) ? p.ficha_partido[0] : p.ficha_partido;
+        (f?.asistencia || []).forEach(id => jugIds.add(id));
+        (f?.goleadores || []).forEach(g => g.jugador_id && jugIds.add(g.jugador_id));
+      });
+      const jugadores = jugIds.size > 0
+        ? await db(`/jugadores?id=in.(${[...jugIds].join(",")})&select=id,nombre_completo,numero_afiliado`, token)
+        : [];
+      const jugadoresMap = Object.fromEntries(jugadores.map(j => [j.id, j]));
+
+      const inscripciones = jugIds.size > 0
+        ? await db(`/jugador_equipo?jugador_id=in.(${[...jugIds].join(",")})&select=jugador_id,equipo_id,dorsal`, token)
+        : [];
+      const inscMap = {};
+      inscripciones.forEach(i => { inscMap[`${i.jugador_id}_${i.equipo_id}`] = i; });
+
+      setJugadoresInfo({ jug: jugadoresMap, insc: inscMap });
+      setResultados(cerradas.map(p => {
+        const ficha = Array.isArray(p.ficha_partido) ? p.ficha_partido[0] : p.ficha_partido;
+        const liga = ligasMap[p.jornadas?.liga_id];
+        return {
+          id: p.id,
+          local: equiposMap[p.equipo_local_id],
+          visitante: equiposMap[p.equipo_visitante_id],
+          jornada: p.jornadas?.numero,
+          fecha: p.jornadas?.fecha,
+          liga,
+          ficha,
+        };
+      }).sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "") || (b.jornada || 0) - (a.jornada || 0)));
+    } catch (e) { showToast(e.message, "err"); }
+    setResultadosLoading(false);
+  };
+
+  useEffect(() => {
+    if (seccion === "resultados") cargarResultadosSA();
+  }, [seccion, filtroLigaRes]);
 
   // ── CANCHAS ───────────────────────────────────────────────────
   const guardarCancha = async () => {
@@ -463,6 +536,160 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
   <Solicitudes session={session} />
 )}
 
+      {/* ── SECCIÓN RESULTADOS (FICHAS CERRADAS) ── */}
+      {seccion === "resultados" && (
+        <div>
+          <h2 style={s.title}>📋 Resultados de partidos</h2>
+          <p style={s.sub}>Fichas cerradas de todos los torneos</p>
+
+          {/* Selector de torneo */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18, marginTop: 16, alignItems: "center" }}>
+            <span style={{ fontSize: 13, color: "#6b7280", fontWeight: 600 }}>Torneo:</span>
+            <button
+              onClick={() => setFiltroLigaRes("todas")}
+              style={{
+                background: filtroLigaRes === "todas" ? "#f0fdf4" : "#fff",
+                border: `1px solid ${filtroLigaRes === "todas" ? "#4f8f2f" : "#e5e7eb"}`,
+                color: filtroLigaRes === "todas" ? "#4f8f2f" : "#6b7280",
+                borderRadius: 20, padding: "7px 14px", fontSize: 13, cursor: "pointer", fontWeight: 600
+              }}>
+              ⚡ Todos
+            </button>
+            {ligas.map(l => (
+              <button key={l.id}
+                onClick={() => setFiltroLigaRes(l.id)}
+                style={{
+                  background: filtroLigaRes === l.id ? "#f0fdf4" : "#fff",
+                  border: `1px solid ${filtroLigaRes === l.id ? "#4f8f2f" : "#e5e7eb"}`,
+                  color: filtroLigaRes === l.id ? "#4f8f2f" : "#6b7280",
+                  borderRadius: 20, padding: "7px 14px", fontSize: 13, cursor: "pointer", fontWeight: 600
+                }}
+                title={l.canchas?.nombre}>
+                🏆 {l.nombre}
+              </button>
+            ))}
+            <button
+              onClick={cargarResultadosSA}
+              style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:8, padding:"6px 12px", color:"#374151", fontSize:12, fontWeight:600, cursor:"pointer", marginLeft:"auto" }}
+              disabled={resultadosLoading}>
+              ↻ Actualizar
+            </button>
+          </div>
+
+          {resultadosLoading ? (
+            <div style={{ textAlign:"center", padding:60, color:"#6b7280" }}>Cargando…</div>
+          ) : resultados.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "60px 20px" }}>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>📋</div>
+              <div style={{ color: "#6b7280", fontSize: 15, fontWeight: 600 }}>No hay partidos con ficha cerrada</div>
+              <p style={{ color:"#9ca3af", fontSize:13 }}>
+                {filtroLigaRes === "todas" ? "Cuando los árbitros cierren fichas aparecerán aquí." : "Este torneo aún no tiene partidos cerrados."}
+              </p>
+            </div>
+          ) : (
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              {resultados.map(r => {
+                const expandido = resultadoExpandido === r.id;
+                const goleadores = r.ficha?.goleadores || [];
+                const asistencia = r.ficha?.asistencia || [];
+                const golesLocal = goleadores.filter(g => g.equipo === r.local?.id);
+                const golesVisit = goleadores.filter(g => g.equipo === r.visitante?.id);
+                const asistLocal = asistencia.map(jid => ({ jid, insc: jugadoresInfo.insc?.[`${jid}_${r.local?.id}`], jug: jugadoresInfo.jug?.[jid] })).filter(x => x.insc);
+                const asistVisit = asistencia.map(jid => ({ jid, insc: jugadoresInfo.insc?.[`${jid}_${r.visitante?.id}`], jug: jugadoresInfo.jug?.[jid] })).filter(x => x.insc);
+                return (
+                  <div key={r.id} style={sR.card}>
+                    <div style={sR.top} onClick={() => setResultadoExpandido(expandido ? null : r.id)}>
+                      <div style={sR.meta}>
+                        <span style={sR.jornada}>J{r.jornada}</span>
+                        <span style={sR.fecha}>{r.fecha || "Sin fecha"}</span>
+                        <span style={sR.ligaTag}>🏆 {r.liga?.nombre || "—"}</span>
+                      </div>
+                      <div style={sR.mid}>
+                        <div style={{ ...sR.eq, justifyContent:"flex-end" }}>
+                          <span style={sR.eqNombre}>{r.local?.nombre || "—"}</span>
+                          <span style={{ ...sR.eqColor, background: r.local?.color_playera || "#9ca3af" }} />
+                        </div>
+                        <div style={sR.marcador}>
+                          {r.ficha?.goles_local} - {r.ficha?.goles_visitante}
+                        </div>
+                        <div style={sR.eq}>
+                          <span style={{ ...sR.eqColor, background: r.visitante?.color_playera || "#9ca3af" }} />
+                          <span style={sR.eqNombre}>{r.visitante?.nombre || "—"}</span>
+                        </div>
+                      </div>
+                      <div style={sR.expandIcon}>{expandido ? "▲" : "▼"}</div>
+                    </div>
+                    {expandido && (
+                      <div style={sR.detalle}>
+                        <div style={sR.detSec}>
+                          <div style={sR.detTitle}>⚽ Goleadores</div>
+                          {goleadores.length === 0 ? (
+                            <div style={sR.detEmpty}>Sin goles registrados</div>
+                          ) : (
+                            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                              <div>
+                                <div style={sR.detSubT}>{r.local?.nombre}</div>
+                                {golesLocal.length === 0 ? <div style={sR.detMini}>—</div> : golesLocal.map((g, i) => (
+                                  <div key={i} style={sR.detMini}>
+                                    <strong>#{g.dorsal || "?"}</strong> {g.nombre} <span style={{ color: "#4f8f2f", fontWeight: 800 }}>({g.goles})</span>
+                                  </div>
+                                ))}
+                              </div>
+                              <div>
+                                <div style={sR.detSubT}>{r.visitante?.nombre}</div>
+                                {golesVisit.length === 0 ? <div style={sR.detMini}>—</div> : golesVisit.map((g, i) => (
+                                  <div key={i} style={sR.detMini}>
+                                    <strong>#{g.dorsal || "?"}</strong> {g.nombre} <span style={{ color: "#4f8f2f", fontWeight: 800 }}>({g.goles})</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <div style={sR.detSec}>
+                          <div style={sR.detTitle}>👥 Asistencia ({asistencia.length})</div>
+                          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                            <div>
+                              <div style={sR.detSubT}>{r.local?.nombre} ({asistLocal.length})</div>
+                              {asistLocal.length === 0 ? <div style={sR.detMini}>—</div> : asistLocal.map(({jid, insc, jug}) => (
+                                <div key={jid} style={sR.detMini}>
+                                  <strong>#{insc?.dorsal || "?"}</strong> {jug?.nombre_completo || "—"}
+                                </div>
+                              ))}
+                            </div>
+                            <div>
+                              <div style={sR.detSubT}>{r.visitante?.nombre} ({asistVisit.length})</div>
+                              {asistVisit.length === 0 ? <div style={sR.detMini}>—</div> : asistVisit.map(({jid, insc, jug}) => (
+                                <div key={jid} style={sR.detMini}>
+                                  <strong>#{insc?.dorsal || "?"}</strong> {jug?.nombre_completo || "—"}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                        {(r.ficha?.faltas_local || r.ficha?.faltas_visitante || r.ficha?.observaciones) && (
+                          <div style={sR.detSec}>
+                            <div style={sR.detTitle}>📝 Otros</div>
+                            <div style={sR.detMini}>
+                              Faltas: {r.local?.nombre} ({r.ficha.faltas_local || 0}) · {r.visitante?.nombre} ({r.ficha.faltas_visitante || 0})
+                            </div>
+                            {r.ficha.observaciones && (
+                              <div style={{ ...sR.detMini, marginTop: 6, fontStyle:"italic" }}>
+                                "{r.ficha.observaciones}"
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── MODAL CANCHA ── */}
       {modal === "cancha" && (
         <div style={s.overlay} onClick={() => setModal(null)}>
@@ -651,61 +878,85 @@ const GREEN = "#4f8f2f";
 
 const s = {
   wrap: { padding: "0" },
-  header: { marginBottom: 28 },
-  title: { fontSize: 26, fontWeight: 800, color: "#111827", letterSpacing: -0.8, marginBottom: 4 },
-  sub: { color: "#6b7280", fontSize: 14 },
-  tabs: { display: "flex", gap: 4, marginBottom: 28, borderBottom: `1px solid ${BORDER}`, paddingBottom: 0 },
-  tab: { background: "transparent", border: "none", borderBottom: "2px solid transparent", color: "#6b7280", padding: "10px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer", transition: "all 0.2s", marginBottom: -1 },
+  header: { marginBottom: 18 },
+  title: { fontSize: 22, fontWeight: 800, color: "#111827", letterSpacing: -0.6, marginBottom: 4 },
+  sub: { color: "#6b7280", fontSize: 13, lineHeight: 1.35 },
+  // Tabs scrolleables horizontalmente: no wrap, sin cortar palabras.
+  tabs: { display: "flex", gap: 2, marginBottom: 18, borderBottom: `1px solid ${BORDER}`, paddingBottom: 0, overflowX: "auto", flexWrap: "nowrap", WebkitOverflowScrolling: "touch" },
+  tab: { background: "transparent", border: "none", borderBottom: "2px solid transparent", color: "#6b7280", padding: "10px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", transition: "all 0.2s", marginBottom: -1, whiteSpace: "nowrap", flexShrink: 0 },
   tabActive: { color: GREEN, borderBottomColor: GREEN },
-  secHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
-  secCount: { color: "#6b7280", fontSize: 13 },
-  btnAdd: { background: GREEN, color: "#ffffff", border: "none", borderRadius: 10, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" },
-  grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 },
-  card: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: 20, boxShadow: "0 2px 8px rgba(79,143,47,0.08)", borderTop: `3px solid ${GREEN}` },
-  cardTop: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 },
-  cardIcon: { width: 44, height: 44, background: "linear-gradient(135deg, #4f8f2f, #7fbf4d)", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, boxShadow: "0 3px 8px rgba(79,143,47,0.3)" },
-  cardActions: { display: "flex", gap: 6 },
-  cardName: { fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 4 },
-  cardMeta: { fontSize: 12, color: "#6b7280", marginBottom: 10 },
-  cardBadge: { display: "inline-block", background: "#f0fdf4", color: GREEN, fontSize: 11, padding: "3px 10px", borderRadius: 6, marginBottom: 8, border: "1px solid #c3e6a3" },
-  cardLigas: { fontSize: 12, color: GREEN, fontWeight: 600 },
-  ligaList: { display: "flex", flexDirection: "column", gap: 10 },
-  ligaRow: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 12, padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 1px 2px rgba(0,0,0,0.04)" },
-  ligaLeft: { display: "flex", alignItems: "center", gap: 14 },
-  ligaDot: { width: 10, height: 10, borderRadius: "50%", flexShrink: 0 },
-  ligaNombre: { fontSize: 15, fontWeight: 700, color: "#111827", marginBottom: 3 },
-  ligaMeta: { fontSize: 12, color: "#6b7280" },
-  ligaRight: { display: "flex", alignItems: "center", gap: 8 },
-  statusBadge: { fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 6 },
-  btnToggle: { background: "#f3f4f6", color: "#6b7280", border: `1px solid ${BORDER}`, borderRadius: 7, padding: "5px 12px", fontSize: 11, cursor: "pointer" },
-  btnEdit: { background: "#f3f4f6", color: "#6b7280", border: `1px solid ${BORDER}`, borderRadius: 7, padding: "5px 9px", fontSize: 13, cursor: "pointer" },
-  btnDel: { background: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 7, padding: "5px 9px", fontSize: 13, cursor: "pointer" },
-  warningBox: { background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 16px", color: "#ca8a04", fontSize: 13, marginBottom: 20 },
-  empty: { textAlign: "center", padding: "60px 20px" },
-  emptyIcon: { fontSize: 48, marginBottom: 16 },
-  emptyTxt: { color: "#6b7280", fontSize: 15, marginBottom: 20 },
-  statsGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 },
-  statCard: { background: "linear-gradient(135deg, #f0fdf4 0%, #e8f5e1 100%)", border: "1px solid #c3e6a3", borderRadius: 14, padding: 22, boxShadow: "0 2px 8px rgba(79,143,47,0.1)" },
-  statIcon: { width: 52, height: 52, background: "linear-gradient(135deg, #4f8f2f, #7fbf4d)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, marginBottom: 12, boxShadow: "0 3px 10px rgba(79,143,47,0.3)" },
-  statVal: { fontSize: 32, fontWeight: 900, color: GREEN, marginBottom: 4 },
-  statLabel: { fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 2 },
-  statSub: { fontSize: 11, color: "#6b7280" },
-  barRow: { display: "flex", alignItems: "center", gap: 12, marginTop: 14 },
-  barLabel: { fontSize: 13, color: "#6b7280", width: 160, flexShrink: 0 },
-  barTrack: { flex: 1, height: 8, background: "#e5e7eb", borderRadius: 4, overflow: "hidden" },
+  secHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 10, flexWrap: "wrap" },
+  secCount: { color: "#6b7280", fontSize: 12 },
+  btnAdd: { background: GREEN, color: "#ffffff", border: "none", borderRadius: 10, padding: "9px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer", minHeight: 40 },
+  grid: { display: "grid", gridTemplateColumns: "1fr", gap: 12 },
+  card: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 12, padding: 14, boxShadow: "0 2px 8px rgba(79,143,47,0.08)", borderTop: `3px solid ${GREEN}` },
+  cardTop: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 8 },
+  cardIcon: { width: 40, height: 40, background: "linear-gradient(135deg, #4f8f2f, #7fbf4d)", borderRadius: 11, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, boxShadow: "0 3px 8px rgba(79,143,47,0.3)", flexShrink: 0 },
+  cardActions: { display: "flex", gap: 4, flexShrink: 0 },
+  cardName: { fontSize: 15, fontWeight: 700, color: "#111827", marginBottom: 3, wordBreak: "break-word" },
+  cardMeta: { fontSize: 12, color: "#6b7280", marginBottom: 8, wordBreak: "break-word" },
+  cardBadge: { display: "inline-block", background: "#f0fdf4", color: GREEN, fontSize: 10.5, padding: "3px 9px", borderRadius: 6, marginBottom: 6, border: "1px solid #c3e6a3" },
+  cardLigas: { fontSize: 11.5, color: GREEN, fontWeight: 600 },
+  ligaList: { display: "flex", flexDirection: "column", gap: 8 },
+  ligaRow: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 10, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 1px 2px rgba(0,0,0,0.04)", gap: 8 },
+  ligaLeft: { display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 },
+  ligaDot: { width: 9, height: 9, borderRadius: "50%", flexShrink: 0 },
+  ligaNombre: { fontSize: 13.5, fontWeight: 700, color: "#111827", marginBottom: 2, wordBreak: "break-word" },
+  ligaMeta: { fontSize: 11, color: "#6b7280" },
+  ligaRight: { display: "flex", alignItems: "center", gap: 6, flexShrink: 0 },
+  statusBadge: { fontSize: 10.5, fontWeight: 700, padding: "3px 8px", borderRadius: 6, whiteSpace: "nowrap" },
+  btnToggle: { background: "#f3f4f6", color: "#6b7280", border: `1px solid ${BORDER}`, borderRadius: 7, padding: "5px 10px", fontSize: 11, cursor: "pointer" },
+  btnEdit: { background: "#f3f4f6", color: "#6b7280", border: `1px solid ${BORDER}`, borderRadius: 7, padding: "6px 8px", fontSize: 13, cursor: "pointer", minWidth: 32 },
+  btnDel: { background: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 7, padding: "6px 8px", fontSize: 13, cursor: "pointer", minWidth: 32 },
+  warningBox: { background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "10px 12px", color: "#ca8a04", fontSize: 12, marginBottom: 14 },
+  empty: { textAlign: "center", padding: "40px 16px" },
+  emptyIcon: { fontSize: 42, marginBottom: 12 },
+  emptyTxt: { color: "#6b7280", fontSize: 14, marginBottom: 16 },
+  // Stat cards: 2 columnas en mobile. Padding/iconos/fuentes reducidos.
+  statsGrid: { display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 },
+  statCard: { background: "linear-gradient(135deg, #f0fdf4 0%, #e8f5e1 100%)", border: "1px solid #c3e6a3", borderRadius: 12, padding: 12, boxShadow: "0 2px 8px rgba(79,143,47,0.1)" },
+  statIcon: { width: 36, height: 36, background: "linear-gradient(135deg, #4f8f2f, #7fbf4d)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, marginBottom: 8, boxShadow: "0 3px 10px rgba(79,143,47,0.3)" },
+  statVal: { fontSize: 22, fontWeight: 900, color: GREEN, marginBottom: 2, lineHeight: 1 },
+  statLabel: { fontSize: 11.5, fontWeight: 600, color: "#374151", marginBottom: 1, lineHeight: 1.25 },
+  statSub: { fontSize: 10, color: "#6b7280" },
+  barRow: { display: "flex", alignItems: "center", gap: 8, marginTop: 10 },
+  barLabel: { fontSize: 11.5, color: "#6b7280", width: 90, flexShrink: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  barTrack: { flex: 1, height: 7, background: "#e5e7eb", borderRadius: 4, overflow: "hidden" },
   barFill: { height: "100%", background: GREEN, borderRadius: 4, transition: "width 0.5s ease" },
-  barCount: { fontSize: 13, fontWeight: 700, color: "#111827", width: 20, textAlign: "right" },
-  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 },
-  modalBox: { background: "#ffffff", border: `1px solid ${BORDER}`, borderRadius: 18, padding: 32, width: "100%", maxWidth: 460, boxShadow: "0 8px 32px rgba(0,0,0,0.12)" },
-  modalTitle: { fontSize: 18, fontWeight: 800, color: "#111827", marginBottom: 24 },
-  field: { marginBottom: 16, flex: 1 },
-  formRow: { display: "flex", gap: 16 },
-  label: { display: "block", fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 7 },
-  input: { width: "100%", background: BASE, border: `1px solid ${BORDER}`, borderRadius: 9, padding: "10px 14px", color: "#111827", fontSize: 14, outline: "none", boxSizing: "border-box" },
-  modalActions: { display: "flex", gap: 10, marginTop: 24 },
-  btnCancel: { flex: 1, background: "transparent", border: `1px solid ${BORDER}`, borderRadius: 10, padding: 12, color: "#6b7280", fontSize: 14, cursor: "pointer" },
-  btnSave: { flex: 2, background: GREEN, color: "#ffffff", border: "none", borderRadius: 10, padding: 12, fontWeight: 800, fontSize: 14, cursor: "pointer" },
-  toast: { position: "fixed", bottom: 28, right: 28, padding: "12px 24px", borderRadius: 12, fontWeight: 700, fontSize: 14, zIndex: 9999 },
+  barCount: { fontSize: 11.5, fontWeight: 700, color: "#111827", width: 18, textAlign: "right" },
+  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 12 },
+  modalBox: { background: "#ffffff", border: `1px solid ${BORDER}`, borderRadius: 14, padding: 20, width: "100%", maxWidth: 440, boxShadow: "0 8px 32px rgba(0,0,0,0.12)", maxHeight: "92vh", overflowY: "auto" },
+  modalTitle: { fontSize: 17, fontWeight: 800, color: "#111827", marginBottom: 18 },
+  field: { marginBottom: 14, flex: 1 },
+  formRow: { display: "flex", gap: 10, flexWrap: "wrap" },
+  label: { display: "block", fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 },
+  input: { width: "100%", background: BASE, border: `1px solid ${BORDER}`, borderRadius: 9, padding: "10px 12px", color: "#111827", fontSize: 14, outline: "none", boxSizing: "border-box" },
+  modalActions: { display: "flex", gap: 8, marginTop: 18 },
+  btnCancel: { flex: 1, background: "transparent", border: `1px solid ${BORDER}`, borderRadius: 10, padding: "11px 8px", color: "#6b7280", fontSize: 13.5, cursor: "pointer", minHeight: 44 },
+  btnSave: { flex: 2, background: GREEN, color: "#ffffff", border: "none", borderRadius: 10, padding: "11px 8px", fontWeight: 800, fontSize: 13.5, cursor: "pointer", minHeight: 44 },
+  toast: { position: "fixed", bottom: 20, right: 20, padding: "12px 20px", borderRadius: 12, fontWeight: 700, fontSize: 13, zIndex: 9999 },
+};
+
+// Estilos sección de resultados (fichas cerradas)
+const sR = {
+  card: { background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  top: { display: "grid", gridTemplateColumns: "auto 1fr auto", alignItems: "center", gap: 14, padding: "12px 16px", cursor: "pointer" },
+  meta: { display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 3, minWidth: 80 },
+  jornada: { fontSize: 12, fontWeight: 800, color: "#4f8f2f", padding: "2px 8px", background: "#f0fdf4", borderRadius: 6, border: "1px solid #c3e6a3" },
+  fecha: { fontSize: 11, color: "#9ca3af" },
+  ligaTag: { fontSize: 10, color: "#6b7280", padding: "1px 6px", background: "#f3f4f6", borderRadius: 5, fontWeight: 600 },
+  mid: { display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 10 },
+  eq: { display: "flex", alignItems: "center", gap: 6, minWidth: 0 },
+  eqNombre: { fontSize: 13, fontWeight: 700, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  eqColor: { width: 12, height: 12, borderRadius: "50%", flexShrink: 0 },
+  marcador: { fontSize: 18, fontWeight: 900, color: "#111827", padding: "4px 10px", background: "#f9fafb", borderRadius: 8 },
+  expandIcon: { color: "#9ca3af", fontSize: 11 },
+  detalle: { borderTop: "1px solid #e5e7eb", padding: "14px 16px", background: "#f9fafb" },
+  detSec: { marginBottom: 14 },
+  detTitle: { fontSize: 12, fontWeight: 800, color: "#111827", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 },
+  detSubT: { fontSize: 11, fontWeight: 700, color: "#6b7280", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 },
+  detMini: { fontSize: 12, color: "#374151", padding: "3px 0" },
+  detEmpty: { fontSize: 12, color: "#9ca3af", fontStyle: "italic" },
 };
 
 const css = `

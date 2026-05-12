@@ -157,10 +157,12 @@ export default function Referee({ session, setTopbarBack }) {
   useEffect(() => { if (userId) cargarPartidos(); }, [userId]);
 
   // ── ASISTENCIA ───────────────────────────────────────────────
-  const toggleAsistencia = (jeId) => {
-    setAsistencia(prev => prev.includes(jeId) ? prev.filter(id => id !== jeId) : [...prev, jeId]);
+  // OJO: la asistencia se guarda con jugador_id (no jugador_equipo.id)
+  // para que coincida con el formato de goleadores y se puedan calcular estadísticas.
+  const toggleAsistencia = (jugadorId) => {
+    setAsistencia(prev => prev.includes(jugadorId) ? prev.filter(id => id !== jugadorId) : [...prev, jugadorId]);
   };
-  const estaPresente = (jeId) => asistencia.includes(jeId);
+  const estaPresente = (jugadorId) => asistencia.includes(jugadorId);
 
   // ── AGREGAR GOLEADOR ─────────────────────────────────────────
   const agregarGoleador = (jugador, equipo, equipoNombre) => {
@@ -343,13 +345,13 @@ export default function Referee({ session, setTopbarBack }) {
                   <div style={{ ...s.colHeader, borderColor: equipo.color_playera || GREEN }}>
                     <span>{equipo.nombre}</span>
                     <span style={s.contadorBadge}>
-                      {jugadores.filter(j => estaPresente(j.id)).length}/{jugadores.length} presentes
+                      {jugadores.filter(j => estaPresente(j.jugador_id)).length}/{jugadores.length} presentes
                     </span>
                   </div>
                   {jugadores.length === 0
                     ? <p style={s.sinJugadores}>Sin jugadores registrados</p>
                     : jugadores.map(j => {
-                      const presente = estaPresente(j.id);
+                      const presente = estaPresente(j.jugador_id);
                       const goles = golesDeJugador(j.jugador_id, equipo.id);
                       return (
                         <div key={j.id} style={{
@@ -366,7 +368,7 @@ export default function Referee({ session, setTopbarBack }) {
                             {/* Asistencia */}
                             <span
                               style={{ ...s.checkBox, background: presente ? "#16a34a" : "transparent", borderColor: presente ? "#16a34a" : "#6b7280", cursor: cerrada ? "default" : "pointer" }}
-                              onClick={() => !cerrada && toggleAsistencia(j.id)}
+                              onClick={() => !cerrada && toggleAsistencia(j.jugador_id)}
                             >{presente ? "✓" : ""}</span>
                             {/* Goles */}
                             {!cerrada ? (

@@ -1,6 +1,11 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&family=Montserrat:wght@600&display=swap');
 
 :root {
+  /* Marco mobile-only — ver DISEÑO.md §1.1 */
+  --app-max-width: 480px;
+  --app-bg-outside: #e9ecef;
+  --tap-min: 44px;
+
   --bg: #e9ecef;
   --bg-card: #ffffff;
   --bg-card-green: #4f8f2f;
@@ -52,21 +57,23 @@ select option { background: #fff; color: var(--text); }
 
 /* ── ANIMATIONS ── */
 @keyframes spin { to { transform: rotate(360deg); } }
-@keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+/* Sin transform en el estado final: dejarlo dejaría un containing block que rompe position:fixed en hijos (modales). */
+@keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
 @keyframes slideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
 @keyframes glow { 0%,100% { box-shadow: 0 0 10px var(--green-glow); } 50% { box-shadow: 0 0 24px var(--green-glow); } }
 
 .animate-in { animation: fadeIn 0.35s ease forwards; }
 
-/* ── CARDS ── */
+/* ── CARDS ── (mobile-only: padding compacto, sin transformaciones que muevan layout) */
 .card {
   background: var(--bg-card);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
   border: 1px solid var(--border);
-  transition: transform 0.2s, box-shadow 0.2s;
+  padding: 14px;
+  transition: box-shadow 0.18s, background 0.15s;
 }
-.card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.card:active { background: #f9fafb; }
 
 .card-green {
   background: linear-gradient(145deg, #4f8f2f 0%, #3d7024 100%);
@@ -74,47 +81,49 @@ select option { background: #fff; color: var(--text); }
   box-shadow: var(--shadow-green);
   border: none;
   color: white;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: box-shadow 0.18s, opacity 0.15s;
 }
-.card-green:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(79,143,47,0.35); }
+.card-green:active { opacity: 0.94; box-shadow: 0 8px 32px rgba(79,143,47,0.35); }
 
-/* ── BUTTONS ── */
+/* ── BUTTONS ── (tap-friendly: min-height 44px, sin transformaciones que muevan layout) */
 .btn {
   font-family: 'DM Sans', sans-serif;
   font-weight: 600;
   border: none;
   cursor: pointer;
   border-radius: var(--radius-full);
-  padding: 11px 24px;
-  font-size: 14px;
-  transition: all 0.2s;
+  padding: 10px 18px;
+  font-size: 13.5px;
+  min-height: 44px;
+  transition: background 0.18s, box-shadow 0.18s, opacity 0.15s;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
 }
+.btn:active { opacity: 0.85; }
 
 .btn-primary {
   background: var(--green-accent);
   color: white;
 }
-.btn-primary:hover { background: var(--green); transform: translateY(-1px); box-shadow: var(--shadow-green); }
+.btn-primary:hover,.btn-primary:active { background: var(--green); }
 
 .btn-premium {
   background: linear-gradient(135deg, #7fbf4d 0%, #4f8f2f 60%, #7fbf4d 100%);
   background-size: 200% auto;
   color: white;
   font-weight: 700;
-  font-size: 15px;
-  padding: 13px 32px;
+  font-size: 14.5px;
+  padding: 12px 22px;
+  min-height: 46px;
   border-radius: var(--radius-full);
   box-shadow: 0 4px 15px rgba(79,143,47,0.3);
-  transition: all 0.3s ease;
+  transition: background-position 0.3s ease, box-shadow 0.25s ease;
 }
-.btn-premium:hover {
+.btn-premium:hover,.btn-premium:active {
   background-position: right center;
   box-shadow: 0 6px 24px rgba(79,143,47,0.45);
-  transform: translateY(-2px);
 }
 
 .btn-outline {
@@ -122,21 +131,21 @@ select option { background: #fff; color: var(--text); }
   color: var(--green);
   border: 1.5px solid var(--green);
 }
-.btn-outline:hover { background: var(--green-light); }
+.btn-outline:hover,.btn-outline:active { background: var(--green-light); }
 
 .btn-ghost {
   background: transparent;
   color: var(--text-sub);
   border: 1px solid var(--border);
 }
-.btn-ghost:hover { background: var(--bg); border-color: var(--green-accent); color: var(--green); }
+.btn-ghost:hover,.btn-ghost:active { background: var(--bg); border-color: var(--green-accent); color: var(--green); }
 
 .btn-danger {
   background: #fee2e2;
   color: #dc2626;
   border: 1px solid #fecaca;
 }
-.btn-danger:hover { background: #fecaca; }
+.btn-danger:hover,.btn-danger:active { background: #fecaca; }
 
 /* ── BADGE ── */
 .badge {
@@ -152,29 +161,41 @@ select option { background: #fff; color: var(--text); }
 .badge-gray { background: #f3f4f6; color: var(--text-sub); }
 .badge-white { background: rgba(255,255,255,0.2); color: white; }
 
-/* ── TABLE ── */
-.ifutbol-table { width: 100%; border-collapse: collapse; }
+/* ── TABLE ── (mobile-only: filas compactas + columnas pinned para scroll horizontal limpio) */
+.ifutbol-table { width: 100%; border-collapse: separate; border-spacing: 0; }
 .ifutbol-table th {
-  padding: 12px 16px;
+  padding: 4px 6px;
   text-align: center;
-  font-size: 11px;
+  font-size: 9.5px;
   font-weight: 800;
   color: #ffffff;
   text-transform: uppercase;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.4px;
   background: #4f8f2f;
   border-bottom: 2px solid #3a6e22;
   border-right: 1px solid rgba(255,255,255,0.18);
+  white-space: nowrap;
 }
 .ifutbol-table th:last-child { border-right: none; }
 .ifutbol-table td {
-  padding: 14px 16px;
-  font-size: 14px;
+  padding: 4px 6px;
+  font-size: 11.5px;
   border-right: 1px solid #e2e8e0;
+  border-bottom: 1px solid #f1f3f0;
+  line-height: 1.2;
+  background: #ffffff;
 }
 .ifutbol-table td:last-child { border-right: none; }
-.ifutbol-table tbody tr td { background: #ffffff; }
-.ifutbol-table tr:hover td { background: rgba(79,143,47,0.13); }
+.ifutbol-table tr:active td { background: rgba(79,143,47,0.13); }
+
+/* Columnas pinned (sticky horizontal). El contenedor padre debe tener overflow-x: auto. */
+.ifutbol-table .pin-rank   { position: sticky; left: 0;        z-index: 2; width: 26px;  min-width: 26px; max-width: 26px; padding-left: 3px; padding-right: 3px; box-shadow: 2px 0 4px -2px rgba(0,0,0,0.08); }
+.ifutbol-table .pin-equipo { position: sticky; left: 26px;     z-index: 2; min-width: 82px;  max-width: 120px; padding-left: 4px; padding-right: 4px; box-shadow: 2px 0 4px -2px rgba(0,0,0,0.08); }
+.ifutbol-table .pin-pts    { position: sticky; right: 0;       z-index: 2; min-width: 30px;  width: 30px; padding-left: 3px; padding-right: 3px; box-shadow: -2px 0 4px -2px rgba(0,0,0,0.08); }
+/* Los th sticky deben quedar encima de los td sticky al hacer scroll vertical */
+.ifutbol-table thead .pin-rank,
+.ifutbol-table thead .pin-equipo,
+.ifutbol-table thead .pin-pts { z-index: 3; }
 
 /* ── FORM ── */
 .form-label {
@@ -198,32 +219,39 @@ select option { background: #fff; color: var(--text); }
 }
 .form-input::placeholder { color: var(--text-muted); }
 
-/* ── TABS ── */
+/* ── TABS ── (mobile-only: siempre scrollean horizontalmente, no wrap) */
 .ifutbol-tabs {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 24px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  gap: 4px;
+  margin-bottom: 18px;
   background: #ffffff;
-  border-radius: 14px;
-  padding: 6px;
+  border-radius: 12px;
+  padding: 5px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   border: 1px solid var(--border);
 }
+.ifutbol-tabs::-webkit-scrollbar { height: 0; }
 .ifutbol-tab {
   background: transparent;
   border: none;
-  border-radius: 9px;
+  border-radius: 8px;
   color: var(--text-muted);
-  padding: 9px 16px;
-  font-size: 13px;
+  padding: 6px 10px;
+  font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
   font-family: 'DM Sans', sans-serif;
   transition: background 0.18s, color 0.18s;
   white-space: nowrap;
+  flex-shrink: 0;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
 }
-.ifutbol-tab:hover { color: var(--green); background: var(--green-light); }
+.ifutbol-tab:hover,.ifutbol-tab:active { color: var(--green); background: var(--green-light); }
 .ifutbol-tab.active { color: #ffffff; background: var(--green); }
 
 /* ── TOAST ── */
@@ -294,10 +322,10 @@ select option { background: #fff; color: var(--text); }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  font-size: 12px;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  font-size: 9.5px;
   font-weight: 800;
 }
 
