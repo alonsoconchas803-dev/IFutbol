@@ -62,6 +62,7 @@ const MENU = {
     { icon:"📊", label:"Resumen",             key:"stats" },
     { icon:"📨", label:"Solicitudes",         key:"solicitudes" },
     { icon:"⚽", label:"Resultados",          key:"resultados" },
+    { icon:"📜", label:"Registro de acciones", key:"auditoria" },
   ],
   league_admin: [
     { icon:"👕", label:"Equipos",    key:"equipos" },
@@ -74,6 +75,7 @@ const MENU = {
   ],
   referee: [
     { icon:"🟡", label:"Mis Partidos", key:"partidos" },
+    { icon:"🏟️", label:"Mis Unidades", key:"unidades" },
   ],
   player: [
     { icon:"🏃", label:"Mi Perfil",        key:"perfil" },
@@ -87,6 +89,7 @@ export default function App() {
   const [session, setSession]           = useState(null);
   const [userRole, setUserRole]         = useState(null);
   const [jugadorData, setJugadorData]   = useState(null);
+  const [userName, setUserName]         = useState(null); // nombre completo para mostrar en la sidebar
   const [screen, setScreen]             = useState("home");
   const [unidadActiva, setUnidadActiva] = useState(null);
   const [dashSeccion, setDashSeccion]   = useState(null);
@@ -128,6 +131,11 @@ export default function App() {
       const roles = await dbAuth(`/user_roles?user_id=eq.${userId}&select=rol,liga_id,cancha_id&limit=1`, token);
       if (Array.isArray(roles) && roles.length > 0) {
         setUserRole(roles[0]);
+        // Para staff (super_admin, league_admin, referee), el nombre completo está en solicitudes_registro
+        try {
+          const sol = await dbAuth(`/solicitudes_registro?user_id=eq.${userId}&select=nombre_completo&order=created_at.asc&limit=1`, token);
+          if (Array.isArray(sol) && sol.length > 0 && sol[0].nombre_completo) setUserName(sol[0].nombre_completo);
+        } catch (_) { /* sin solicitud, falla silenciosa */ }
         setScreen("dashboard");
         return;
       }
@@ -135,13 +143,14 @@ export default function App() {
       if (Array.isArray(jugador) && jugador.length > 0) {
         setUserRole({ rol: "player" });
         setJugadorData(jugador[0]);
+        if (jugador[0].nombre_completo) setUserName(jugador[0].nombre_completo);
         setScreen("dashboard");
       }
     } catch (e) { console.error(e); }
   };
 
   const handleLogout = () => {
-    setSession(null); setUserRole(null); setJugadorData(null);
+    setSession(null); setUserRole(null); setJugadorData(null); setUserName(null);
     setScreen("home"); setSidebarOpen(false);
     showToast("Sesión cerrada");
   };
@@ -153,10 +162,14 @@ export default function App() {
     return name.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase();
   };
 
+  // Nombre a mostrar: nombre completo si lo tenemos, si no el prefijo del email
+  const displayName = userName || session?.user?.email?.split("@")[0] || "";
+
   if (screen === "dashboard" && session) {
     return (
       <DashboardLayout
         session={session} userRole={userRole} jugadorData={jugadorData}
+        displayName={displayName}
         onLogout={handleLogout} toast={toast} showToast={showToast}
         onHome={goHome} initials={initials()}
         seccionInicial={dashSeccion}
@@ -169,6 +182,7 @@ export default function App() {
     return (
       <PublicLayout session={session} userRole={userRole} sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen} setModal={setModal} onLogout={handleLogout}
+        displayName={displayName}
         initials={initials()} toast={toast} onHome={goHome}
         onDashboard={goDashboard}
         topbarBack={topbarBack}>
@@ -181,6 +195,7 @@ export default function App() {
   return (
     <PublicLayout session={session} userRole={userRole} sidebarOpen={sidebarOpen}
       setSidebarOpen={setSidebarOpen} setModal={setModal} onLogout={handleLogout}
+      displayName={displayName}
       initials={initials()} toast={toast} onHome={goHome}
       onDashboard={goDashboard}
       topbarBack={topbarBack}>
@@ -203,24 +218,24 @@ function Modals({ modal, setModal, onLogin, showToast }) {
 // ─────────────────────────────────────────────────────────────────
 // DASHBOARD LAYOUT (con navegación lateral funcional)
 // ─────────────────────────────────────────────────────────────────
-function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, showToast, onHome, initials, seccionInicial, topbarBack, setTopbarBack }) {
+function DashboardLayout({ session, userRole, jugadorData, displayName, onLogout, toast, showToast, onHome, initials, seccionInicial, topbarBack, setTopbarBack }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const rol = userRole?.rol;
   const roleInfo = ROLES_INFO[rol] || { label:"Usuario", icon:"👤", color:"#666" };
   const menuItems = MENU[rol] || [];
   const [activeSection, setActiveSection] = useState(seccionInicial || menuItems[0]?.key || "panel");
 
-  const SUPER_MAP  = { canchas:"canchas", ligas:"ligas", equipos:"equipos", stats:"stats", solicitudes:"solicitudes", resultados:"resultados" };
+  const SUPER_MAP  = { canchas:"canchas", ligas:"ligas", equipos:"equipos", stats:"stats", solicitudes:"solicitudes", resultados:"resultados", auditoria:"auditoria" };
   const LEAGUE_MAP = { equipos:"equipos", jugadores:"jugadores", calendario:"calendario", arbitros:"arbitros", fichas:"fichas", resultados:"resultados", personalizar:"personalizar" };
+  const REFEREE_MAP = { partidos:"partidos", unidades:"unidades" };
   const PLAYER_MAP = { perfil:"perfil", ligas:"ligas", estadisticas:"estadisticas" };
 
   const renderContent = () => {
     if (rol === "super_admin") {
-      if (activeSection === "solicitudes") return <Solicitudes session={session} />;
-      return <SuperAdmin session={session} seccionInicial={SUPER_MAP[activeSection] || "stats"} />;
+      return <SuperAdmin session={session} seccionInicial={SUPER_MAP[activeSection] || "stats"} setTopbarBack={setTopbarBack} />;
     }
     if (rol === "league_admin") return <LeagueAdmin session={session} userRole={userRole} seccionInicial={LEAGUE_MAP[activeSection] || "equipos"} setTopbarBack={setTopbarBack} />;
-    if (rol === "referee") return <Referee session={session} setTopbarBack={setTopbarBack} />;
+    if (rol === "referee") return <Referee session={session} setTopbarBack={setTopbarBack} seccionInicial={REFEREE_MAP[activeSection] || "partidos"} />;
     if (rol === "player") return <PlayerProfile session={session} seccionInicial={PLAYER_MAP[activeSection] || "perfil"} />;
     return null;
   };
@@ -255,7 +270,7 @@ function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, show
           <Avatar initials={initials} size={44} />
           <div style={{ overflow:"hidden", flex:1 }}>
             <div style={{ fontSize:14, fontWeight:700, color:"var(--text)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-              {session?.user?.email?.split("@")[0]}
+              {displayName || session?.user?.email?.split("@")[0]}
             </div>
             <div style={{ fontSize:11, color:roleInfo.color, fontWeight:600, marginTop:2 }}>
               {roleInfo.icon} {roleInfo.label}
@@ -311,7 +326,7 @@ function TopbarBackBtn({ back }) {
   );
 }
 
-function PublicLayout({ children, session, userRole, sidebarOpen, setSidebarOpen, setModal, onLogout, initials, toast, onHome, onDashboard, topbarBack }) {
+function PublicLayout({ children, session, userRole, displayName, sidebarOpen, setSidebarOpen, setModal, onLogout, initials, toast, onHome, onDashboard, topbarBack }) {
   const roleInfo = ROLES_INFO[userRole?.rol] || null;
   return (
     <div style={s.root}>
@@ -359,7 +374,7 @@ function PublicLayout({ children, session, userRole, sidebarOpen, setSidebarOpen
           <div style={s.sbFooter}>
             <Avatar initials={initials} size={38} />
             <div>
-              <div style={{ fontSize:12, fontWeight:700, color:"var(--text)" }}>{session.user?.email?.split("@")[0]}</div>
+              <div style={{ fontSize:12, fontWeight:700, color:"var(--text)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{displayName || session.user?.email?.split("@")[0]}</div>
               <div style={{ fontSize:11, color:"var(--text-muted)" }}>{roleInfo?.label || "Usuario"}</div>
             </div>
           </div>
@@ -1272,7 +1287,7 @@ const s = {
   overlay: { position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:299,backdropFilter:"blur(2px)" },
   // Drawer: position fixed para no scroll-jacking. 85% del ancho del viewport, anclado al borde izquierdo del marco
   // (en PC con marco visible queda al borde izquierdo del viewport — la vista de PC se ignora por diseño).
-  sidebar: { position:"fixed",top:0,left:0,bottom:0,width:"85%",maxWidth:400,background:"white",zIndex:300,display:"flex",flexDirection:"column",transition:"transform 0.25s ease",boxShadow:"4px 0 24px rgba(0,0,0,0.18)" },
+  sidebar: { position:"fixed",top:0,left:0,bottom:0,width:"72%",maxWidth:290,background:"white",zIndex:300,display:"flex",flexDirection:"column",transition:"transform 0.25s ease",boxShadow:"4px 0 24px rgba(0,0,0,0.18)" },
   drawerHeader: { padding:"16px 14px 14px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",gap:12,background:"linear-gradient(135deg, rgba(127,191,77,0.10), rgba(79,143,47,0.05))" },
   sbFooter: { padding:"14px 16px",borderTop:"1px solid var(--border)",display:"flex",alignItems:"center",gap:12 },
   main: { flex:1,padding:"16px 14px",width:"100%" },

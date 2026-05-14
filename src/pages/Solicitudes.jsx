@@ -26,6 +26,11 @@ const ROLES_LABEL = {
   league_admin: { label: "Admin de Unidad", icon: "🏟️", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
 };
 
+// Una solicitud de árbitro con cancha_id != null significa: el árbitro ya existe
+// y solo pide acceso adicional a esa unidad. Al aprobar NO se crea user_role nuevo,
+// solo se inserta arbitro_cancha (confirmado=false) para la unidad solicitada.
+const esSolicitudUnidadExtra = (sol) => sol?.tipo_rol === "referee" && !!sol?.cancha_id;
+
 const ESTADO_LABEL = {
   pendiente: { label: "Pendiente", color: "#f59e0b", bg: "#fffbeb" },
   aprobado:  { label: "Aprobado",  color: "#16a34a", bg: "#f0fdf4" },
@@ -87,7 +92,8 @@ export default function Solicitudes({ session }) {
     setModalSolicitud(sol);
     setModoEditar(false);
     setLigaSeleccionada("");
-    setCanchasSeleccionadas([]);
+    // Si es solicitud de unidad extra, pre-seleccionamos la cancha solicitada (no editable por el super admin).
+    setCanchasSeleccionadas(esSolicitudUnidadExtra(sol) ? [sol.cancha_id] : []);
     setAccesoTotal(true);
     setLigasEspecificas([]);
   };
@@ -171,18 +177,39 @@ export default function Solicitudes({ session }) {
 
     setProcesando(true);
     try {
-      await db("/user_roles", token, {
-        method: "POST",
-        body: JSON.stringify({
-          user_id: modalSolicitud.user_id,
-          rol: modalSolicitud.tipo_rol,
-          cancha_id: modalSolicitud.tipo_rol === "league_admin" ? ligaSeleccionada : null,
-          liga_id: null,
-        })
-      });
+      if (esSolicitudUnidadExtra(modalSolicitud)) {
+        // Árbitro ya registrado pidiendo unidad adicional → solo añadir arbitro_cancha (sin tocar user_roles).
+        // Comprobar si ya existe (idempotente).
+        const existente = await db(
+          `/arbitro_cancha?user_id=eq.${modalSolicitud.user_id}&cancha_id=eq.${modalSolicitud.cancha_id}&select=id`,
+          token
+        );
+        if (!existente || existente.length === 0) {
+          await db("/arbitro_cancha", token, {
+            method: "POST",
+            body: JSON.stringify({
+              user_id: modalSolicitud.user_id,
+              cancha_id: modalSolicitud.cancha_id,
+              acceso_total: false,
+              confirmado: false,
+            })
+          });
+        }
+      } else {
+        // Flujo original: solicitud de registro nueva (árbitro o admin de liga).
+        await db("/user_roles", token, {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: modalSolicitud.user_id,
+            rol: modalSolicitud.tipo_rol,
+            cancha_id: modalSolicitud.tipo_rol === "league_admin" ? ligaSeleccionada : null,
+            liga_id: null,
+          })
+        });
 
-      if (modalSolicitud.tipo_rol === "referee") {
-        await guardarArbitroCanchas(modalSolicitud.user_id);
+        if (modalSolicitud.tipo_rol === "referee") {
+          await guardarArbitroCanchas(modalSolicitud.user_id);
+        }
       }
 
       await db(`/solicitudes_registro?id=eq.${modalSolicitud.id}`, token, {
@@ -249,12 +276,9 @@ export default function Solicitudes({ session }) {
       <style>{css}</style>
       {toast && <div className={`ifutbol-toast ${toast.tipo === "err" ? "toast-err" : "toast-ok"}`}>{toast.msg}</div>}
 
-      {/* HEADER */}
+      {/* HEADER: solo el contador de pendientes (el título lo da el heroCard del SuperAdmin) */}
       <div style={s.header}>
-        <div>
-          <h2 style={s.title}>Solicitudes de registro 📋</h2>
-          <p style={s.sub}>Aprueba o rechaza solicitudes de árbitros y admins de unidad</p>
-        </div>
+        <div />
         {pendientes > 0 && (
           <div style={s.pendienteBadge}>
             {pendientes} {pendientes === 1 ? "pendiente" : "pendientes"}
@@ -286,6 +310,8 @@ export default function Solicitudes({ session }) {
           {filtradas.map(sol => {
             const rolInfo = ROLES_LABEL[sol.tipo_rol] || {};
             const estadoInfo = ESTADO_LABEL[sol.estado] || {};
+            const esExtra = esSolicitudUnidadExtra(sol);
+            const canchaSolicitada = esExtra ? canchas.find(c => c.id === sol.cancha_id) : null;
             return (
               <div key={sol.id} style={s.card}>
                 <div style={s.cardLeft}>
@@ -298,6 +324,11 @@ export default function Solicitudes({ session }) {
                       <span style={{ ...s.rolPill, background: rolInfo.bg, color: rolInfo.color, border: `1px solid ${rolInfo.border}` }}>
                         {rolInfo.icon} {rolInfo.label}
                       </span>
+                      {esExtra && (
+                        <span style={{ ...s.rolPill, background:"#ecfeff", color:"#0e7490", border:"1px solid #a5f3fc" }}>
+                          ➕ Nueva unidad{canchaSolicitada ? ` · ${canchaSolicitada.nombre}` : ""}
+                        </span>
+                      )}
                       <span style={s.fecha}>{formatFecha(sol.created_at)}</span>
                     </div>
                   </div>
@@ -368,7 +399,7 @@ export default function Solicitudes({ session }) {
               )}
 
               {/* ÁRBITRO → checkboxes canchas (super admin solo ubica; el admin de unidad confirma y asigna torneos) */}
-              {modalSolicitud.tipo_rol === "referee" && (
+              {modalSolicitud.tipo_rol === "referee" && !esSolicitudUnidadExtra(modalSolicitud) && (
                 <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
                   <div>
                     <label className="form-label">Unidades deportivas *</label>
@@ -405,6 +436,29 @@ export default function Solicitudes({ session }) {
                   </div>
                 </div>
               )}
+
+              {/* ÁRBITRO EXISTENTE → solicitud de unidad ADICIONAL (cancha_id fija) */}
+              {esSolicitudUnidadExtra(modalSolicitud) && (() => {
+                const canchaSol = canchas.find(c => c.id === modalSolicitud.cancha_id);
+                return (
+                  <div>
+                    <div style={{ background:"#ecfeff", border:"1px solid #a5f3fc", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
+                      <div style={{ fontSize:12, fontWeight:700, color:"#0e7490", marginBottom:4 }}>➕ Solicitud de unidad adicional</div>
+                      <div style={{ fontSize:12, color:"#155e75", lineHeight:1.5 }}>
+                        Este árbitro <b>ya está registrado</b> en otra(s) unidad(es) y solicita acceso a una unidad nueva. Al aprobar, conservará sus accesos previos.
+                      </div>
+                    </div>
+                    <label className="form-label">Unidad solicitada</label>
+                    <div style={{ padding:"12px 14px", borderRadius:10, border:`2px solid var(--green)`, background:"var(--green-light)" }}>
+                      <div style={{ fontWeight:700, fontSize:13 }}>🏟️ {canchaSol?.nombre || "Unidad"}</div>
+                      {canchaSol?.direccion && <div style={{ fontSize:11, color:"var(--text-muted)" }}>{canchaSol.direccion}</div>}
+                    </div>
+                    <p style={{ fontSize:11, color:"var(--text-muted)", marginTop:8, lineHeight:1.5 }}>
+                      Al aprobar se añade el acceso a esta unidad (sin acceso total). El admin de la unidad lo confirmará y le asignará torneos.
+                    </p>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* BOTONES */}

@@ -1,4 +1,5 @@
 import Solicitudes from "./Solicitudes";
+import Auditoria from "./Auditoria";
 import { useState, useEffect } from "react";
 import JerseySVG, { JerseyDesignPicker } from "../components/JerseySVG";
 import PersonalizacionUnidadFields from "../components/PersonalizacionUnidadFields";
@@ -43,7 +44,7 @@ const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "
 const TURNOS = ["Mañana", "Tarde", "Noche"];
 const COLORES = ["#e53e3e","#dd6b20","#d69e2e","#38a169","#3182ce","#805ad5","#d53f8c","#2d3748","#319795","#e53e8c"];
 
-export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
+export default function SuperAdmin({ session, seccionInicial = "canchas", setTopbarBack }) {
   const [seccion, setSeccion] = useState(seccionInicial);
   const [canchas, setCanchas] = useState([]);
   const [ligas, setLigas] = useState([]);
@@ -61,8 +62,9 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
   const [portadaFile, setPortadaFile] = useState(null);
   const [portadaPreview, setPortadaPreview] = useState(null);
 
-  // Equipos
+  // Equipos: ahora primero se elige unidad y luego liga
   const [equipos, setEquipos] = useState([]);
+  const [canchaEquipos, setCanchaEquipos] = useState(null); // unidad seleccionada en pestaña equipos
   const [ligaEquipos, setLigaEquipos] = useState(null);
   const [equipoForm, setEquipoForm] = useState({ nombre: "", color_playera: "#3182ce", color_camiseta_2: "#ffffff", diseno_camiseta: "solido" });
   const [editEquipoId, setEditEquipoId] = useState(null);
@@ -101,6 +103,31 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
   };
 
   useEffect(() => { cargarCanchas(); cargarLigas(); }, []);
+
+  // Sincroniza la sección con el cambio de seccionInicial (clicks de la sidebar)
+  useEffect(() => {
+    if (!seccionInicial) return;
+    if (seccionInicial !== seccion) {
+      setSeccion(seccionInicial);
+      setLigasCanchaFilter(null);
+    }
+  }, [seccionInicial]);
+
+  // Topbar back: solo aparece cuando se está dentro de las ligas de una unidad
+  // (la sección "auditoria" maneja su propio topbarBack internamente)
+  useEffect(() => {
+    if (!setTopbarBack) return;
+    if (seccion === "auditoria") return; // delegar a Auditoria.jsx
+    if (seccion === "ligas" && ligasCanchaFilter) {
+      setTopbarBack({
+        label: "Volver a unidades",
+        onClick: () => { setLigasCanchaFilter(null); setSeccion("canchas"); },
+      });
+    } else {
+      setTopbarBack(null);
+    }
+    return () => { if (seccion !== "auditoria") setTopbarBack(null); };
+  }, [seccion, ligasCanchaFilter, setTopbarBack]);
 
   // ── RESULTADOS (FICHAS CERRADAS) ──────────────────────────────
   const cargarResultadosSA = async () => {
@@ -333,6 +360,7 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
           stats:       { icon: "📊", label: "RESUMEN",       title: "Estadísticas",         sub: "Visión general de la plataforma" },
           resultados:  { icon: "⚽", label: "FICHAS",         title: "Resultados",           sub: "Fichas cerradas y marcadores" },
           solicitudes: { icon: "📨", label: "REGISTROS",     title: "Solicitudes",          sub: "Aprobar o rechazar registros" },
+          auditoria:   { icon: "📜", label: "AUDITORÍA",    title: "Registro de acciones", sub: "Acciones recientes de admins, árbitros y capitanes" },
         };
         const h = HEADERS[seccion] || HEADERS.canchas;
         return (
@@ -405,13 +433,6 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
         const ligasMostradas = ligasCanchaFilter ? ligas.filter(l => l.cancha_id === ligasCanchaFilter) : ligas;
         return (
         <div>
-          {canchaFiltro && (
-            <button
-              onClick={() => { setLigasCanchaFilter(null); setSeccion("canchas"); }}
-              style={{ background:"transparent", border:"none", color:"#4f8f2f", fontSize:13, fontWeight:700, cursor:"pointer", marginBottom:14, padding:0, display:"inline-flex", alignItems:"center", gap:4 }}>
-              ← Volver a unidades deportivas
-            </button>
-          )}
           <div style={s.secHeader}>
             <span style={s.secCount}>
               {ligasMostradas.length} {ligasMostradas.length === 1 ? "liga" : "ligas"}
@@ -503,23 +524,50 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
       {/* ── SECCIÓN EQUIPOS ── */}
       {seccion === "equipos" && (
         <div>
+          {/* Selector 1: Unidad deportiva */}
           <div style={s.field}>
-            <label style={s.label}>Liga</label>
-            <select style={s.input} value={ligaEquipos?.id || ""} onChange={e => {
-              const liga = ligas.find(l => l.id === e.target.value) || null;
-              setLigaEquipos(liga);
-              if (liga) cargarEquipos(liga.id);
-              else setEquipos([]);
+            <label style={s.label}>Unidad deportiva</label>
+            <select style={s.input} value={canchaEquipos?.id || ""} onChange={e => {
+              const cancha = canchas.find(c => c.id === e.target.value) || null;
+              setCanchaEquipos(cancha);
+              setLigaEquipos(null);
+              setEquipos([]);
             }}>
-              <option value="">Selecciona una liga...</option>
-              {ligas.map(l => <option key={l.id} value={l.id}>{l.nombre} · {l.dia} {l.turno}</option>)}
+              <option value="">Selecciona una unidad...</option>
+              {canchas.map(c => <option key={c.id} value={c.id}>🏟️ {c.nombre}</option>)}
             </select>
           </div>
 
-          {!ligaEquipos && (
+          {/* Selector 2: Liga (solo visible si hay unidad seleccionada) */}
+          {canchaEquipos && (() => {
+            const ligasUnidad = ligas.filter(l => l.cancha_id === canchaEquipos.id);
+            return (
+              <div style={s.field}>
+                <label style={s.label}>Torneo</label>
+                <select style={s.input} value={ligaEquipos?.id || ""} onChange={e => {
+                  const liga = ligasUnidad.find(l => l.id === e.target.value) || null;
+                  setLigaEquipos(liga);
+                  if (liga) cargarEquipos(liga.id);
+                  else setEquipos([]);
+                }}>
+                  <option value="">{ligasUnidad.length === 0 ? "Sin torneos en esta unidad" : "Selecciona un torneo..."}</option>
+                  {ligasUnidad.map(l => <option key={l.id} value={l.id}>🏆 {l.nombre} · {l.dia} {l.turno}</option>)}
+                </select>
+              </div>
+            );
+          })()}
+
+          {!canchaEquipos && (
             <div style={s.empty}>
               <div style={s.emptyIcon}>👆</div>
-              <div style={s.emptyTxt}>Selecciona una liga para ver o agregar equipos</div>
+              <div style={s.emptyTxt}>Selecciona primero una unidad deportiva</div>
+            </div>
+          )}
+
+          {canchaEquipos && !ligaEquipos && (
+            <div style={s.empty}>
+              <div style={s.emptyIcon}>👆</div>
+              <div style={s.emptyTxt}>Ahora selecciona un torneo para ver o agregar equipos</div>
             </div>
           )}
 
@@ -567,15 +615,17 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
       )}
 
       {seccion === "solicitudes" && (
-  <Solicitudes session={session} />
-)}
+        <Solicitudes session={session} />
+      )}
+
+      {/* ── SECCIÓN AUDITORÍA ── */}
+      {seccion === "auditoria" && (
+        <Auditoria session={session} setTopbarBack={setTopbarBack} />
+      )}
 
       {/* ── SECCIÓN RESULTADOS (FICHAS CERRADAS) ── */}
       {seccion === "resultados" && (
         <div>
-          <h2 style={s.title}>📋 Resultados de partidos</h2>
-          <p style={s.sub}>Fichas cerradas de todos los torneos</p>
-
           {/* Selector de torneo */}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18, marginTop: 16, alignItems: "center" }}>
             <span style={{ fontSize: 13, color: "#6b7280", fontWeight: 600 }}>Torneo:</span>
