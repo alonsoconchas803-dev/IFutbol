@@ -116,7 +116,7 @@ function formatFecha(fecha) {
 // ─────────────────────────────────────────────────────────────────
 // COMPONENTE PRINCIPAL
 // ─────────────────────────────────────────────────────────────────
-export default function ScheduleGenerator({ session, liga, cancha }) {
+export default function ScheduleGenerator({ session, liga, cancha, miUnidad, headerExtra }) {
   const [tab, setTab] = useState("jornada"); // jornada | liguilla | bracket
   const [equipos, setEquipos] = useState([]);
   const [historial, setHistorial] = useState({});
@@ -321,10 +321,47 @@ export default function ScheduleGenerator({ session, liga, cancha }) {
       <style>{css}</style>
       {toast && <div className={`ifutbol-toast ${toast.tipo==="err"?"toast-err":"toast-ok"}`}>{toast.msg}</div>}
 
-      <div style={s.header}>
-        <div>
-          <h2 style={s.title}>Calendario y Liguilla 📅</h2>
-          <p style={s.sub}>{liga?.nombre} · {equipos.length} equipos · {jornadasGuardadas.length} jornadas generadas</p>
+      <div style={s.heroCard}>
+        <div style={s.heroOverlay} />
+        <div style={s.heroInner}>
+          {/* Fila superior: info de la unidad (logo + nombre) */}
+          {miUnidad && (
+            <div style={s.heroUnitRow}>
+              <div style={s.heroUnitLogo}>
+                {miUnidad.logo_url
+                  ? <img src={miUnidad.logo_url} alt={miUnidad.nombre} style={s.heroUnitLogoImg} />
+                  : <span style={{ fontSize:32 }}>🏟️</span>}
+              </div>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={s.heroUnitLabel}>UNIDAD DEPORTIVA</div>
+                <div style={s.heroUnitName}>{miUnidad.nombre}</div>
+              </div>
+            </div>
+          )}
+
+          {/* Separador entre unidad y calendario */}
+          {miUnidad && <div style={s.heroDivider} />}
+
+          {/* Fila inferior: 2 columnas — izquierda título/torneo, derecha stats grandes */}
+          <div style={s.heroBottomRow}>
+            <div style={s.heroBottomLeft}>
+              <div style={s.heroTitleRow}>
+                <span style={s.heroEmoji}>📅</span>
+                <h2 style={s.heroTitle}>Calendario y Liguilla</h2>
+              </div>
+              <div style={s.heroLiga}>🏆 {liga?.nombre || "Sin torneo"}</div>
+            </div>
+            <div style={s.heroBottomRight}>
+              <div style={s.heroStatBox}>
+                <div style={s.heroStatNumber}>{equipos.length}</div>
+                <div style={s.heroStatLabel}>EQUIPOS</div>
+              </div>
+              <div style={s.heroStatBox}>
+                <div style={s.heroStatNumber}>{jornadasGuardadas.length}</div>
+                <div style={s.heroStatLabel}>JORNADAS</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -334,6 +371,9 @@ export default function ScheduleGenerator({ session, liga, cancha }) {
           <button key={key} className={`ifutbol-tab ${tab===key?"active":""}`} onClick={()=>setTab(key)}>{label}</button>
         ))}
       </div>
+
+      {/* Selector de torneos: abajo de los tabs según el flujo deseado */}
+      {headerExtra}
 
       {loading ? <div style={{ padding:60, textAlign:"center" }}><div className="spinner"/></div> : <>
 
@@ -380,8 +420,8 @@ export default function ScheduleGenerator({ session, liga, cancha }) {
                   {equipos.map((eq,i)=>(
                     <div key={eq.id} style={s.equipoRow}>
                       <div style={{ ...s.dot, background:eq.color_playera||"var(--green)" }}/>
-                      <span style={{ flex:1, fontSize:14, fontWeight:600 }}>{eq.nombre}</span>
-                      <span style={{ fontSize:11, color:"var(--text-muted)" }}>
+                      <span className="sg-eq-name">{eq.nombre}</span>
+                      <span style={{ fontSize:10.5, color:"var(--text-muted)", flexShrink:0 }}>
                         {Object.keys(historial).filter(k=>k.includes(eq.id)).length} partidos
                       </span>
                     </div>
@@ -420,13 +460,13 @@ export default function ScheduleGenerator({ session, liga, cancha }) {
                           <div key={pi} style={s.partidoRow}>
                             <span style={s.hora}>{p.hora}</span>
                             <div style={s.vsBlock}>
-                              <div style={{ display:"flex", alignItems:"center", gap:8, flex:1 }}>
+                              <div className="sg-vs-team">
                                 <div style={{ ...s.dot, background:p.local.color_playera||"var(--green)" }}/>
-                                <span style={{ fontWeight:700, fontSize:14 }}>{p.local.nombre}</span>
+                                <span className="sg-eq-name" style={{ fontWeight:700 }}>{p.local.nombre}</span>
                               </div>
                               <span style={s.vsTag}>VS</span>
-                              <div style={{ display:"flex", alignItems:"center", gap:8, flex:1, justifyContent:"flex-end" }}>
-                                <span style={{ fontWeight:700, fontSize:14 }}>{p.visitante.nombre}</span>
+                              <div className="sg-vs-team" style={{ justifyContent:"flex-end" }}>
+                                <span className="sg-eq-name-r" style={{ fontWeight:700 }}>{p.visitante.nombre}</span>
                                 <div style={{ ...s.dot, background:p.visitante.color_playera||"#999" }}/>
                               </div>
                             </div>
@@ -437,10 +477,17 @@ export default function ScheduleGenerator({ session, liga, cancha }) {
                   );
                 })}
                 {preview.descansos.length>0 && (
-                  <div style={{ display:"flex", gap:8, flexWrap:"wrap", paddingTop:12, borderTop:"1px solid var(--border)" }}>
-                    {preview.descansos.map((d,i)=>(
-                      <span key={i} style={s.descansoChip}>😴 {d.nombre} descansa</span>
-                    ))}
+                  <div style={{ paddingTop:12, borderTop:"1px solid var(--border)" }}>
+                    <div style={s.canchaLabel}>😴 Descansa esta jornada</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                      {preview.descansos.map((d,i)=>(
+                        <div key={i} style={s.descansaRow}>
+                          <span style={{ fontSize:18, lineHeight:1, flexShrink:0 }}>😴</span>
+                          <div style={{ ...s.dot, background:d.color_playera||"#9ca3af" }}/>
+                          <span className="sg-eq-name" style={{ fontWeight:700, fontSize:13 }}>{d.nombre}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
                 <div style={{ display:"flex", justifyContent:"flex-end", marginTop:16 }}>
@@ -470,8 +517,8 @@ export default function ScheduleGenerator({ session, liga, cancha }) {
                     <div key={r.equipo.id} style={{ ...s.equipoRow, background: i<8?"#f0fdf4":i<16?"#fffbeb":"#f9fafb" }}>
                       <span style={{ ...s.rankBadge, background:i===0?"#FFD700":i===1?"#C0C0C0":i===2?"#CD7F32":i<8?"var(--green-light)":i<16?"#fef9c3":"#f3f4f6", color:i<3?"#111":i<8?"var(--green)":i<16?"#854d0e":"#888" }}>{i+1}</span>
                       <div style={{ ...s.dot, background:r.equipo.color_playera||"#999" }}/>
-                      <span style={{ flex:1, fontSize:14, fontWeight:600 }}>{r.equipo.nombre}</span>
-                      <span style={{ fontSize:12, fontWeight:800, color:"var(--green)" }}>{r.pts} pts</span>
+                      <span className="sg-eq-name">{r.equipo.nombre}</span>
+                      <span style={{ fontSize:11.5, fontWeight:800, color:"var(--green)", flexShrink:0 }}>{r.pts} pts</span>
                       {i < 8 && <span style={s.liguillaChip}>Liguilla</span>}
                       {i >= 8 && i < 16 && <span style={s.copaChip}>Copa</span>}
                       {i >= 16 && <span style={s.amistosChip}>Amistoso</span>}
@@ -493,9 +540,9 @@ export default function ScheduleGenerator({ session, liga, cancha }) {
                         if (!a||!b) return null;
                         return (
                           <div key={i} style={s.cruceRow}>
-                            <span style={{ fontWeight:700, color:"var(--green)" }}>#{i+1} {a.equipo.nombre}</span>
+                            <span className="sg-eq-name" style={{ fontWeight:700, color:"var(--green)" }}>#{i+1} {a.equipo.nombre}</span>
                             <span style={s.vsTag}>VS</span>
-                            <span style={{ fontWeight:700, color:"var(--green)" }}>#{Math.min(8,clasificacion.length)-i} {b.equipo.nombre}</span>
+                            <span className="sg-eq-name-r" style={{ fontWeight:700, color:"var(--green)" }}>#{Math.min(8,clasificacion.length)-i} {b.equipo.nombre}</span>
                           </div>
                         );
                       })}
@@ -509,9 +556,9 @@ export default function ScheduleGenerator({ session, liga, cancha }) {
                           if (!a||!b) return null;
                           return (
                             <div key={i} style={s.cruceRow}>
-                              <span style={{ fontWeight:700, color:"#b45309" }}>#{9+i} {a.equipo.nombre}</span>
+                              <span className="sg-eq-name" style={{ fontWeight:700, color:"#b45309" }}>#{9+i} {a.equipo.nombre}</span>
                               <span style={s.vsTag}>VS</span>
-                              <span style={{ fontWeight:700, color:"#b45309" }}>#{Math.min(16,clasificacion.length)-i} {b.equipo.nombre}</span>
+                              <span className="sg-eq-name-r" style={{ fontWeight:700, color:"#b45309" }}>#{Math.min(16,clasificacion.length)-i} {b.equipo.nombre}</span>
                             </div>
                           );
                         })}
@@ -600,12 +647,12 @@ function BracketView({ liguilla, equipos, token, liga, onRefresh, showToast }) {
       <div key={p.id} style={{ ...s.bracketPartido, borderLeft:`3px solid ${colorTipo}` }} onClick={() => !p.cerrado && handleAbrirModal(p)} className={!p.cerrado ? "bracket-clickable" : ""}>
         <div style={s.bracketEquipo}>
           <div style={{ ...s.dot, background:local?.color_playera||"#999", width:8, height:8 }}/>
-          <span style={{ fontSize:12, fontWeight:600, color:p.equipo_avanza_id===local?.id?"var(--green)":"var(--text)" }}>{local?.nombre||"—"}</span>
+          <span className="sg-eq-name" style={{ fontSize:12, fontWeight:600, color:p.equipo_avanza_id===local?.id?"var(--green)":"var(--text)" }}>{local?.nombre||"—"}</span>
           {p.goles_local !== null && p.goles_local !== undefined && <span style={s.gol}>{p.goles_local}</span>}
         </div>
         <div style={s.bracketEquipo}>
           <div style={{ ...s.dot, background:visitante?.color_playera||"#999", width:8, height:8 }}/>
-          <span style={{ fontSize:12, fontWeight:600, color:p.equipo_avanza_id===visitante?.id?"var(--green)":"var(--text)" }}>{visitante?.nombre||"—"}</span>
+          <span className="sg-eq-name" style={{ fontSize:12, fontWeight:600, color:p.equipo_avanza_id===visitante?.id?"var(--green)":"var(--text)" }}>{visitante?.nombre||"—"}</span>
           {p.goles_visitante !== null && p.goles_visitante !== undefined && <span style={s.gol}>{p.goles_visitante}</span>}
         </div>
         {p.cerrado ? (
@@ -723,44 +770,67 @@ function BracketView({ liguilla, equipos, token, liga, onRefresh, showToast }) {
 // STYLES
 // ─────────────────────────────────────────────────────────────────
 const s = {
-  wrap: {},
-  header: { marginBottom:20 },
-  title: { fontSize:24, fontWeight:800, color:"var(--text)", letterSpacing:-0.8, marginBottom:4 },
-  sub: { color:"var(--text-muted)", fontSize:14 },
+  wrap: { width:"100%", minWidth:0 },
+  // ── HERO HEADER COMBINADO (verde gradiente como card-green) ──
+  heroCard: { position:"relative", overflow:"hidden", background:"linear-gradient(145deg, #4f8f2f 0%, #3a6b22 100%)", borderRadius:"var(--radius-lg)", padding:"16px 16px 14px", marginBottom:14, boxShadow:"var(--shadow-green)", color:"#fff" },
+  heroOverlay: { position:"absolute", top:-30, right:-30, width:160, height:160, borderRadius:"50%", background:"radial-gradient(circle, rgba(127,191,77,0.45) 0%, rgba(127,191,77,0) 70%)", pointerEvents:"none" },
+  heroInner: { position:"relative", zIndex:1 },
+  // Sección superior: unidad (logo + nombre más grandes y prominentes)
+  heroUnitRow: { display:"flex", alignItems:"center", gap:12, marginBottom:12 },
+  heroUnitLogo: { width:62, height:62, borderRadius:14, background:"rgba(255,255,255,0.20)", border:"2px solid rgba(255,255,255,0.42)", display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", flexShrink:0, boxShadow:"0 4px 14px rgba(0,0,0,0.22)" },
+  heroUnitLogoImg: { width:"100%", height:"100%", objectFit:"cover" },
+  heroUnitLabel: { fontSize:10, fontWeight:700, letterSpacing:1.1, color:"rgba(255,255,255,0.82)", textTransform:"uppercase", marginBottom:3 },
+  heroUnitName: { fontSize:19, fontWeight:800, color:"#fff", letterSpacing:-0.5, lineHeight:1.15, textShadow:"0 1px 2px rgba(0,0,0,0.22)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
+  // Divisor
+  heroDivider: { height:1, background:"linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.40) 50%, rgba(255,255,255,0) 100%)", margin:"4px 0 12px" },
+  // Sección inferior: 2 columnas (izq: título+torneo, der: stats grandes)
+  heroBottomRow: { display:"flex", alignItems:"stretch", gap:10 },
+  heroBottomLeft: { flex:1, minWidth:0, display:"flex", flexDirection:"column", justifyContent:"center" },
+  heroBottomRight: { display:"flex", gap:8, flexShrink:0 },
+  heroTitleRow: { display:"flex", alignItems:"center", gap:7, marginBottom:6 },
+  heroEmoji: { fontSize:18, lineHeight:1 },
+  heroTitle: { fontSize:16, fontWeight:800, letterSpacing:-0.4, color:"#fff", margin:0, lineHeight:1.15 },
+  heroLiga: { fontSize:13, fontWeight:800, color:"#fff", lineHeight:1.3, textShadow:"0 1px 2px rgba(0,0,0,0.18)", overflow:"hidden", textOverflow:"ellipsis", display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical" },
+  // Stat boxes a la derecha (rellenan el espacio vacío)
+  heroStatBox: { width:62, padding:"8px 6px", borderRadius:12, background:"rgba(255,255,255,0.18)", border:"1px solid rgba(255,255,255,0.32)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", textAlign:"center", boxShadow:"inset 0 1px 0 rgba(255,255,255,0.18)", backdropFilter:"blur(2px)" },
+  heroStatNumber: { fontSize:24, fontWeight:900, color:"#fff", lineHeight:1, letterSpacing:-1, textShadow:"0 1px 2px rgba(0,0,0,0.22)" },
+  heroStatLabel: { fontSize:9, fontWeight:700, letterSpacing:0.8, color:"rgba(255,255,255,0.88)", textTransform:"uppercase", marginTop:4 },
+  // ── RESTO ──
   tabContent: { paddingTop:4 },
-  twoCol: { display:"grid", gridTemplateColumns:"1fr 1.2fr", gap:20 },
-  card: { background:"white", borderRadius:"var(--radius-md)", padding:24, boxShadow:"var(--shadow-md)", border:"1px solid var(--border)" },
-  cardTitle: { fontSize:15, fontWeight:700, color:"var(--text)", marginBottom:16 },
-  field: { marginBottom:16 },
-  fieldRow: { display:"flex", gap:16 },
-  label: { display:"block", fontSize:11, fontWeight:700, color:"var(--text-sub)", textTransform:"uppercase", letterSpacing:0.7, marginBottom:8 },
-  equipoRow: { display:"flex", alignItems:"center", gap:10, padding:"8px 12px", borderRadius:8, background:"var(--bg)" },
-  dot: { width:12, height:12, borderRadius:"50%", flexShrink:0 },
-  rankBadge: { width:24, height:24, borderRadius:6, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:800, flexShrink:0 },
-  infoBox: { background:"var(--green-light)", border:"1px solid #c3e6a3", borderRadius:8, padding:"10px 14px", color:"var(--green-dark)", fontSize:12 },
-  previewHeader: { display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:20, paddingBottom:16, borderBottom:"1px solid var(--border)" },
-  canchaLabel: { fontSize:11, fontWeight:700, color:"var(--text-sub)", textTransform:"uppercase", letterSpacing:0.8, marginBottom:8 },
-  partidoRow: { display:"flex", alignItems:"center", gap:12, padding:"10px 14px", borderRadius:10, background:"var(--bg)", border:"1px solid var(--border)" },
-  hora: { background:"var(--green)", color:"white", fontSize:12, fontWeight:800, padding:"4px 10px", borderRadius:6, flexShrink:0, minWidth:50, textAlign:"center" },
-  vsBlock: { flex:1, display:"flex", alignItems:"center", justifyContent:"space-between" },
-  vsTag: { fontSize:11, fontWeight:800, color:"var(--text-muted)", padding:"0 10px" },
-  descansoChip: { background:"#f3f4f6", color:"var(--text-muted)", fontSize:12, fontWeight:600, padding:"4px 12px", borderRadius:6 },
-  crucesGrid: { display:"grid", gridTemplateColumns:"1fr 1fr", gap:20, marginBottom:16 },
-  crucesTitle: { fontSize:13, fontWeight:700, marginBottom:10 },
-  cruceRow: { display:"flex", alignItems:"center", gap:8, padding:"8px 12px", borderRadius:8, background:"var(--bg)", marginBottom:6, fontSize:13 },
-  liguillaChip: { background:"var(--green-light)", color:"var(--green)", fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:4 },
-  copaChip: { background:"#fef9c3", color:"#854d0e", fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:4 },
-  amistosChip: { background:"#f3f4f6", color:"#6b7280", fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:4 },
-  bracketRow: { display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:20, overflowX:"auto" },
-  bracketCol: { display:"flex", flexDirection:"column", gap:10 },
-  bracketColTitle: { fontSize:12, fontWeight:800, textTransform:"uppercase", letterSpacing:0.8, marginBottom:8 },
-  bracketPartido: { background:"var(--bg)", borderRadius:10, padding:"12px 14px", cursor:"default", border:"1px solid var(--border)" },
-  bracketEquipo: { display:"flex", alignItems:"center", gap:8, marginBottom:6 },
-  gol: { marginLeft:"auto", fontWeight:800, fontSize:14, color:"var(--text)" },
-  ganadorChip: { background:"var(--green-light)", color:"var(--green)", fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:6, marginTop:4 },
-  pendienteChip: { fontSize:11, color:"var(--text-muted)", fontStyle:"italic", marginTop:4 },
-  bracketPendiente: { background:"#f9fafb", borderRadius:10, padding:"16px", textAlign:"center", color:"var(--text-muted)", fontSize:12, fontStyle:"italic", border:"1px dashed var(--border)" },
-  closeBtn: { background:"var(--bg)", border:"1px solid var(--border)", borderRadius:8, width:30, height:30, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", color:"var(--text-sub)" },
+  twoCol: { display:"flex", flexDirection:"column", gap:14 },
+  card: { background:"white", borderRadius:"var(--radius-md)", padding:14, boxShadow:"var(--shadow-md)", border:"1px solid var(--border)", borderTop:"3px solid var(--green)", minWidth:0, overflow:"hidden" },
+  cardTitle: { fontSize:14, fontWeight:800, color:"var(--green-dark)", marginBottom:12, letterSpacing:-0.2 },
+  field: { marginBottom:14 },
+  fieldRow: { display:"flex", flexDirection:"column", gap:12 },
+  label: { display:"block", fontSize:10.5, fontWeight:700, color:"var(--green-dark)", textTransform:"uppercase", letterSpacing:0.6, marginBottom:6 },
+  equipoRow: { display:"flex", alignItems:"center", gap:8, padding:"8px 10px", borderRadius:8, background:"linear-gradient(90deg, #f0fdf4 0%, #ffffff 100%)", border:"1px solid #e4efd9", minWidth:0, flexWrap:"wrap" },
+  dot: { width:12, height:12, borderRadius:"50%", flexShrink:0, boxShadow:"0 0 0 2px #ffffff, 0 0 0 3px rgba(0,0,0,0.05)" },
+  rankBadge: { width:22, height:22, borderRadius:6, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10.5, fontWeight:800, flexShrink:0 },
+  infoBox: { background:"linear-gradient(135deg, #eaf4e0 0%, #d6ebc4 100%)", border:"1px solid #b8d99a", borderRadius:10, padding:"10px 12px", color:"var(--green-dark)", fontSize:11.5, lineHeight:1.45 },
+  previewHeader: { display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10, marginBottom:14, paddingBottom:12, borderBottom:"2px solid var(--green-light)", flexWrap:"wrap" },
+  canchaLabel: { fontSize:11, fontWeight:800, color:"#fff", background:"var(--green)", textTransform:"uppercase", letterSpacing:0.7, padding:"4px 10px", borderRadius:"var(--radius-full)", display:"inline-block", marginBottom:8 },
+  partidoRow: { display:"flex", alignItems:"center", gap:8, padding:"9px 10px", borderRadius:10, background:"#ffffff", border:"1px solid var(--border)", borderLeft:"3px solid var(--green-accent)", minWidth:0 },
+  hora: { background:"var(--green)", color:"white", fontSize:11, fontWeight:800, padding:"4px 8px", borderRadius:6, flexShrink:0, minWidth:44, textAlign:"center" },
+  vsBlock: { flex:1, display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, minWidth:0 },
+  vsTag: { fontSize:10, fontWeight:800, color:"var(--text-muted)", padding:"0 4px", flexShrink:0 },
+  descansoChip: { background:"#f3f4f6", color:"var(--text-muted)", fontSize:11, fontWeight:600, padding:"4px 10px", borderRadius:6 }, // legacy
+  descansaRow: { display:"flex", alignItems:"center", gap:8, padding:"7px 10px", borderRadius:9, background:"#f9fafb", border:"1px dashed #d1d5db", minWidth:0 },
+  crucesGrid: { display:"flex", flexDirection:"column", gap:14, marginBottom:14 },
+  crucesTitle: { fontSize:12.5, fontWeight:700, marginBottom:8 },
+  cruceRow: { display:"flex", alignItems:"center", gap:6, padding:"7px 10px", borderRadius:8, background:"var(--bg)", marginBottom:5, fontSize:12, flexWrap:"wrap", minWidth:0 },
+  liguillaChip: { background:"var(--green-light)", color:"var(--green)", fontSize:9.5, fontWeight:700, padding:"2px 7px", borderRadius:4, flexShrink:0 },
+  copaChip: { background:"#fef9c3", color:"#854d0e", fontSize:9.5, fontWeight:700, padding:"2px 7px", borderRadius:4, flexShrink:0 },
+  amistosChip: { background:"#f3f4f6", color:"#6b7280", fontSize:9.5, fontWeight:700, padding:"2px 7px", borderRadius:4, flexShrink:0 },
+  bracketRow: { display:"flex", flexDirection:"column", gap:14 },
+  bracketCol: { display:"flex", flexDirection:"column", gap:8 },
+  bracketColTitle: { fontSize:11.5, fontWeight:800, textTransform:"uppercase", letterSpacing:0.7, marginBottom:6 },
+  bracketPartido: { background:"var(--bg)", borderRadius:10, padding:"10px 12px", cursor:"default", border:"1px solid var(--border)", minWidth:0 },
+  bracketEquipo: { display:"flex", alignItems:"center", gap:7, marginBottom:5, minWidth:0 },
+  gol: { marginLeft:"auto", fontWeight:800, fontSize:13, color:"var(--text)", flexShrink:0 },
+  ganadorChip: { background:"var(--green-light)", color:"var(--green)", fontSize:10.5, fontWeight:700, padding:"3px 9px", borderRadius:6, marginTop:4 },
+  pendienteChip: { fontSize:10.5, color:"var(--text-muted)", fontStyle:"italic", marginTop:4 },
+  bracketPendiente: { background:"#f9fafb", borderRadius:10, padding:"14px", textAlign:"center", color:"var(--text-muted)", fontSize:11.5, fontStyle:"italic", border:"1px dashed var(--border)" },
+  closeBtn: { background:"var(--bg)", border:"1px solid var(--border)", borderRadius:8, width:30, height:30, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", color:"var(--text-sub)", flexShrink:0 },
 };
 
 const css = `
@@ -769,5 +839,8 @@ const css = `
   .num-btn.active { background:var(--green); border-color:var(--green); color:white; }
   .bracket-clickable { cursor:pointer; transition:transform 0.15s, box-shadow 0.15s; }
   .bracket-clickable:hover { transform:translateY(-2px); box-shadow:var(--shadow-md); }
-  @media(max-width:768px){ .bracket-row{ grid-template-columns:1fr !important; } }
+  /* Truncado de nombres largos en filas flexibles */
+  .sg-eq-name { flex:1; min-width:0; font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sg-eq-name-r { font-size:13px; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }
+  .sg-vs-team { display:flex; align-items:center; gap:6px; flex:1; min-width:0; }
 `;

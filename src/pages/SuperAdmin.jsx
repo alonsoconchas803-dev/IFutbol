@@ -47,6 +47,7 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
   const [seccion, setSeccion] = useState(seccionInicial);
   const [canchas, setCanchas] = useState([]);
   const [ligas, setLigas] = useState([]);
+  const [ligasCanchaFilter, setLigasCanchaFilter] = useState(null); // si está set, ligas se filtra por esta unidad
   const [usuarios, setUsuarios] = useState([]);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
@@ -323,23 +324,31 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
       <style>{css}</style>
       {toast && <div style={{ ...s.toast, background: toast.tipo === "err" ? "#ef4444" : "#4ade80", color: toast.tipo === "err" ? "#fff" : "#0d0d1a" }}>{toast.msg}</div>}
 
-      {/* ENCABEZADO */}
-      <div style={s.header}>
-        <div>
-          <h2 style={s.title}>Panel Super Admin 👑</h2>
-          <p style={s.sub}>Control total sobre unidades deportivas, ligas y usuarios</p>
-        </div>
-      </div>
-
-      {/* TABS */}
-      <div style={s.tabs}>
-        {[["canchas","🏟️","Unidades Deportivas"],["ligas","🏆","Ligas"],["equipos","👕","Equipos"],["stats","📊","Resumen"],["solicitudes","📋","Solicitudes"]].map(([key, icon, label]) => (
-          <button key={key} onClick={() => setSeccion(key)}
-            style={{ ...s.tab, ...(seccion === key ? s.tabActive : {}) }}>
-            {icon} {label}
-          </button>
-        ))}
-      </div>
+      {/* ENCABEZADO contextual con tarjeta verde gradiente. Cambia según la pestaña. */}
+      {(() => {
+        const HEADERS = {
+          canchas:     { icon: "🏟️", label: "GESTIÓN",       title: "Unidades Deportivas", sub: "Administra las unidades de la plataforma" },
+          ligas:       { icon: "🏆", label: "TORNEOS",       title: "Ligas",                sub: "Ligas registradas en la plataforma" },
+          equipos:     { icon: "👕", label: "COMPETIDORES",  title: "Equipos",              sub: "Equipos inscritos por torneo" },
+          stats:       { icon: "📊", label: "RESUMEN",       title: "Estadísticas",         sub: "Visión general de la plataforma" },
+          resultados:  { icon: "⚽", label: "FICHAS",         title: "Resultados",           sub: "Fichas cerradas y marcadores" },
+          solicitudes: { icon: "📨", label: "REGISTROS",     title: "Solicitudes",          sub: "Aprobar o rechazar registros" },
+        };
+        const h = HEADERS[seccion] || HEADERS.canchas;
+        return (
+          <div style={s.heroCard}>
+            <div style={s.heroGlow} />
+            <div style={s.heroInner}>
+              <div style={s.heroIcon}>{h.icon}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={s.heroLabel}>{h.label}</div>
+                <h2 style={s.heroTitle}>{h.title}</h2>
+                <p style={s.heroSub}>{h.sub}</p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── SECCIÓN CANCHAS ── */}
       {seccion === "canchas" && (
@@ -367,9 +376,14 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
                         ? <img src={c.logo_url} alt={c.nombre} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "inherit" }} />
                         : "🏟️"}
                     </div>
-                    <div style={s.cardActions}>
-                      <button style={s.btnEdit} onClick={() => editarCancha(c)}>✏️</button>
-                      <button style={s.btnDel} onClick={() => eliminarCancha(c.id)}>🗑️</button>
+                    <div style={s.cardActionsCol}>
+                      <div style={s.cardActions}>
+                        <button style={s.btnEdit} onClick={() => editarCancha(c)} title="Editar">✏️</button>
+                        <button style={s.btnDel} onClick={() => eliminarCancha(c.id)} title="Eliminar">🗑️</button>
+                      </div>
+                      <button style={s.btnVerLigas} onClick={() => { setLigasCanchaFilter(c.id); setSeccion("ligas"); }}>
+                        🏆 Ver ligas
+                      </button>
                     </div>
                   </div>
                   <div style={s.cardName}>{c.nombre}</div>
@@ -386,11 +400,25 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
       )}
 
       {/* ── SECCIÓN LIGAS ── */}
-      {seccion === "ligas" && (
+      {seccion === "ligas" && (() => {
+        const canchaFiltro = ligasCanchaFilter ? canchas.find(c => c.id === ligasCanchaFilter) : null;
+        const ligasMostradas = ligasCanchaFilter ? ligas.filter(l => l.cancha_id === ligasCanchaFilter) : ligas;
+        return (
         <div>
+          {canchaFiltro && (
+            <button
+              onClick={() => { setLigasCanchaFilter(null); setSeccion("canchas"); }}
+              style={{ background:"transparent", border:"none", color:"#4f8f2f", fontSize:13, fontWeight:700, cursor:"pointer", marginBottom:14, padding:0, display:"inline-flex", alignItems:"center", gap:4 }}>
+              ← Volver a unidades deportivas
+            </button>
+          )}
           <div style={s.secHeader}>
-            <span style={s.secCount}>{ligas.length} ligas registradas</span>
-            <button style={s.btnAdd} onClick={() => { setLigaForm({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: "", temporada: "", color_marca: "#4f8f2f" }); setEditLigaId(null); setModal("liga"); }}
+            <span style={s.secCount}>
+              {ligasMostradas.length} {ligasMostradas.length === 1 ? "liga" : "ligas"}
+              {canchaFiltro ? ` en ${canchaFiltro.nombre}` : " registradas"}
+            </span>
+            <button style={s.btnAdd}
+              onClick={() => { setLigaForm({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: canchaFiltro?.id || "", temporada: "", color_marca: "#4f8f2f" }); setEditLigaId(null); setModal("liga"); }}
               disabled={canchas.length === 0}>
               + Nueva liga
             </button>
@@ -400,15 +428,20 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
             <div style={s.warningBox}>⚠️ Primero debes registrar al menos una unidad deportiva para poder crear ligas.</div>
           )}
 
-          {ligas.length === 0 && canchas.length > 0 ? (
+          {ligasMostradas.length === 0 && canchas.length > 0 ? (
             <div style={s.empty}>
               <div style={s.emptyIcon}>🏆</div>
-              <div style={s.emptyTxt}>No hay ligas registradas aún</div>
-              <button style={s.btnAdd} onClick={() => setModal("liga")}>Crear primera liga</button>
+              <div style={s.emptyTxt}>
+                {canchaFiltro ? `No hay ligas registradas en ${canchaFiltro.nombre}` : "No hay ligas registradas aún"}
+              </div>
+              <button style={s.btnAdd}
+                onClick={() => { setLigaForm({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: canchaFiltro?.id || "", temporada: "", color_marca: "#4f8f2f" }); setEditLigaId(null); setModal("liga"); }}>
+                Crear primera liga
+              </button>
             </div>
           ) : (
             <div style={s.ligaList}>
-              {ligas.map(l => (
+              {ligasMostradas.map(l => (
                 <div key={l.id} style={{ ...s.ligaRow, opacity: l.activa ? 1 : 0.5 }} className="sa-card">
                   <div style={s.ligaLeft}>
                     <div style={{ ...s.ligaDot, background: l.activa ? "#4ade80" : "#666" }} />
@@ -433,7 +466,8 @@ export default function SuperAdmin({ session, seccionInicial = "canchas" }) {
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
 
       {/* ── SECCIÓN RESUMEN ── */}
       {seccion === "stats" && (
@@ -878,9 +912,17 @@ const GREEN = "#4f8f2f";
 
 const s = {
   wrap: { padding: "0" },
-  header: { marginBottom: 18 },
-  title: { fontSize: 22, fontWeight: 800, color: "#111827", letterSpacing: -0.6, marginBottom: 4 },
-  sub: { color: "#6b7280", fontSize: 13, lineHeight: 1.35 },
+  header: { marginBottom: 18 }, // legacy
+  title: { fontSize: 22, fontWeight: 800, color: "#111827", letterSpacing: -0.6, marginBottom: 4 }, // legacy
+  sub: { color: "#6b7280", fontSize: 13, lineHeight: 1.35 }, // legacy
+  // ── HERO CARD del encabezado contextual ──
+  heroCard: { position: "relative", overflow: "hidden", background: "linear-gradient(145deg, #4f8f2f 0%, #3a6b22 100%)", borderRadius: 18, padding: "16px 16px 14px", marginBottom: 18, boxShadow: "0 6px 20px rgba(79,143,47,0.28)", color: "#fff" },
+  heroGlow: { position: "absolute", top: -40, right: -40, width: 170, height: 170, borderRadius: "50%", background: "radial-gradient(circle, rgba(127,191,77,0.55) 0%, rgba(127,191,77,0) 70%)", pointerEvents: "none" },
+  heroInner: { position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: 13 },
+  heroIcon: { width: 58, height: 58, borderRadius: 14, background: "rgba(255,255,255,0.22)", border: "2px solid rgba(255,255,255,0.42)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, flexShrink: 0, boxShadow: "0 4px 14px rgba(0,0,0,0.22)" },
+  heroLabel: { fontSize: 10, fontWeight: 700, letterSpacing: 1.2, color: "rgba(255,255,255,0.82)", textTransform: "uppercase", marginBottom: 3 },
+  heroTitle: { fontSize: 22, fontWeight: 800, color: "#fff", letterSpacing: -0.5, margin: 0, marginBottom: 4, lineHeight: 1.15, textShadow: "0 1px 2px rgba(0,0,0,0.22)" },
+  heroSub: { fontSize: 12, color: "rgba(255,255,255,0.85)", lineHeight: 1.35, margin: 0 },
   // Tabs scrolleables horizontalmente: no wrap, sin cortar palabras.
   tabs: { display: "flex", gap: 2, marginBottom: 18, borderBottom: `1px solid ${BORDER}`, paddingBottom: 0, overflowX: "auto", flexWrap: "nowrap", WebkitOverflowScrolling: "touch" },
   tab: { background: "transparent", border: "none", borderBottom: "2px solid transparent", color: "#6b7280", padding: "10px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", transition: "all 0.2s", marginBottom: -1, whiteSpace: "nowrap", flexShrink: 0 },
@@ -893,6 +935,8 @@ const s = {
   cardTop: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 8 },
   cardIcon: { width: 40, height: 40, background: "linear-gradient(135deg, #4f8f2f, #7fbf4d)", borderRadius: 11, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, boxShadow: "0 3px 8px rgba(79,143,47,0.3)", flexShrink: 0 },
   cardActions: { display: "flex", gap: 4, flexShrink: 0 },
+  cardActionsCol: { display: "flex", flexDirection: "column", gap: 5, alignItems: "stretch", flexShrink: 0 },
+  btnVerLigas: { background: "#fff", borderWidth: 1.5, borderStyle: "solid", borderColor: "#4f8f2f", borderRadius: 8, padding: "5px 10px", fontSize: 11, fontWeight: 800, color: "#4f8f2f", cursor: "pointer", whiteSpace: "nowrap", lineHeight: 1.2 },
   cardName: { fontSize: 15, fontWeight: 700, color: "#111827", marginBottom: 3, wordBreak: "break-word" },
   cardMeta: { fontSize: 12, color: "#6b7280", marginBottom: 8, wordBreak: "break-word" },
   cardBadge: { display: "inline-block", background: "#f0fdf4", color: GREEN, fontSize: 10.5, padding: "3px 9px", borderRadius: 6, marginBottom: 6, border: "1px solid #c3e6a3" },

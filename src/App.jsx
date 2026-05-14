@@ -57,11 +57,11 @@ const ROLES_INFO = {
 
 const MENU = {
   super_admin: [
-    { icon:"👑", label:"Panel Admin",         key:"panel" },
     { icon:"🏟️", label:"Unidades Deportivas", key:"canchas" },
-    { icon:"🏆", label:"Torneos",             key:"torneos" },
-    { icon:"📋", label:"Resultados",          key:"resultados" },
+    { icon:"👕", label:"Equipos",             key:"equipos" },
+    { icon:"📊", label:"Resumen",             key:"stats" },
     { icon:"📨", label:"Solicitudes",         key:"solicitudes" },
+    { icon:"⚽", label:"Resultados",          key:"resultados" },
   ],
   league_admin: [
     { icon:"👕", label:"Equipos",    key:"equipos" },
@@ -70,6 +70,7 @@ const MENU = {
     { icon:"🟡", label:"Árbitros",   key:"arbitros" },
     { icon:"📄", label:"Fichas",     key:"fichas" },
     { icon:"📋", label:"Resultados", key:"resultados" },
+    { icon:"🎨", label:"Personalizar mi unidad", key:"personalizar" },
   ],
   referee: [
     { icon:"🟡", label:"Mis Partidos", key:"partidos" },
@@ -209,8 +210,8 @@ function DashboardLayout({ session, userRole, jugadorData, onLogout, toast, show
   const menuItems = MENU[rol] || [];
   const [activeSection, setActiveSection] = useState(seccionInicial || menuItems[0]?.key || "panel");
 
-  const SUPER_MAP  = { panel:"stats", canchas:"canchas", torneos:"ligas", solicitudes:"solicitudes", resultados:"resultados" };
-  const LEAGUE_MAP = { equipos:"equipos", jugadores:"jugadores", calendario:"calendario", arbitros:"arbitros", fichas:"fichas", resultados:"resultados" };
+  const SUPER_MAP  = { canchas:"canchas", ligas:"ligas", equipos:"equipos", stats:"stats", solicitudes:"solicitudes", resultados:"resultados" };
+  const LEAGUE_MAP = { equipos:"equipos", jugadores:"jugadores", calendario:"calendario", arbitros:"arbitros", fichas:"fichas", resultados:"resultados", personalizar:"personalizar" };
   const PLAYER_MAP = { perfil:"perfil", ligas:"ligas", estadisticas:"estadisticas" };
 
   const renderContent = () => {
@@ -830,6 +831,13 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
           {seccion==="partidos"&&(jornadasAgrupadas.length===0?<EmptyState icon="📅" txt="No hay partidos programados aún"/>:
             (() => {
               const grupoSel = jornadasAgrupadas.find(g => g.jornada.numero === jornadaSel) || jornadasAgrupadas[0];
+              // Equipos que descansan en esta jornada: los de la liga que no aparecen como local ni visitante.
+              const equipoIdsEnJornada = new Set();
+              grupoSel.partidos.forEach(p => {
+                if (p.equipo_local_id) equipoIdsEnJornada.add(p.equipo_local_id);
+                if (p.equipo_visitante_id) equipoIdsEnJornada.add(p.equipo_visitante_id);
+              });
+              const descansan = equipos.filter(eq => !equipoIdsEnJornada.has(eq.id));
               return (
                 <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
                   {/* Selector de jornada — solo si hay más de 1 */}
@@ -908,6 +916,24 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
                           </div>
                         );
                       })}
+
+                      {/* Equipos que descansan en esta jornada */}
+                      {descansan.map(eq => (
+                        <div key={`descansa-${eq.id}`} style={{ padding:"8px 10px", background:"#f9fafb", borderRadius:9, border:"1px dashed #d1d5db", display:"flex", alignItems:"center", gap:10 }}>
+                          <span style={{ fontSize:22, lineHeight:1, flexShrink:0 }}>😴</span>
+                          <JerseySVG
+                            diseno={eq.diseno_camiseta||"solido"}
+                            color1={eq.color_playera||"#999"}
+                            color2={eq.color_camiseta_2||"#fff"}
+                            escudoUrl={eq.escudo_url||null}
+                            size={30}
+                          />
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ fontSize:12.5, fontWeight:800, color:"var(--text)", lineHeight:1.15, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{eq.nombre}</div>
+                            <div style={{ fontSize:10.5, color:"var(--text-muted)", marginTop:1 }}>Descansa esta jornada</div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </div>
