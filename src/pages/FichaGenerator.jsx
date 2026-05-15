@@ -298,6 +298,7 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra })
     try {
       const partidos = await db(
         `/partidos?jornada_id=eq.${jornadaSel}` +
+        `&equipo_local_id=not.is.null&equipo_visitante_id=not.is.null` +
         `&select=*,jornadas(id,numero,fecha)` +
         `,equipos_local:equipos!partidos_equipo_local_id_fkey(id,nombre,color_playera,color_camiseta_2,diseno_camiseta,escudo_url)` +
         `,equipos_visitante:equipos!partidos_equipo_visitante_id_fkey(id,nombre,color_playera,color_camiseta_2,diseno_camiseta,escudo_url)` +
@@ -514,13 +515,14 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra })
         </div>
       )}
 
-      {/* MODAL DE FICHA COMPLETA (asistencia, goles, faltas, observaciones) */}
+      {/* MODAL DE EDICIÓN DE FICHA — el admin de unidad puede corregir cualquier ficha cerrada */}
       {fichaModalPartido && (
-        <FichaDetalleModal
+        <FichaEditorModal
           partido={fichaModalPartido}
           token={token}
           liga={liga}
           onClose={() => setFichaModalPartido(null)}
+          onGuardado={() => { setFichaModalPartido(null); cargarResumenJornada(); }}
         />
       )}
     </div>
@@ -577,7 +579,7 @@ function PartidoCard({ partido, onVerFicha }) {
 
       {cerrada && (
         <button style={hs.btnVerFicha} onClick={() => onVerFicha(partido)}>
-          📝 Ver ficha
+          ✏️ Modificar ficha
         </button>
       )}
     </div>
@@ -585,9 +587,9 @@ function PartidoCard({ partido, onVerFicha }) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// MODAL: FICHA COMPLETA DEL PARTIDO (lectura)
+// MODAL: FICHA COMPLETA DEL PARTIDO (lectura) — exportado para Resultados
 // ─────────────────────────────────────────────────────────────────
-function FichaDetalleModal({ partido, token, liga, onClose }) {
+export function FichaDetalleModal({ partido, token, liga, onClose }) {
   const [jugadoresLocal, setJugadoresLocal] = useState([]);
   const [jugadoresVisit, setJugadoresVisit] = useState([]);
   const [cargando, setCargando]             = useState(true);
@@ -758,6 +760,280 @@ function FichaDetalleModal({ partido, token, liga, onClose }) {
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────
+// MODAL: EDITOR DE FICHA — el admin de unidad corrige fichas cerradas
+// ─────────────────────────────────────────────────────────────────
+function FichaEditorModal({ partido, token, liga, onClose, onGuardado }) {
+  const f = partido.ficha;
+  const eqL = partido.equipos_local;
+  const eqV = partido.equipos_visitante;
+
+  // Estado local editable, inicializado desde la ficha cerrada
+  const [golesLocal, setGolesLocal]         = useState(f?.goles_local ?? 0);
+  const [golesVisitante, setGolesVisitante] = useState(f?.goles_visitante ?? 0);
+  const [goleadores, setGoleadores]         = useState(f?.goleadores || []);
+  const [asistencia, setAsistencia]         = useState(f?.asistencia || []);
+  const [faltasLocal, setFaltasLocal]       = useState(f?.faltas_local ?? 0);
+  const [faltasVisit, setFaltasVisit]       = useState(f?.faltas_visitante ?? 0);
+  const [observaciones, setObservaciones]   = useState(f?.observaciones || "");
+
+  const [jugadoresLocal, setJugadoresLocal] = useState([]);
+  const [jugadoresVisit, setJugadoresVisit] = useState([]);
+  const [cargando, setCargando]             = useState(true);
+  const [guardando, setGuardando]           = useState(false);
+  const [error, setError]                   = useState(null);
+
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      try {
+        const ligaId = liga?.id || partido.jornadas?.liga_id;
+        const equipoIds = [eqL?.id, eqV?.id].filter(Boolean);
+        if (equipoIds.length === 0) { setCargando(false); return; }
+        const data = await db(
+          `/jugador_equipo?equipo_id=in.(${equipoIds.join(",")})&liga_id=eq.${ligaId}` +
+          `&select=equipo_id,jugador_id,dorsal,nombre_camiseta,jugadores(nombre_completo,numero_afiliado)` +
+          `&order=equipo_id,dorsal`,
+          token
+        );
+        if (cancelado) return;
+        setJugadoresLocal((data || []).filter(j => j.equipo_id === eqL?.id));
+        setJugadoresVisit((data || []).filter(j => j.equipo_id === eqV?.id));
+      } finally {
+        if (!cancelado) setCargando(false);
+      }
+    })();
+    return () => { cancelado = true; };
+  }, [partido?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Helpers ───────────────────────────────────────────────────
+  const estaPresente = (jid) => asistencia.includes(jid);
+  const toggleAsistencia = (jid) => {
+    setAsistencia(prev => prev.includes(jid) ? prev.filter(x => x !== jid) : [...prev, jid]);
+  };
+
+  const golesDeJugador = (jugadorId, equipoId) => {
+    const g = goleadores.find(x => x.jugador_id === jugadorId && x.equipo === equipoId);
+    return g?.goles || 0;
+  };
+
+  const agregarGoleador = (jugInfo, equipoId, equipoNombre) => {
+    const idx = goleadores.findIndex(g => g.jugador_id === jugInfo.jugador_id && g.equipo === equipoId);
+    if (idx >= 0) {
+      const updated = [...goleadores];
+      updated[idx].goles += 1;
+      setGoleadores(updated);
+    } else {
+      setGoleadores([...goleadores, {
+        jugador_id: jugInfo.jugador_id,
+        nombre: jugInfo.jugadores?.nombre_completo,
+        equipo: equipoId,
+        equipo_nombre: equipoNombre,
+        dorsal: jugInfo.dorsal,
+        goles: 1,
+      }]);
+    }
+    if (equipoId === eqL?.id) setGolesLocal(v => v + 1);
+    else setGolesVisitante(v => v + 1);
+  };
+
+  const quitarGoleador = (jugadorId, equipoId) => {
+    setGoleadores(prev => prev.map(g => {
+      if (g.jugador_id === jugadorId && g.equipo === equipoId) return { ...g, goles: g.goles - 1 };
+      return g;
+    }).filter(g => g.goles > 0));
+    if (equipoId === eqL?.id) setGolesLocal(v => Math.max(0, v - 1));
+    else setGolesVisitante(v => Math.max(0, v - 1));
+  };
+
+  const guardar = async () => {
+    if (!f?.id) { setError("No se encontró el id de la ficha"); return; }
+    setGuardando(true);
+    setError(null);
+    try {
+      const payload = {
+        goles_local: golesLocal,
+        goles_visitante: golesVisitante,
+        goleadores,
+        asistencia,
+        faltas_local: faltasLocal,
+        faltas_visitante: faltasVisit,
+        observaciones,
+        // cerrada permanece true — solo corregimos datos
+      };
+      await db(`/ficha_partido?id=eq.${f.id}`, token, { method: "PATCH", body: JSON.stringify(payload) });
+      onGuardado && onGuardado();
+    } catch (e) {
+      setError(e.message || "Error al guardar");
+    }
+    setGuardando(false);
+  };
+
+  // ── Render lista de jugadores editable ────────────────────────
+  const renderEquipoLista = (jugadores, equipoId, equipoNombre, color) => {
+    if (jugadores.length === 0) return <div style={fd.sinJugadores}>Sin jugadores inscritos</div>;
+    return (
+      <div style={fd.equipoCol}>
+        {jugadores.map(j => {
+          const presente = estaPresente(j.jugador_id);
+          const goles = golesDeJugador(j.jugador_id, equipoId);
+          return (
+            <div key={j.jugador_id} style={{ ...fd.jugRow, background: goles > 0 ? "rgba(22,163,74,0.12)" : presente ? "rgba(22,163,74,0.04)" : "transparent" }}>
+              <span style={{ ...fd.jugDorsal, background: color }}>{j.dorsal || "—"}</span>
+              <span style={fd.jugNombre}>{j.jugadores?.nombre_completo || "—"}</span>
+              <span
+                style={{ ...fe.checkBox, background: presente ? "#16a34a" : "transparent", borderColor: presente ? "#16a34a" : "#9ca3af", cursor: "pointer" }}
+                onClick={() => toggleAsistencia(j.jugador_id)}
+                title={presente ? "Quitar asistencia" : "Marcar presente"}>
+                {presente ? "✓" : ""}
+              </span>
+              <div style={fe.golBtns}>
+                {goles > 0 && <button style={fe.golMinus} onClick={() => quitarGoleador(j.jugador_id, equipoId)}>−</button>}
+                <button style={fe.golPlus} onClick={() => agregarGoleador(j, equipoId, equipoNombre)} title="Agregar gol">⚽</button>
+                {goles > 0 && <span style={fe.golCount}>{goles}</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <div style={fd.overlay} onClick={onClose}>
+      <div style={fd.modal} onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div style={fd.header}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ ...fd.headerLabel, color: "#b45309" }}>MODIFICAR FICHA</div>
+            <div style={fd.headerMeta}>
+              Jornada {partido.jornadas?.numero ?? "—"} · ⏰ {fmtHora(partido.hora)} · Cancha {partido.cancha_numero ?? "—"}
+            </div>
+          </div>
+          <button style={fd.closeBtn} onClick={onClose} aria-label="Cerrar">✕</button>
+        </div>
+
+        {/* Aviso */}
+        <div style={fe.warningBox}>
+          ⚠️ Estás corrigiendo una ficha ya cerrada. Los cambios se registrarán en el log de auditoría.
+        </div>
+
+        {/* Marcador editable */}
+        <div style={fd.marcadorRow}>
+          <div style={fd.eqCol}>
+            <JerseySVG diseno={eqL?.diseno_camiseta || "solido"} color1={eqL?.color_playera || "#3182ce"} color2={eqL?.color_camiseta_2 || "#fff"} escudoUrl={eqL?.escudo_url || null} size={44}/>
+            <span style={fd.eqNombreCol}>{eqL?.nombre}</span>
+          </div>
+          <div style={fe.marcadorEdit}>
+            <div style={fe.marcadorBox}>
+              <button style={fe.marcadorBtn} onClick={() => setGolesLocal(v => Math.max(0, v - 1))}>−</button>
+              <span style={fe.marcadorNum}>{golesLocal}</span>
+              <button style={fe.marcadorBtn} onClick={() => setGolesLocal(v => v + 1)}>+</button>
+            </div>
+            <span style={{ color: "#9ca3af", fontSize: 18, fontWeight: 800 }}>·</span>
+            <div style={fe.marcadorBox}>
+              <button style={fe.marcadorBtn} onClick={() => setGolesVisitante(v => Math.max(0, v - 1))}>−</button>
+              <span style={fe.marcadorNum}>{golesVisitante}</span>
+              <button style={fe.marcadorBtn} onClick={() => setGolesVisitante(v => v + 1)}>+</button>
+            </div>
+          </div>
+          <div style={fd.eqCol}>
+            <JerseySVG diseno={eqV?.diseno_camiseta || "solido"} color1={eqV?.color_playera || "#3182ce"} color2={eqV?.color_camiseta_2 || "#fff"} escudoUrl={eqV?.escudo_url || null} size={44}/>
+            <span style={fd.eqNombreCol}>{eqV?.nombre}</span>
+          </div>
+        </div>
+
+        {/* Jugadores con asistencia y goles editables */}
+        <div style={fd.sectionLabel}>👥 Asistencia y goles</div>
+        {cargando ? (
+          <div style={{ padding: 16, textAlign: "center", color: "#9ca3af", fontSize: 12 }}>Cargando...</div>
+        ) : (
+          <div style={fd.equiposGrid}>
+            <div>
+              <div style={fd.equipoCabecera}>
+                <JerseySVG diseno={eqL?.diseno_camiseta || "solido"} color1={eqL?.color_playera || "#3182ce"} color2={eqL?.color_camiseta_2 || "#fff"} escudoUrl={eqL?.escudo_url || null} size={22}/>
+                <span style={fd.equipoCabeceraNombre}>{eqL?.nombre}</span>
+              </div>
+              {renderEquipoLista(jugadoresLocal, eqL?.id, eqL?.nombre, eqL?.color_playera || "#3182ce")}
+            </div>
+            <div>
+              <div style={fd.equipoCabecera}>
+                <JerseySVG diseno={eqV?.diseno_camiseta || "solido"} color1={eqV?.color_playera || "#3182ce"} color2={eqV?.color_camiseta_2 || "#fff"} escudoUrl={eqV?.escudo_url || null} size={22}/>
+                <span style={fd.equipoCabeceraNombre}>{eqV?.nombre}</span>
+              </div>
+              {renderEquipoLista(jugadoresVisit, eqV?.id, eqV?.nombre, eqV?.color_playera || "#3182ce")}
+            </div>
+          </div>
+        )}
+
+        {/* Faltas editables */}
+        <div style={fd.faltasRow}>
+          <div style={fd.faltasBox}>
+            <div style={fd.faltasLabel}>🟨 Faltas {eqL?.nombre}</div>
+            <div style={fe.faltasEditRow}>
+              <button style={fe.faltaBtn} onClick={() => setFaltasLocal(v => Math.max(0, v - 1))}>−</button>
+              <span style={fd.faltasNum}>{faltasLocal}</span>
+              <button style={fe.faltaBtn} onClick={() => setFaltasLocal(v => v + 1)}>+</button>
+            </div>
+          </div>
+          <div style={fd.faltasBox}>
+            <div style={fd.faltasLabel}>🟨 Faltas {eqV?.nombre}</div>
+            <div style={fe.faltasEditRow}>
+              <button style={fe.faltaBtn} onClick={() => setFaltasVisit(v => Math.max(0, v - 1))}>−</button>
+              <span style={fd.faltasNum}>{faltasVisit}</span>
+              <button style={fe.faltaBtn} onClick={() => setFaltasVisit(v => v + 1)}>+</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Observaciones editables */}
+        <div style={fd.obsBox}>
+          <div style={fd.obsLabel}>📝 Observaciones del árbitro</div>
+          <textarea
+            style={fe.textarea}
+            value={observaciones}
+            onChange={e => setObservaciones(e.target.value)}
+            rows={3}
+            placeholder="Tarjetas, incidencias, notas..."
+          />
+        </div>
+
+        {error && (
+          <div style={fe.errorBox}>⚠️ {error}</div>
+        )}
+
+        <div style={fe.acciones}>
+          <button style={fe.btnCancel} onClick={onClose} disabled={guardando}>Cancelar</button>
+          <button style={fe.btnGuardar} onClick={guardar} disabled={guardando}>
+            {guardando ? "Guardando..." : "💾 Guardar cambios"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Estilos del editor (complemento de fd)
+const fe = {
+  warningBox: { background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 9, padding: "8px 12px", color: "#92400e", fontSize: 11, marginBottom: 12, lineHeight: 1.5 },
+  marcadorEdit: { display: "flex", alignItems: "center", gap: 4, padding: "0 4px" },
+  marcadorBox: { display: "flex", alignItems: "center", gap: 4 },
+  marcadorBtn: { width: 26, height: 26, borderRadius: 7, background: "#f3f4f6", border: "1px solid #e5e7eb", color: "#374151", fontSize: 16, cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 },
+  marcadorNum: { fontSize: 22, fontWeight: 900, color: "#111827", minWidth: 26, textAlign: "center" },
+  checkBox: { width: 20, height: 20, borderRadius: 5, border: "2px solid", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: "#fff", flexShrink: 0, transition: "all 0.12s" },
+  golBtns: { display: "flex", alignItems: "center", gap: 3, flexShrink: 0 },
+  golPlus: { background: "#dcfce7", border: "1px solid #bbf7d0", borderRadius: 5, color: "#15803d", fontSize: 12, cursor: "pointer", padding: "2px 5px", fontWeight: 700 },
+  golMinus: { background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 5, color: "#dc2626", fontSize: 12, cursor: "pointer", padding: "2px 5px", fontWeight: 700 },
+  golCount: { fontSize: 11, fontWeight: 800, color: "#15803d", minWidth: 12, textAlign: "center" },
+  faltasEditRow: { display: "flex", alignItems: "center", justifyContent: "center", gap: 8 },
+  faltaBtn: { width: 24, height: 24, borderRadius: 6, background: "#fff", border: "1px solid #fde68a", color: "#92400e", fontSize: 14, fontWeight: 700, cursor: "pointer", padding: 0 },
+  textarea: { width: "100%", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: "8px 10px", fontSize: 12, color: "#111827", outline: "none", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" },
+  errorBox: { background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 9, padding: "8px 12px", color: "#b91c1c", fontSize: 12, marginBottom: 10 },
+  acciones: { display: "flex", gap: 8, marginTop: 4 },
+  btnCancel: { flex: 1, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: "10px 12px", color: "#6b7280", fontSize: 13, fontWeight: 700, cursor: "pointer" },
+  btnGuardar: { flex: 2, background: "#4f8f2f", border: "none", borderRadius: 10, padding: "10px 12px", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" },
+};
 
 // Estilos del modal de ficha detallada
 const fd = {

@@ -1,5 +1,5 @@
 import ScheduleGenerator from "./ScheduleGenerator";
-import FichaGenerator from "./FichaGenerator";
+import FichaGenerator, { FichaDetalleModal } from "./FichaGenerator";
 import { useState, useEffect } from "react";
 import JerseySVG, { JerseyDesignPicker } from "../components/JerseySVG";
 import PersonalizacionUnidadFields from "../components/PersonalizacionUnidadFields";
@@ -100,6 +100,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
   const [jugadoresInfo, setJugadoresInfo] = useState({});
   const [resultadoExpandido, setResultadoExpandido] = useState(null);
   const [jornadaSelectedRes, setJornadaSelectedRes] = useState(null);
+  const [resultadoVistaFicha, setResultadoVistaFicha] = useState(null); // partido cuyo modal "ver ficha" está abierto
 
   const token = session?.access_token;
 
@@ -280,7 +281,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
       if (jornadaIds.length === 0) { setResultados([]); setResultadosLoading(false); return; }
 
       const partidos = await db(
-        `/partidos?jornada_id=in.(${jornadaIds.join(",")})&select=id,jornada_id,equipo_local_id,equipo_visitante_id,jornadas(numero,fecha),ficha_partido(*)`,
+        `/partidos?jornada_id=in.(${jornadaIds.join(",")})&select=id,jornada_id,equipo_local_id,equipo_visitante_id,hora,cancha_numero,jornadas(numero,fecha,liga_id),ficha_partido(*)`,
         token
       );
 
@@ -292,7 +293,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
       const equipoIds = new Set();
       cerradas.forEach(p => { equipoIds.add(p.equipo_local_id); equipoIds.add(p.equipo_visitante_id); });
       const equipos = equipoIds.size > 0
-        ? await db(`/equipos?id=in.(${[...equipoIds].join(",")})&select=id,nombre,color_playera,escudo_url`, token)
+        ? await db(`/equipos?id=in.(${[...equipoIds].join(",")})&select=id,nombre,color_playera,color_camiseta_2,diseno_camiseta,escudo_url`, token)
         : [];
       const equiposMap = Object.fromEntries(equipos.map(e => [e.id, e]));
 
@@ -323,6 +324,9 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
           visitante: equiposMap[p.equipo_visitante_id],
           jornada: p.jornadas?.numero,
           fecha: p.jornadas?.fecha,
+          hora: p.hora,
+          cancha_numero: p.cancha_numero,
+          jornadas: p.jornadas, // numero, fecha, liga_id
           ficha,
         };
       }).sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "") || (b.jornada || 0) - (a.jornada || 0));
@@ -1291,6 +1295,12 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                           <div style={s.resultadoMeta}>
                             <span style={s.resultadoJornada}>J{r.jornada}</span>
                             <span style={s.resultadoFecha}>{r.fecha || "Sin fecha"}</span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setResultadoVistaFicha(r); }}
+                              style={{ marginLeft: "auto", background:"#f0fdf4", border:"1px solid #c3e6a3", color:"#15803d", borderRadius:8, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}
+                              title="Ver ficha completa">
+                              📝 Ver ficha
+                            </button>
                           </div>
                           <div style={s.resultadoMid}>
                             <div style={{ ...s.resEq, justifyContent:"flex-end" }}>
@@ -1382,6 +1392,24 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
             </div>
             );
           })()}
+
+          {/* MODAL: VER FICHA COMPLETA (solo lectura, desde sección Resultados) */}
+          {resultadoVistaFicha && (
+            <FichaDetalleModal
+              partido={{
+                id: resultadoVistaFicha.id,
+                equipos_local: resultadoVistaFicha.local,
+                equipos_visitante: resultadoVistaFicha.visitante,
+                hora: resultadoVistaFicha.hora,
+                cancha_numero: resultadoVistaFicha.cancha_numero,
+                jornadas: resultadoVistaFicha.jornadas,
+                ficha: resultadoVistaFicha.ficha,
+              }}
+              token={token}
+              liga={ligaSeleccionada}
+              onClose={() => setResultadoVistaFicha(null)}
+            />
+          )}
 
         </>
       )}

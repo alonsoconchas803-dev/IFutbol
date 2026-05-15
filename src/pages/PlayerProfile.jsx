@@ -435,7 +435,7 @@ export default function PlayerProfile({ session, seccionInicial = "perfil" }) {
 
       // Cargar todos los equipos de los partidos (rivales) en batch separado
       const partidosRaw = await db(
-        `/partidos?or=(equipo_local_id.in.(${equipoIds.join(",")}),equipo_visitante_id.in.(${equipoIds.join(",")}))&select=id,equipo_local_id,equipo_visitante_id,jornada_id,jornadas(numero,fecha,liga_id),ficha_partido(*)`,
+        `/partidos?or=(equipo_local_id.in.(${equipoIds.join(",")}),equipo_visitante_id.in.(${equipoIds.join(",")}))&equipo_local_id=not.is.null&equipo_visitante_id=not.is.null&select=id,equipo_local_id,equipo_visitante_id,jornada_id,jornadas(numero,fecha,liga_id),ficha_partido(*)`,
         token
       );
 

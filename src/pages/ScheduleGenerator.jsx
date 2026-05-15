@@ -207,8 +207,16 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
   };
 
   // ── GUARDAR JORNADA ──
+  // Solo se guardan partidos con AMBOS equipos asignados. Los slots con un solo equipo
+  // o sin equipos no se persisten; el equipo no asignado aparecerá como "descansa".
+  // El historial_enfrentamientos refleja exactamente lo guardado para que las jornadas
+  // siguientes generen pareos sin repetir lo ya jugado.
   const handleGuardarJornada = async () => {
     if (!preview) return;
+    const partidosCompletos = preview.partidos.filter(p => p.local && p.visitante);
+    if (partidosCompletos.length === 0) {
+      return showToast("La jornada no tiene partidos completos para guardar", "err");
+    }
     setGuardando(true);
     try {
       const jornada = await db("/jornadas", token, {
@@ -217,7 +225,7 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
       });
       const jornadaId = Array.isArray(jornada) ? jornada[0]?.id : jornada?.id;
 
-      for (const p of preview.partidos) {
+      for (const p of partidosCompletos) {
         await db("/partidos", token, {
           method: "POST",
           body: JSON.stringify({
@@ -228,7 +236,6 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
             hora: p.hora,
           })
         });
-        // Guardar en historial
         await db("/historial_enfrentamientos", token, {
           method: "POST",
           body: JSON.stringify({
@@ -245,6 +252,47 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
       cargarTodo();
     } catch (e) { showToast(e.message, "err"); }
     setGuardando(false);
+  };
+
+  // ── EDICIÓN DEL PREVIEW: sacar equipo asignado al pool de descansos ──
+  const sacarEquipoPreview = (partidoIdx, lado) => {
+    if (!preview) return;
+    const partido = preview.partidos[partidoIdx];
+    const equipo = partido[lado];
+    if (!equipo) return;
+    const nuevosPartidos = preview.partidos.map((p, i) =>
+      i === partidoIdx ? { ...p, [lado]: null } : p
+    );
+    setPreview({ ...preview, partidos: nuevosPartidos, descansos: [...preview.descansos, equipo] });
+  };
+
+  // ── EDICIÓN DEL PREVIEW: asignar equipo del pool al primer hueco ──
+  // Orden: hora más temprana → cancha menor → local antes que visitante en el mismo slot.
+  const asignarEquipoPreview = (equipoId) => {
+    if (!preview) return;
+    const equipo = preview.descansos.find(e => e.id === equipoId);
+    if (!equipo) return;
+    const indices = preview.partidos.map((p, i) => ({ p, i }))
+      .sort((a, b) =>
+        (a.p.hora || "").localeCompare(b.p.hora || "") ||
+        ((a.p.cancha || 0) - (b.p.cancha || 0))
+      );
+    let asignadoEnIdx = -1, lado = null;
+    for (const { p, i } of indices) {
+      if (!p.local)     { asignadoEnIdx = i; lado = "local";     break; }
+      if (!p.visitante) { asignadoEnIdx = i; lado = "visitante"; break; }
+    }
+    if (asignadoEnIdx < 0) {
+      return showToast("No hay huecos libres en esta jornada", "err");
+    }
+    const nuevosPartidos = preview.partidos.map((p, i) =>
+      i === asignadoEnIdx ? { ...p, [lado]: equipo } : p
+    );
+    setPreview({
+      ...preview,
+      partidos: nuevosPartidos,
+      descansos: preview.descansos.filter(e => e.id !== equipoId),
+    });
   };
 
   // ── GENERAR LIGUILLA Y COPA ──
@@ -449,25 +497,48 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
                   </div>
                   <button className="btn btn-ghost" onClick={()=>setPreview(null)}>✕ Descartar</button>
                 </div>
+                <div style={ej.hint}>
+                  👆 Edita antes de guardar: toca un equipo para sacarlo al pool de descansos; toca un equipo del pool para colocarlo en el siguiente hueco libre (horario más temprano primero). Una vez guardada, la jornada no podrá modificarse.
+                </div>
+
                 {Array.from({length:config.numCanchas},(_,ci)=>{
-                  const pcs = preview.partidos.filter(p=>p.cancha===ci+1);
+                  // Indices originales en preview.partidos para que sacarEquipoPreview reciba el idx correcto
+                  const pcs = preview.partidos
+                    .map((p, idx) => ({ p, idx }))
+                    .filter(({ p }) => p.cancha === ci+1);
                   if (!pcs.length) return null;
                   return (
                     <div key={ci} style={{ marginBottom:16 }}>
                       <div style={s.canchaLabel}>🏟️ Cancha {ci+1}</div>
                       <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                        {pcs.map((p,pi)=>(
-                          <div key={pi} style={s.partidoRow}>
+                        {pcs.map(({ p, idx }) => (
+                          <div key={idx} style={s.partidoRow}>
                             <span style={s.hora}>{p.hora}</span>
                             <div style={s.vsBlock}>
-                              <div className="sg-vs-team">
-                                <div style={{ ...s.dot, background:p.local.color_playera||"var(--green)" }}/>
-                                <span className="sg-eq-name" style={{ fontWeight:700 }}>{p.local.nombre}</span>
+                              <div style={{ ...ej.slot, ...(p.local ? {} : ej.slotVacio) }}
+                                   onClick={() => p.local && sacarEquipoPreview(idx, "local")}
+                                   title={p.local ? "Sacar este equipo al pool" : "Hueco vacío"}>
+                                {p.local ? (
+                                  <>
+                                    <span style={{ ...ej.dot, background: p.local.color_playera || "var(--green)" }}/>
+                                    <span style={ej.eqNombre}>{p.local.nombre}</span>
+                                  </>
+                                ) : (
+                                  <span style={ej.huecoTxt}>+ Hueco</span>
+                                )}
                               </div>
                               <span style={s.vsTag}>VS</span>
-                              <div className="sg-vs-team" style={{ justifyContent:"flex-end" }}>
-                                <span className="sg-eq-name-r" style={{ fontWeight:700 }}>{p.visitante.nombre}</span>
-                                <div style={{ ...s.dot, background:p.visitante.color_playera||"#999" }}/>
+                              <div style={{ ...ej.slot, ...(p.visitante ? {} : ej.slotVacio), justifyContent: "flex-end" }}
+                                   onClick={() => p.visitante && sacarEquipoPreview(idx, "visitante")}
+                                   title={p.visitante ? "Sacar este equipo al pool" : "Hueco vacío"}>
+                                {p.visitante ? (
+                                  <>
+                                    <span style={ej.eqNombre}>{p.visitante.nombre}</span>
+                                    <span style={{ ...ej.dot, background: p.visitante.color_playera || "#999" }}/>
+                                  </>
+                                ) : (
+                                  <span style={ej.huecoTxt}>+ Hueco</span>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -476,27 +547,36 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
                     </div>
                   );
                 })}
-                {preview.descansos.length>0 && (
-                  <div style={{ paddingTop:12, borderTop:"1px solid var(--border)" }}>
-                    <div style={s.canchaLabel}>😴 Descansa esta jornada</div>
-                    <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                      {preview.descansos.map((d,i)=>(
-                        <div key={i} style={s.descansaRow}>
-                          <span style={{ fontSize:18, lineHeight:1, flexShrink:0 }}>😴</span>
-                          <div style={{ ...s.dot, background:d.color_playera||"#9ca3af" }}/>
-                          <span className="sg-eq-name" style={{ fontWeight:700, fontSize:13 }}>{d.nombre}</span>
-                        </div>
+
+                <div style={{ paddingTop:12, borderTop:"1px solid var(--border)" }}>
+                  <div style={s.canchaLabel}>😴 Descansa esta jornada ({preview.descansos.length})</div>
+                  {preview.descansos.length === 0 ? (
+                    <div style={ej.poolEmpty}>Sin equipos en descanso</div>
+                  ) : (
+                    <div style={ej.poolGrid}>
+                      {preview.descansos.map(d => (
+                        <button key={d.id} style={ej.poolChip} onClick={() => asignarEquipoPreview(d.id)}
+                                title="Asignar al primer hueco disponible">
+                          <span style={{ ...ej.dot, background: d.color_playera || "#9ca3af" }}/>
+                          <span style={ej.poolChipNombre}>{d.nombre}</span>
+                        </button>
                       ))}
                     </div>
-                  </div>
-                )}
-                <div style={{ display:"flex", justifyContent:"flex-end", marginTop:16 }}>
+                  )}
+                </div>
+
+                <div style={{ display:"flex", justifyContent:"flex-end", marginTop:16, gap:8, flexWrap:"wrap" }}>
+                  <button className="btn btn-ghost" onClick={handlePreviewJornada} disabled={guardando}
+                          title="Regenerar enfrentamientos automáticamente">
+                    🔄 Regenerar
+                  </button>
                   <button className="btn btn-premium" style={{ padding:"12px 28px" }} onClick={handleGuardarJornada} disabled={guardando}>
                     {guardando ? "Guardando..." : "💾 Guardar jornada"}
                   </button>
                 </div>
               </div>
             )}
+
           </div>
         )}
 
@@ -831,6 +911,23 @@ const s = {
   pendienteChip: { fontSize:10.5, color:"var(--text-muted)", fontStyle:"italic", marginTop:4 },
   bracketPendiente: { background:"#f9fafb", borderRadius:10, padding:"14px", textAlign:"center", color:"var(--text-muted)", fontSize:11.5, fontStyle:"italic", border:"1px dashed var(--border)" },
   closeBtn: { background:"var(--bg)", border:"1px solid var(--border)", borderRadius:8, width:30, height:30, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", color:"var(--text-sub)", flexShrink:0 },
+};
+
+// ─────────────────────────────────────────────────────────────────
+// Estilos del editor del preview (slots clickeables, pool y huecos)
+// ─────────────────────────────────────────────────────────────────
+const ej = {
+  slot: { flex: 1, display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 7, background: "#f9fafb", border: "1px solid #e5e7eb", cursor: "pointer", minWidth: 0, transition: "all 0.15s" },
+  slotVacio: { background: "#fffbeb", border: "1px dashed #fbbf24", cursor: "default" },
+  dot: { width: 10, height: 10, borderRadius: "50%", flexShrink: 0 },
+  eqNombre: { flex: 1, fontSize: 12, fontWeight: 700, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 },
+  huecoTxt: { fontSize: 11, fontStyle: "italic", color: "#92400e", fontWeight: 700 },
+  poolGrid: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 },
+  poolChip: { display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 11px", background: "#fff", border: "1.5px solid #c3e6a3", borderRadius: 999, cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#15803d", maxWidth: 220 },
+  poolChipNombre: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  poolEmpty: { background: "#f9fafb", border: "1px dashed #d1d5db", borderRadius: 9, padding: "10px", textAlign: "center", color: "#9ca3af", fontSize: 11.5, fontStyle: "italic", marginBottom: 8 },
+  hint: { background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1e40af", borderRadius: 9, padding: "9px 12px", fontSize: 11, marginBottom: 12, lineHeight: 1.5 },
+  sectionLabel: { fontSize: 11, fontWeight: 800, color: "#4f8f2f", letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 8, marginTop: 4 },
 };
 
 const css = `

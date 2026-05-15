@@ -846,13 +846,16 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
           {seccion==="partidos"&&(jornadasAgrupadas.length===0?<EmptyState icon="📅" txt="No hay partidos programados aún"/>:
             (() => {
               const grupoSel = jornadasAgrupadas.find(g => g.jornada.numero === jornadaSel) || jornadasAgrupadas[0];
-              // Equipos que descansan en esta jornada: los de la liga que no aparecen como local ni visitante.
-              const equipoIdsEnJornada = new Set();
-              grupoSel.partidos.forEach(p => {
-                if (p.equipo_local_id) equipoIdsEnJornada.add(p.equipo_local_id);
-                if (p.equipo_visitante_id) equipoIdsEnJornada.add(p.equipo_visitante_id);
+              // Solo se muestran partidos con AMBOS equipos asignados.
+              // Los partidos con un solo equipo cuentan como "descanso" para ese equipo.
+              // Los partidos sin equipos (hueco completo) simplemente no aparecen.
+              const partidosLlenos = grupoSel.partidos.filter(p => p.equipo_local_id && p.equipo_visitante_id);
+              const equipoIdsEnPartidos = new Set();
+              partidosLlenos.forEach(p => {
+                equipoIdsEnPartidos.add(p.equipo_local_id);
+                equipoIdsEnPartidos.add(p.equipo_visitante_id);
               });
-              const descansan = equipos.filter(eq => !equipoIdsEnJornada.has(eq.id));
+              const descansan = equipos.filter(eq => !equipoIdsEnPartidos.has(eq.id));
               return (
                 <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
                   {/* Selector de jornada — solo si hay más de 1 */}
@@ -884,7 +887,12 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
                       <span style={{ fontSize:11, color:"var(--text-muted)" }}>{grupoSel.jornada.fecha||"Fecha por definir"}</span>
                     </div>
                     <div style={{ padding:"8px 10px", display:"flex", flexDirection:"column", gap:6 }}>
-                      {grupoSel.partidos.map(p => {
+                      {partidosLlenos.length === 0 && descansan.length === 0 && (
+                        <div style={{ padding:"14px 10px", textAlign:"center", color:"var(--text-muted)", fontSize:12, fontStyle:"italic" }}>
+                          Sin partidos programados en esta jornada
+                        </div>
+                      )}
+                      {partidosLlenos.map(p => {
                         const fichaOk = p.ficha_partido?.cerrada;
                         const f = fichaOk ? p.ficha_partido : null;
                         return (

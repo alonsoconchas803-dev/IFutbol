@@ -172,7 +172,7 @@ export default function Referee({ session, setTopbarBack, seccionInicial }) {
       const jornadasMap = Object.fromEntries(jornadas.map(j => [j.id, j]));
 
       const partidos = await db(
-        `/partidos?jornada_id=in.(${jornadaIds.join(",")})&select=*,equipos_local:equipos!partidos_equipo_local_id_fkey(id,nombre,color_playera,color_camiseta_2,diseno_camiseta,escudo_url),equipos_visitante:equipos!partidos_equipo_visitante_id_fkey(id,nombre,color_playera,color_camiseta_2,diseno_camiseta,escudo_url),ficha_partido(cerrada)&order=hora`,
+        `/partidos?jornada_id=in.(${jornadaIds.join(",")})&equipo_local_id=not.is.null&equipo_visitante_id=not.is.null&select=*,equipos_local:equipos!partidos_equipo_local_id_fkey(id,nombre,color_playera,color_camiseta_2,diseno_camiseta,escudo_url),equipos_visitante:equipos!partidos_equipo_visitante_id_fkey(id,nombre,color_playera,color_camiseta_2,diseno_camiseta,escudo_url),ficha_partido(cerrada)&order=hora`,
         token
       );
       // Adjuntamos jornadas + ligas a cada partido para mantener compat con FichaView
