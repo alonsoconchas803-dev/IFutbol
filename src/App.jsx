@@ -1191,25 +1191,35 @@ function RegisterStaffModal({ onClose, showToast }) {
   if (data.user || data.id) {
     const userId = data.user?.id || data.id;
 
-    // Guardar solicitud usando anon key (no necesita token)
+    // Crear la solicitud. Si signup devolvió access_token (autoconfirm activo) lo usamos;
+    // si no, va como anon (la policy "Signup anon crea solicitud inicial" lo permite).
+    // Enviamos cancha_id=null EXPLÍCITAMENTE para que la policy WITH CHECK lo evalúe correctamente.
+    const accessToken = data.access_token || data.session?.access_token;
+    const headers = {
+      "apikey": SUPABASE_KEY,
+      "Content-Type": "application/json",
+      "Prefer": "return=representation",
+    };
+    if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+
     const solRes = await fetch(`${SUPABASE_URL}/rest/v1/solicitudes_registro`, {
       method: "POST",
-      headers: {
-        "apikey": SUPABASE_KEY,
-        "Content-Type": "application/json",
-        "Prefer": "return=representation"
-      },
+      headers,
       body: JSON.stringify({
         user_id: userId,
         nombre_completo: form.nombre_completo,
         tipo_rol: form.tipo,
-        estado: "pendiente"
+        estado: "pendiente",
+        cancha_id: null,
       })
     });
 
     if (!solRes.ok) {
-      const err = await solRes.json();
-      console.error("Error solicitud:", err);
+      const err = await solRes.json().catch(() => ({}));
+      console.error("Error al crear solicitud:", err);
+      setError("Tu cuenta se creó, pero no pudimos enviar la solicitud al administrador. Contacta soporte indicando este correo. " + (err.message || ""));
+      setLoading(false);
+      return;
     }
 
     setSuccess(true);
