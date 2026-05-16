@@ -1181,50 +1181,49 @@ function RegisterStaffModal({ onClose, showToast }) {
   const handle = async () => {
     if (!form.tipo) return setError("Selecciona si eres árbitro o admin de liga");
     if (!form.nombre_completo || !form.email || !form.password) return setError("Completa todos los campos");
+    if (form.password.length < 6) return setError("La contraseña debe tener al menos 6 caracteres");
     setLoading(true); setError("");
 
-    // Llamamos a la Edge Function register-staff: crea cuenta + solicitud
-    // de forma atómica con rollback si algo falla. No envía email de confirmación.
-    let res, json;
-    try {
-      res = await fetch(`${SUPABASE_URL}/functions/v1/register-staff`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": SUPABASE_KEY,
-          "Authorization": `Bearer ${SUPABASE_KEY}`,
-        },
-        body: JSON.stringify({
-          email: form.email,
-          password: form.password,
+    // signUp normal: Supabase envía el correo de confirmación. Guardamos
+    // nombre_completo y tipo_rol en raw_user_meta_data; un trigger en la BD
+    // creará la solicitud_registro automáticamente cuando el usuario confirme
+    // el correo. Así el admin solo ve solicitudes de correos verificados.
+    const data = await api("/auth/v1/signup", {
+      method: "POST",
+      body: JSON.stringify({
+        email: form.email,
+        password: form.password,
+        data: {
           nombre_completo: form.nombre_completo,
           tipo_rol: form.tipo,
-        }),
-      });
-      json = await res.json().catch(() => ({}));
-    } catch {
-      setError("No pudimos conectarnos al servidor. Revisa tu conexión e inténtalo de nuevo.");
-      setLoading(false);
-      return;
-    }
+        },
+      }),
+    });
 
-    if (!res.ok || json.error) {
-      setError(json.error || "No pudimos completar el registro. Inténtalo de nuevo.");
-      setLoading(false);
-      return;
+    if (data.user || data.id) {
+      setSuccess(true);
+    } else {
+      const msg = (data.msg || data.error_description || data.error || "").toLowerCase();
+      if (msg.includes("already") || msg.includes("registered")) {
+        setError("Ya existe una cuenta con ese correo. Inicia sesión o usa otro.");
+      } else if (msg.includes("password")) {
+        setError("La contraseña no es válida. Usa al menos 6 caracteres.");
+      } else if (msg.includes("email") && (msg.includes("invalid") || msg.includes("not valid"))) {
+        setError("El correo no tiene un formato válido.");
+      } else {
+        setError("No pudimos registrarte en este momento. Verifica el correo o inténtalo más tarde.");
+      }
     }
-
-    setSuccess(true);
     setLoading(false);
   };
 
   if (success) return (
     <div className="ifutbol-overlay" onClick={onClose}>
       <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:360,textAlign:"center" }}>
-        <div style={{ fontSize:52,marginBottom:14 }}>📋</div>
-        <h3 style={{ fontSize:22,fontWeight:800,marginBottom:8 }}>¡Solicitud enviada!</h3>
-        <p style={{ color:"var(--text-sub)",marginBottom:24 }}>Tu solicitud ha sido enviada al administrador. Te confirmarán tu acceso pronto.</p>
-        <button className="btn btn-premium" style={{ width:"100%" }} onClick={onClose}>Ir al inicio →</button>
+        <div style={{ fontSize:52,marginBottom:14 }}>📬</div>
+        <h3 style={{ fontSize:22,fontWeight:800,marginBottom:8 }}>Confirma tu correo</h3>
+        <p style={{ color:"var(--text-sub)",marginBottom:24 }}>Te enviamos un enlace a <b>{form.email}</b>. Ábrelo y haz click para que tu solicitud llegue al administrador. Revisa también la carpeta de spam.</p>
+        <button className="btn btn-premium" style={{ width:"100%" }} onClick={onClose}>Entendido →</button>
       </div>
     </div>
   );
