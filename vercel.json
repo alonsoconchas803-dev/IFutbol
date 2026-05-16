@@ -1,0 +1,15 @@
+{
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "(?<subdomain>.*\\.vercel\\.app)"
+        }
+      ],
+      "destination": "https://ifutbol.lat/:path*",
+      "permanent": true
+    }
+  ]
+}
