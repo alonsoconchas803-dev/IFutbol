@@ -44,8 +44,12 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
 
 /* ── INPUTS ── */
+/* iOS Safari hace auto-zoom cuando enfocas un input con font-size < 16px.
+   Forzamos 16px global para evitar que la página quede zoomeada tras un
+   focus en login, registro u otros formularios. */
 input, select, textarea {
   font-family: 'DM Sans', sans-serif;
+  font-size: 16px;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 input:focus, select:focus, textarea:focus {
@@ -214,7 +218,7 @@ select option { background: #fff; color: var(--text); }
   border-radius: var(--radius-sm);
   padding: 11px 14px;
   color: var(--text);
-  font-size: 14px;
+  font-size: 16px;
   font-family: 'DM Sans', sans-serif;
 }
 .form-input::placeholder { color: var(--text-muted); }
