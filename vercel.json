@@ -8,7 +8,7 @@
           "value": "(?<subdomain>.*\\.vercel\\.app)"
         }
       ],
-      "destination": "https://ifutbol.lat/:path*",
+      "destination": "https://www.ifutbol.lat/:path*",
       "permanent": true
     }
   ]
