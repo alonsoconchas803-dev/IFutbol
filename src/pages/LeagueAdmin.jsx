@@ -478,20 +478,29 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
     if (!ligaSeleccionada) return;
     try {
       const canchaId = ligaSeleccionada.cancha_id;
-      const [arbsCanchaData, arbsLigaData, solicData] = await Promise.all([
+      // La RPC nombres_arbitros_unidad bypassa RLS y devuelve nombre + email
+      // verificando que el caller sea league_admin de esta cancha o super_admin
+      const [arbsCanchaData, arbsLigaData, nombresData] = await Promise.all([
         db(`/arbitro_cancha?cancha_id=eq.${canchaId}&select=user_id,acceso_total,confirmado`, token),
         db(`/arbitro_liga?liga_id=eq.${ligaSeleccionada.id}&select=user_id`, token),
-        db(`/solicitudes_registro?tipo_rol=eq.referee&estado=eq.aprobado&select=user_id,nombre_completo`, token),
+        db(`/rpc/nombres_arbitros_unidad`, token, {
+          method: "POST",
+          body: JSON.stringify({ p_cancha_id: canchaId }),
+        }),
       ]);
       const arbsLigaSet = new Set((arbsLigaData || []).map(a => a.user_id));
-      const solicMap = Object.fromEntries((solicData || []).map(s => [s.user_id, s.nombre_completo]));
-      setArbitros((arbsCanchaData || []).map(arb => ({
-        user_id: arb.user_id,
-        nombre: solicMap[arb.user_id] || "Árbitro",
-        acceso_total: arb.acceso_total,
-        confirmado: arb.confirmado,
-        tiene_acceso_liga: arb.acceso_total || arbsLigaSet.has(arb.user_id),
-      })));
+      const nombresMap = Object.fromEntries((nombresData || []).map(n => [n.user_id, { nombre: n.nombre, email: n.email }]));
+      setArbitros((arbsCanchaData || []).map(arb => {
+        const info = nombresMap[arb.user_id] || {};
+        return {
+          user_id: arb.user_id,
+          nombre: info.nombre || "Árbitro",
+          email: info.email || "",
+          acceso_total: arb.acceso_total,
+          confirmado: arb.confirmado,
+          tiene_acceso_liga: arb.acceso_total || arbsLigaSet.has(arb.user_id),
+        };
+      }));
     } catch (e) { showToast(e.message, "err"); }
   };
 
@@ -1104,6 +1113,9 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                           <div style={s.arbAvatar}>🟡</div>
                           <div style={{ minWidth:0 }}>
                             <div style={s.arbName}>{arb.nombre}</div>
+                            {arb.email && (
+                              <div style={{ fontSize:11, color:"#9ca3af", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{arb.email}</div>
+                            )}
                             <div style={s.arbMeta}>Esperando tu confirmación</div>
                           </div>
                         </div>
@@ -1138,6 +1150,9 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                           <div style={s.arbAvatar}>🟡</div>
                           <div style={{ minWidth:0 }}>
                             <div style={s.arbName}>{arb.nombre}</div>
+                            {arb.email && (
+                              <div style={{ fontSize:11, color:"#9ca3af", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{arb.email}</div>
+                            )}
                             <div style={s.arbMeta}>
                               {arb.acceso_total
                                 ? "Acceso total a todos los torneos"
