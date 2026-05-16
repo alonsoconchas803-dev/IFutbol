@@ -1179,55 +1179,44 @@ function RegisterStaffModal({ onClose, showToast }) {
   const [success, setSuccess] = useState(false);
 
   const handle = async () => {
-  if (!form.tipo) return setError("Selecciona si eres árbitro o admin de liga");
-  if (!form.nombre_completo || !form.email || !form.password) return setError("Completa todos los campos");
-  setLoading(true); setError("");
+    if (!form.tipo) return setError("Selecciona si eres árbitro o admin de liga");
+    if (!form.nombre_completo || !form.email || !form.password) return setError("Completa todos los campos");
+    setLoading(true); setError("");
 
-  const data = await api("/auth/v1/signup", {
-    method: "POST",
-    body: JSON.stringify({ email: form.email, password: form.password })
-  });
+    // Llamamos a la Edge Function register-staff: crea cuenta + solicitud
+    // de forma atómica con rollback si algo falla. No envía email de confirmación.
+    let res, json;
+    try {
+      res = await fetch(`${SUPABASE_URL}/functions/v1/register-staff`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+        },
+        body: JSON.stringify({
+          email: form.email,
+          password: form.password,
+          nombre_completo: form.nombre_completo,
+          tipo_rol: form.tipo,
+        }),
+      });
+      json = await res.json().catch(() => ({}));
+    } catch {
+      setError("No pudimos conectarnos al servidor. Revisa tu conexión e inténtalo de nuevo.");
+      setLoading(false);
+      return;
+    }
 
-  if (data.user || data.id) {
-    const userId = data.user?.id || data.id;
-
-    // Crear la solicitud. Si signup devolvió access_token (autoconfirm activo) lo usamos;
-    // si no, va como anon (la policy "Signup anon crea solicitud inicial" lo permite).
-    // Enviamos cancha_id=null EXPLÍCITAMENTE para que la policy WITH CHECK lo evalúe correctamente.
-    const accessToken = data.access_token || data.session?.access_token;
-    const headers = {
-      "apikey": SUPABASE_KEY,
-      "Content-Type": "application/json",
-      "Prefer": "return=representation",
-    };
-    if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
-
-    const solRes = await fetch(`${SUPABASE_URL}/rest/v1/solicitudes_registro`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        user_id: userId,
-        nombre_completo: form.nombre_completo,
-        tipo_rol: form.tipo,
-        estado: "pendiente",
-        cancha_id: null,
-      })
-    });
-
-    if (!solRes.ok) {
-      const err = await solRes.json().catch(() => ({}));
-      console.error("Error al crear solicitud:", err);
-      setError("Tu cuenta se creó, pero no pudimos enviar la solicitud al administrador. Contacta soporte indicando este correo. " + (err.message || ""));
+    if (!res.ok || json.error) {
+      setError(json.error || "No pudimos completar el registro. Inténtalo de nuevo.");
       setLoading(false);
       return;
     }
 
     setSuccess(true);
-  } else {
-    setError(data.msg || data.error_description || "Error al registrarse");
-  }
-  setLoading(false);
-};
+    setLoading(false);
+  };
 
   if (success) return (
     <div className="ifutbol-overlay" onClick={onClose}>
