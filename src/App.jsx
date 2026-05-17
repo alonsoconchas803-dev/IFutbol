@@ -125,19 +125,35 @@ export default function App() {
   }, []);
 
   // Detectar enlaces de recuperación de contraseña de Supabase.
-  // Supabase redirige con tokens en el fragment (hash) tipo:
-  //   #access_token=...&refresh_token=...&type=recovery
+  // Caso éxito: hash trae #access_token=...&type=recovery → abrir modal de reset.
+  // Caso error: Supabase redirige con ?error=...&error_code=... cuando el token
+  // expiró o fue consumido (común si Gmail preescanea el link). Mostrar aviso
+  // y abrir el modal de "olvidé contraseña" para pedir otro enlace.
   useEffect(() => {
-    const hash = window.location.hash;
-    if (!hash || !hash.includes("type=recovery")) return;
-    const params = new URLSearchParams(hash.substring(1));
-    const token = params.get("access_token");
-    if (params.get("type") === "recovery" && token) {
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    const queryParams = new URLSearchParams(window.location.search);
+    const errorCode = hashParams.get("error_code") || queryParams.get("error_code");
+    const errorParam = hashParams.get("error") || queryParams.get("error");
+    const limpiarUrl = () => window.history.replaceState(null, "", window.location.pathname);
+
+    if (errorParam) {
+      if (errorCode === "otp_expired" || errorParam === "access_denied") {
+        showToast("El enlace ya no es válido. Solicita uno nuevo.", "err");
+      } else {
+        showToast("No pudimos procesar el enlace. Intenta de nuevo.", "err");
+      }
+      setModal("forgot_password");
+      setScreen("home");
+      limpiarUrl();
+      return;
+    }
+
+    const token = hashParams.get("access_token");
+    if (hashParams.get("type") === "recovery" && token) {
       setRecoveryToken(token);
       setModal("reset_password");
-      setScreen("home"); // por si hubiera una sesión vieja que mande a dashboard
-      // Limpiar el hash para que no quede expuesto si recarga.
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      setScreen("home");
+      limpiarUrl();
     }
   }, []);
 
