@@ -15,6 +15,17 @@ const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
 export const toTitleCase = (s) =>
   String(s || "").replace(/(^|[\s\-])(\p{Ll})/gu, (_, sep, c) => sep + c.toUpperCase());
 
+// Valida que la contraseña cumpla la política de Supabase Auth:
+// mínimo 8 caracteres, con mayúscula, minúscula y número.
+// Devuelve null si es válida o un mensaje de error en caso contrario.
+export const validarPassword = (pwd) => {
+  if (!pwd || pwd.length < 8) return "La contraseña debe tener al menos 8 caracteres";
+  if (!/[A-Z]/.test(pwd)) return "Incluye al menos una letra mayúscula";
+  if (!/[a-z]/.test(pwd)) return "Incluye al menos una letra minúscula";
+  if (!/[0-9]/.test(pwd)) return "Incluye al menos un número";
+  return null;
+};
+
 const api = async (path, options = {}) => {
   const res = await fetch(`${SUPABASE_URL}${path}`, {
     ...options,
@@ -98,6 +109,7 @@ export default function App() {
   const [toast, setToast]               = useState(null);
   const [canchas, setCanchas]           = useState([]);
   const [topbarBack, setTopbarBack]     = useState(null);
+  const [recoveryToken, setRecoveryToken] = useState(null);
 
   const showToast = (msg, tipo = "ok") => {
     setToast({ msg, tipo });
@@ -110,6 +122,23 @@ export default function App() {
 
   useEffect(() => {
     db("/canchas?select=*&order=created_at.asc").then(d => setCanchas(d || []));
+  }, []);
+
+  // Detectar enlaces de recuperación de contraseña de Supabase.
+  // Supabase redirige con tokens en el fragment (hash) tipo:
+  //   #access_token=...&refresh_token=...&type=recovery
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (!hash || !hash.includes("type=recovery")) return;
+    const params = new URLSearchParams(hash.substring(1));
+    const token = params.get("access_token");
+    if (params.get("type") === "recovery" && token) {
+      setRecoveryToken(token);
+      setModal("reset_password");
+      setScreen("home"); // por si hubiera una sesión vieja que mande a dashboard
+      // Limpiar el hash para que no quede expuesto si recarga.
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
   }, []);
 
   const handleLogin = async (email, password) => {
@@ -155,6 +184,14 @@ export default function App() {
     showToast("Sesión cerrada");
   };
 
+  // Tras restablecer la contraseña: limpiar token de recovery, cerrar modal,
+  // abrir login para que el usuario entre con la contraseña nueva.
+  const handleResetSuccess = () => {
+    setRecoveryToken(null);
+    setModal("login");
+    showToast("Contraseña actualizada. Inicia sesión con la nueva.");
+  };
+
   const initials = () => {
     if (!session) return null;
     if (jugadorData?.foto_url) return jugadorData.foto_url;
@@ -187,7 +224,7 @@ export default function App() {
         onDashboard={goDashboard}
         topbarBack={topbarBack}>
         <UnidadPage cancha={unidadActiva} onBack={goHome} setTopbarBack={setTopbarBack} />
-        <Modals modal={modal} setModal={setModal} onLogin={handleLogin} showToast={showToast} />
+        <Modals modal={modal} setModal={setModal} onLogin={handleLogin} showToast={showToast} recoveryToken={recoveryToken} onResetSuccess={handleResetSuccess} />
       </PublicLayout>
     );
   }
@@ -208,10 +245,12 @@ export default function App() {
 // ─────────────────────────────────────────────────────────────────
 // MODALS WRAPPER
 // ─────────────────────────────────────────────────────────────────
-function Modals({ modal, setModal, onLogin, showToast }) {
-  if (modal === "login") return <LoginModal onClose={() => setModal(null)} onLogin={onLogin} onRegister={() => setModal("register_player")} />;
+function Modals({ modal, setModal, onLogin, showToast, recoveryToken, onResetSuccess }) {
+  if (modal === "login") return <LoginModal onClose={() => setModal(null)} onLogin={onLogin} onRegister={() => setModal("register_player")} onForgotPassword={() => setModal("forgot_password")} />;
   if (modal === "register_player") return <RegisterPlayerModal onClose={() => setModal(null)} showToast={showToast} onLogin={() => setModal("login")} />;
   if (modal === "register_staff") return <RegisterStaffModal onClose={() => setModal(null)} showToast={showToast} />;
+  if (modal === "forgot_password") return <ForgotPasswordModal onClose={() => setModal(null)} onBackToLogin={() => setModal("login")} />;
+  if (modal === "reset_password" && recoveryToken) return <ResetPasswordModal accessToken={recoveryToken} onClose={() => setModal(null)} onSuccess={onResetSuccess} />;
   return null;
 }
 
@@ -1054,7 +1093,7 @@ function EmptyState({ icon, txt }) {
 // ─────────────────────────────────────────────────────────────────
 // LOGIN MODAL
 // ─────────────────────────────────────────────────────────────────
-function LoginModal({ onClose, onLogin, onRegister }) {
+function LoginModal({ onClose, onLogin, onRegister, onForgotPassword }) {
   const [form, setForm] = useState({ email:"", password:"" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1071,9 +1110,136 @@ function LoginModal({ onClose, onLogin, onRegister }) {
         {error&&<div style={m.err}>⚠️ {error}</div>}
         <Field label="Correo electrónico"><input className="form-input" type="email" placeholder="tu@correo.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></Field>
         <Field label="Contraseña"><input className="form-input" type="password" placeholder="••••••••" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} onKeyDown={e=>e.key==="Enter"&&handle()}/></Field>
-        <div style={{ height:8 }}/>
+        <div style={{ textAlign:"right",marginTop:6,marginBottom:10 }}>
+          <span style={{ ...m.link,fontSize:13 }} onClick={onForgotPassword}>¿Olvidaste tu contraseña?</span>
+        </div>
         <button className="btn btn-premium" style={{ width:"100%",marginBottom:14 }} onClick={handle} disabled={loading}>{loading?"Entrando...":"Entrar →"}</button>
         <p style={{ textAlign:"center",fontSize:13,color:"var(--text-muted)" }}>¿No tienes cuenta? <span style={m.link} onClick={onRegister}>Regístrate como jugador</span></p>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// FORGOT PASSWORD MODAL — pide email y manda enlace de recuperación
+// ─────────────────────────────────────────────────────────────────
+function ForgotPasswordModal({ onClose, onBackToLogin }) {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  const handle = async () => {
+    if (!email) return setError("Ingresa tu correo electrónico");
+    setLoading(true); setError("");
+    const data = await api("/auth/v1/recover", {
+      method: "POST",
+      body: JSON.stringify({
+        email,
+        // Supabase agrega los tokens al fragment de esta URL al hacer clic
+        redirect_to: `${window.location.origin}/`,
+      }),
+    });
+    setLoading(false);
+    // Supabase responde 200 sin importar si el correo existe (anti-enumeración).
+    // Tratamos cualquier respuesta sin error explícito como éxito.
+    if (data.error || data.error_description) {
+      setError(data.error_description || data.error || "No pudimos enviar el correo. Intenta más tarde.");
+      return;
+    }
+    setSuccess(true);
+  };
+
+  if (success) return (
+    <div className="ifutbol-overlay" onClick={onClose}>
+      <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:380,textAlign:"center" }}>
+        <div style={{ fontSize:52,marginBottom:14 }}>📬</div>
+        <h3 style={{ fontSize:22,fontWeight:800,marginBottom:8 }}>Revisa tu correo</h3>
+        <p style={{ color:"var(--text-sub)",marginBottom:24,lineHeight:1.5 }}>
+          Si <b>{email}</b> tiene una cuenta en iFutbol, te enviamos un enlace para restablecer tu contraseña. Revisa también la carpeta de spam.
+        </p>
+        <button className="btn btn-premium" style={{ width:"100%" }} onClick={onClose}>Entendido →</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="ifutbol-overlay" onClick={onClose}>
+      <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:400 }}>
+        <ModalHeader title="Recuperar contraseña" subtitle="Te enviaremos un enlace por correo" onClose={onClose}/>
+        {error&&<div style={m.err}>⚠️ {error}</div>}
+        <Field label="Correo electrónico">
+          <input className="form-input" type="email" placeholder="tu@correo.com" value={email}
+            onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()} autoFocus/>
+        </Field>
+        <div style={{ height:8 }}/>
+        <button className="btn btn-premium" style={{ width:"100%",marginBottom:14 }} onClick={handle} disabled={loading}>
+          {loading?"Enviando...":"Enviar enlace de recuperación →"}
+        </button>
+        <p style={{ textAlign:"center",fontSize:13,color:"var(--text-muted)" }}>
+          ¿Te acordaste? <span style={m.link} onClick={onBackToLogin}>Volver a iniciar sesión</span>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// RESET PASSWORD MODAL — pide nueva contraseña usando token de recovery
+// ─────────────────────────────────────────────────────────────────
+function ResetPasswordModal({ accessToken, onClose, onSuccess }) {
+  const [form, setForm] = useState({ password:"", confirm:"" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handle = async () => {
+    if (!form.password) return setError("Ingresa una nueva contraseña");
+    if (form.password !== form.confirm) return setError("Las contraseñas no coinciden");
+    const pwdErr = validarPassword(form.password);
+    if (pwdErr) return setError(pwdErr);
+    setLoading(true); setError("");
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      method: "PUT",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ password: form.password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setLoading(false);
+    if (!res.ok) {
+      const msg = (data.msg || data.error_description || data.error || "").toLowerCase();
+      if (msg.includes("password")) {
+        return setError("La contraseña no cumple los requisitos. Revisa los criterios e inténtalo de nuevo.");
+      }
+      if (msg.includes("expired") || msg.includes("invalid")) {
+        return setError("El enlace expiró o no es válido. Solicita uno nuevo desde 'Olvidaste tu contraseña'.");
+      }
+      return setError(data.msg || data.error_description || "No pudimos cambiar tu contraseña. Intenta más tarde.");
+    }
+    onSuccess();
+  };
+
+  return (
+    <div className="ifutbol-overlay">
+      <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:420 }}>
+        <ModalHeader title="Nueva contraseña" subtitle="Elige una contraseña segura para tu cuenta" onClose={onClose}/>
+        {error&&<div style={m.err}>⚠️ {error}</div>}
+        <Field label="Nueva contraseña *">
+          <input className="form-input" type="password" placeholder="Mín. 8, con mayús, minús y número"
+            value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/>
+        </Field>
+        <Field label="Confirmar contraseña *">
+          <input className="form-input" type="password" placeholder="Repite tu contraseña"
+            value={form.confirm} onChange={e=>setForm({...form,confirm:e.target.value})}
+            onKeyDown={e=>e.key==="Enter"&&handle()}/>
+        </Field>
+        <div style={{ height:8 }}/>
+        <button className="btn btn-premium" style={{ width:"100%" }} onClick={handle} disabled={loading}>
+          {loading?"Guardando...":"Cambiar contraseña →"}
+        </button>
       </div>
     </div>
   );
@@ -1090,8 +1256,10 @@ function RegisterPlayerModal({ onClose, showToast, onLogin }) {
   const [success, setSuccess] = useState(null);
 
   const handle = async () => {
-    if (form.password!==form.confirm) return setError("Las contraseñas no coinciden");
     if (!form.nombre_completo||!form.email||!form.password) return setError("Completa los campos obligatorios");
+    if (form.password!==form.confirm) return setError("Las contraseñas no coinciden");
+    const pwdErr = validarPassword(form.password);
+    if (pwdErr) return setError(pwdErr);
     setLoading(true); setError("");
     const data = await api("/auth/v1/signup",{method:"POST",body:JSON.stringify({email:form.email,password:form.password})});
     if (data.user||data.id) {
@@ -1159,7 +1327,7 @@ function RegisterPlayerModal({ onClose, showToast, onLogin }) {
           <div style={{ marginBottom:14 }}><Field label="Nombre en camiseta"><input className="form-input" type="text" placeholder="GARCÍA" value={form.nombre_camiseta} onChange={e=>setForm({...form,nombre_camiseta:e.target.value.toUpperCase()})}/></Field></div>
           <div style={{ gridColumn:"1/-1",marginBottom:14 }}><Field label="Domicilio"><input className="form-input" type="text" placeholder="Calle, Ciudad" value={form.domicilio} onChange={e=>setForm({...form,domicilio:e.target.value})}/></Field></div>
           <div style={{ gridColumn:"1/-1",marginBottom:14 }}><Field label="Correo electrónico *"><input className="form-input" type="email" placeholder="tu@correo.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></Field></div>
-          <div style={{ marginBottom:14 }}><Field label="Contraseña *"><input className="form-input" type="password" placeholder="Mín. 6 caracteres" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></Field></div>
+          <div style={{ marginBottom:14 }}><Field label="Contraseña *"><input className="form-input" type="password" placeholder="Mín. 8, con mayús, minús y número" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></Field></div>
           <div style={{ marginBottom:20 }}><Field label="Confirmar contraseña *"><input className="form-input" type="password" placeholder="Repite tu contraseña" value={form.confirm} onChange={e=>setForm({...form,confirm:e.target.value})}/></Field></div>
         </div>
         <button className="btn btn-premium" style={{ width:"100%",marginBottom:14 }} onClick={handle} disabled={loading}>{loading?"Creando cuenta...":"Crear cuenta de jugador →"}</button>
@@ -1181,7 +1349,8 @@ function RegisterStaffModal({ onClose, showToast }) {
   const handle = async () => {
     if (!form.tipo) return setError("Selecciona si eres árbitro o admin de liga");
     if (!form.nombre_completo || !form.email || !form.password) return setError("Completa todos los campos");
-    if (form.password.length < 6) return setError("La contraseña debe tener al menos 6 caracteres");
+    const pwdErr = validarPassword(form.password);
+    if (pwdErr) return setError(pwdErr);
     setLoading(true); setError("");
 
     // signUp normal: Supabase envía el correo de confirmación. Guardamos
@@ -1207,7 +1376,7 @@ function RegisterStaffModal({ onClose, showToast }) {
       if (msg.includes("already") || msg.includes("registered")) {
         setError("Ya existe una cuenta con ese correo. Inicia sesión o usa otro.");
       } else if (msg.includes("password")) {
-        setError("La contraseña no es válida. Usa al menos 6 caracteres.");
+        setError("La contraseña no cumple los requisitos: mínimo 8 caracteres, con mayúscula, minúscula y número.");
       } else if (msg.includes("email") && (msg.includes("invalid") || msg.includes("not valid"))) {
         setError("El correo no tiene un formato válido.");
       } else {
@@ -1243,7 +1412,7 @@ function RegisterStaffModal({ onClose, showToast }) {
           </div>
         </div>
         <Field label="Correo electrónico *"><input className="form-input" type="email" placeholder="tu@correo.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></Field>
-        <div style={{ marginBottom:24 }}><Field label="Contraseña *"><input className="form-input" type="password" placeholder="Mínimo 6 caracteres" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></Field></div>
+        <div style={{ marginBottom:24 }}><Field label="Contraseña *"><input className="form-input" type="password" placeholder="Mín. 8, con mayús, minús y número" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></Field></div>
         <button className="btn btn-premium" style={{ width:"100%" }} onClick={handle} disabled={loading}>{loading?"Enviando...":"Enviar solicitud de registro →"}</button>
       </div>
     </div>
