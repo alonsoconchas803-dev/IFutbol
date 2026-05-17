@@ -212,9 +212,16 @@ export default function Solicitudes({ session }) {
         }
       }
 
+      // OJO: ligaSeleccionada en realidad guarda un cancha_id (los league_admin
+      // se asignan por unidad/cancha, no por liga). Por eso lo guardamos en
+      // cancha_id; meterlo en liga_id violaba el FK contra ligas.
+      const patchSolicitud = { estado: "aprobado" };
+      if (modalSolicitud.tipo_rol === "league_admin" && ligaSeleccionada) {
+        patchSolicitud.cancha_id = ligaSeleccionada;
+      }
       await db(`/solicitudes_registro?id=eq.${modalSolicitud.id}`, token, {
         method: "PATCH",
-        body: JSON.stringify({ estado: "aprobado", liga_id: ligaSeleccionada || null })
+        body: JSON.stringify(patchSolicitud)
       });
 
       showToast(`✅ ${modalSolicitud.nombre_completo} aprobado correctamente`);
