@@ -3,6 +3,8 @@ import FichaGenerator, { FichaDetalleModal } from "./FichaGenerator";
 import { useState, useEffect } from "react";
 import JerseySVG, { JerseyDesignPicker } from "../components/JerseySVG";
 import PersonalizacionUnidadFields from "../components/PersonalizacionUnidadFields";
+import { uploadFile } from "../lib/storage";
+import ColorPicker from "../components/ColorPicker";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -25,65 +27,11 @@ const db = async (path, token, options = {}) => {
   return res.status === 204 ? null : res.json();
 };
 
-// El bucket "imagenes" tiene un límite de 5 MB. Las fotos modernas del rollo
-// del celular suelen pesar 4-8 MB, así que cuando se supera el umbral
-// re-encodeamos a JPEG y reducimos las dimensiones máximas a 1600px.
-// SVG y archivos chicos se suben tal cual.
-const comprimirImagenSiAplica = async (file) => {
-  if (!file || !file.type?.startsWith("image/")) return file;
-  if (file.type === "image/svg+xml") return file;
-  if (file.size <= 4.5 * 1024 * 1024) return file;
-  try {
-    const url = URL.createObjectURL(file);
-    const img = await new Promise((res, rej) => {
-      const i = new Image();
-      i.onload = () => res(i);
-      i.onerror = rej;
-      i.src = url;
-    });
-    const MAX_DIM = 1600;
-    let { width, height } = img;
-    if (width > MAX_DIM || height > MAX_DIM) {
-      const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
-      width = Math.round(width * ratio);
-      height = Math.round(height * ratio);
-    }
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-    URL.revokeObjectURL(url);
-    const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.85));
-    if (!blob || blob.size >= file.size) return file;
-    return new File([blob], file.name, { type: "image/jpeg" });
-  } catch {
-    return file;
-  }
-};
-
-const uploadFile = async (bucket, path, file, token) => {
-  const finalFile = await comprimirImagenSiAplica(file);
-  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`, {
-    method: "POST",
-    headers: {
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${token}`,
-      "Content-Type": finalFile.type,
-      "x-upsert": "true",
-    },
-    body: finalFile,
-  });
-  if (!res.ok) {
-    // Mostramos el detalle real que devuelve Supabase Storage (suele ser un
-    // mensaje de RLS o de bucket) para facilitar diagnosticar problemas.
-    const detalle = await res.text().catch(() => "");
-    throw new Error(`Error al subir imagen (${res.status}): ${detalle || res.statusText}`);
-  }
-  return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
-};
-
 const COLORES = ["#e53e3e","#dd6b20","#d69e2e","#38a169","#3182ce","#805ad5","#d53f8c","#2d3748"];
 const POSICIONES = ["Portero","Defensa","Mediocampista","Delantero"];
+const DIAS_LIGA = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"];
+const TURNOS_LIGA = ["Mañana","Tarde","Noche"];
+const COLORES_LIGA = ["#4f8f2f","#3182ce","#e53e3e","#dd6b20","#d69e2e","#805ad5","#d53f8c","#0ea5e9","#14b8a6","#1f2937"];
 
 // Normaliza "1", "00001", "af-1", "AF-00001" → "AF-00001"
 const normalizarAfiliado = (input) => {
@@ -124,6 +72,10 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
 
   // Árbitros
   const [arbitros, setArbitros] = useState([]);
+  // Modal de confirmar árbitro: decide acceso total o por torneos específicos.
+  const [confirmarArbTarget, setConfirmarArbTarget] = useState(null);
+  const [confirmarAccesoTotal, setConfirmarAccesoTotal] = useState(true);
+  const [confirmarLigasSel, setConfirmarLigasSel] = useState([]);
 
   // Personalización de la unidad
   const [miUnidad, setMiUnidad] = useState(null);
@@ -135,6 +87,11 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
 
   // Color del torneo activo
   const [colorLigaForm, setColorLigaForm] = useState("#4f8f2f");
+
+  // CRUD de torneos (alta/edición desde el panel del admin de unidad)
+  const [ligaForm, setLigaForm] = useState({ nombre: "", dia: "Lunes", turno: "Noche", temporada: "", color_marca: "#4f8f2f" });
+  const [editLigaId, setEditLigaId] = useState(null);
+  const [eliminarLigaTarget, setEliminarLigaTarget] = useState(null);
 
   // Resultados (fichas cerradas)
   const [resultados, setResultados] = useState([]);
@@ -546,35 +503,86 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
     } catch (e) { showToast(e.message, "err"); }
   };
 
-  const toggleAccesoArbitro = async (arbitro) => {
-    try {
-      if (arbitro.acceso_total) {
-        return showToast("Este árbitro tiene acceso total a todos los torneos. Quítaselo primero.", "err");
+  // ── Confirmar / editar acceso de un árbitro ──────────────────────
+  // Sirve tanto para confirmar un pendiente (sin accesos previos) como para
+  // editar a uno ya confirmado. Si ya está confirmado precargamos su acceso
+  // actual: total marcado o, si es por torneos, los torneos donde está.
+  const abrirConfirmarArbitro = async (arbitro) => {
+    setConfirmarArbTarget(arbitro);
+    if (arbitro.confirmado && !arbitro.acceso_total) {
+      // Cargar torneos de esta unidad donde tiene acceso, para precargar la lista.
+      try {
+        const canchaId = ligaSeleccionada?.cancha_id;
+        const ligasUni = await db(`/ligas?cancha_id=eq.${canchaId}&select=id`, token);
+        const ligaIds = (ligasUni || []).map(l => l.id);
+        if (ligaIds.length > 0) {
+          const accesos = await db(`/arbitro_liga?user_id=eq.${arbitro.user_id}&liga_id=in.(${ligaIds.join(",")})&select=liga_id`, token);
+          setConfirmarLigasSel((accesos || []).map(r => r.liga_id));
+        } else {
+          setConfirmarLigasSel([]);
+        }
+      } catch {
+        setConfirmarLigasSel([]);
       }
-      if (arbitro.tiene_acceso_liga) {
-        await db(`/arbitro_liga?user_id=eq.${arbitro.user_id}&liga_id=eq.${ligaSeleccionada.id}`, token, { method: "DELETE" });
-        showToast("Acceso revocado");
-      } else {
-        await db("/arbitro_liga", token, {
-          method: "POST",
-          body: JSON.stringify({ user_id: arbitro.user_id, liga_id: ligaSeleccionada.id })
-        });
-        showToast("Acceso otorgado ✓");
-      }
-      cargarArbitros();
-    } catch (e) { showToast(e.message, "err"); }
+      setConfirmarAccesoTotal(false);
+    } else if (arbitro.confirmado && arbitro.acceso_total) {
+      // Ya tiene acceso total: mantenerlo seleccionado.
+      setConfirmarAccesoTotal(true);
+      setConfirmarLigasSel([]);
+    } else {
+      // Pendiente: por defecto acceso total (lo más común al confirmar).
+      setConfirmarAccesoTotal(true);
+      setConfirmarLigasSel([]);
+    }
   };
 
-  // ── Confirmar árbitro asignado por el super admin ────────────────
-  const confirmarArbitro = async (arbitro) => {
+  const cerrarConfirmarArbitro = () => {
+    setConfirmarArbTarget(null);
+    setConfirmarLigasSel([]);
+  };
+
+  const aplicarConfirmacion = async () => {
+    if (!confirmarArbTarget || !ligaSeleccionada) return;
+    if (!confirmarAccesoTotal && confirmarLigasSel.length === 0) {
+      return showToast("Selecciona al menos un torneo o marca acceso total", "err");
+    }
+    setLoading(true);
     try {
-      await db(`/arbitro_cancha?user_id=eq.${arbitro.user_id}&cancha_id=eq.${ligaSeleccionada.cancha_id}`, token, {
+      const canchaId = ligaSeleccionada.cancha_id;
+      // 1) Marcar como confirmado + setear acceso_total según elección.
+      await db(`/arbitro_cancha?user_id=eq.${confirmarArbTarget.user_id}&cancha_id=eq.${canchaId}`, token, {
         method: "PATCH",
-        body: JSON.stringify({ confirmado: true })
+        body: JSON.stringify({ confirmado: true, acceso_total: !!confirmarAccesoTotal }),
       });
-      showToast(`${arbitro.nombre} confirmado ✓`);
+      // 2) Si eligió torneos específicos, insertar accesos en arbitro_liga.
+      if (!confirmarAccesoTotal && confirmarLigasSel.length > 0) {
+        // Borrar accesos previos a torneos de esta unidad (limpieza idempotente)
+        const ligasUni = await db(`/ligas?cancha_id=eq.${canchaId}&select=id`, token);
+        const ligaIds = (ligasUni || []).map(l => l.id);
+        if (ligaIds.length > 0) {
+          await db(`/arbitro_liga?user_id=eq.${confirmarArbTarget.user_id}&liga_id=in.(${ligaIds.join(",")})`, token, { method: "DELETE" });
+        }
+        for (const ligaId of confirmarLigasSel) {
+          await db("/arbitro_liga", token, {
+            method: "POST",
+            body: JSON.stringify({ user_id: confirmarArbTarget.user_id, liga_id: ligaId }),
+          });
+        }
+      }
+      const detalle = confirmarAccesoTotal
+        ? "con acceso a todos los torneos"
+        : `con acceso a ${confirmarLigasSel.length} torneo${confirmarLigasSel.length === 1 ? "" : "s"}`;
+      showToast(`${confirmarArbTarget.nombre} confirmado ✓ ${detalle}`);
+      cerrarConfirmarArbitro();
       cargarArbitros();
     } catch (e) { showToast(e.message, "err"); }
+    setLoading(false);
+  };
+
+  const toggleLigaConfirm = (ligaId) => {
+    setConfirmarLigasSel(prev =>
+      prev.includes(ligaId) ? prev.filter(x => x !== ligaId) : [...prev, ligaId]
+    );
   };
 
   // ── Desvincular árbitro de la unidad (rechazar o despedir) ──────
@@ -591,20 +599,6 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
       await db(`/arbitro_cancha?user_id=eq.${arbitro.user_id}&cancha_id=eq.${canchaId}`, token, { method: "DELETE" });
       showToast(`${arbitro.nombre} desvinculado de la unidad`);
       setDesvincularArbTarget(null);
-      cargarArbitros();
-    } catch (e) { showToast(e.message, "err"); }
-  };
-
-  // ── Toggle acceso total (admin de unidad decide, no super admin) ──
-  const toggleAccesoTotal = async (arbitro) => {
-    try {
-      const nuevo = !arbitro.acceso_total;
-      await db(`/arbitro_cancha?user_id=eq.${arbitro.user_id}&cancha_id=eq.${ligaSeleccionada.cancha_id}`, token, {
-        method: "PATCH",
-        body: JSON.stringify({ acceso_total: nuevo })
-      });
-      // Si se quita acceso total, no borramos arbitro_liga (puede tener torneos específicos previos).
-      showToast(nuevo ? "Acceso total otorgado ✓" : "Acceso total quitado");
       cargarArbitros();
     } catch (e) { showToast(e.message, "err"); }
   };
@@ -643,6 +637,75 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
       setPersonalizarPortadaFile(null);
       setPersonalizarForm(f => ({ ...f, logo_url, portada_url }));
     } catch (e) { showToast(e.message, "err"); }
+    setLoading(false);
+  };
+
+  // ── CRUD TORNEOS (admin de unidad) ──────────────────────────
+  // El admin solo puede crear/editar torneos dentro de su propia unidad,
+  // así que el cancha_id se fija desde userRole y no se expone en el form.
+  const abrirNuevoTorneo = () => {
+    setLigaForm({ nombre: "", dia: "Lunes", turno: "Noche", temporada: "", color_marca: "#4f8f2f" });
+    setEditLigaId(null);
+    setModal("liga");
+  };
+
+  const abrirEditarTorneo = (l) => {
+    setLigaForm({
+      nombre: l.nombre || "",
+      dia: l.dia || "Lunes",
+      turno: l.turno || "Noche",
+      temporada: l.temporada || "",
+      color_marca: l.color_marca || "#4f8f2f",
+    });
+    setEditLigaId(l.id);
+    setModal("liga");
+  };
+
+  const guardarLiga = async () => {
+    if (!ligaForm.nombre.trim()) return showToast("El nombre del torneo es obligatorio", "err");
+    if (!userRole?.cancha_id) return showToast("No se pudo determinar tu unidad deportiva", "err");
+    setLoading(true);
+    try {
+      const payload = {
+        nombre: ligaForm.nombre.trim(),
+        dia: ligaForm.dia,
+        turno: ligaForm.turno,
+        temporada: ligaForm.temporada || null,
+        color_marca: ligaForm.color_marca,
+      };
+      if (editLigaId) {
+        await db(`/ligas?id=eq.${editLigaId}`, token, { method: "PATCH", body: JSON.stringify(payload) });
+        showToast("Torneo actualizado ✓");
+      } else {
+        const creada = await db("/ligas", token, {
+          method: "POST",
+          body: JSON.stringify({ ...payload, cancha_id: userRole.cancha_id, activa: true }),
+        });
+        showToast("Torneo creado ✓");
+        // Si PostgREST devuelve la fila creada, la dejamos seleccionada de una.
+        const nueva = Array.isArray(creada) ? creada[0] : creada;
+        if (nueva?.id) setLigaSeleccionada(nueva);
+      }
+      setModal(null);
+      setEditLigaId(null);
+      await cargarLigas();
+    } catch (e) { showToast(e.message, "err"); }
+    setLoading(false);
+  };
+
+  const eliminarLiga = async () => {
+    if (!eliminarLigaTarget) return;
+    setLoading(true);
+    try {
+      await db(`/ligas?id=eq.${eliminarLigaTarget.id}`, token, { method: "DELETE" });
+      showToast("Torneo eliminado");
+      if (ligaSeleccionada?.id === eliminarLigaTarget.id) setLigaSeleccionada(null);
+      setEliminarLigaTarget(null);
+      await cargarLigas();
+    } catch (e) {
+      // Lo más común: hay equipos/jornadas/fichas atadas y la FK lo bloquea.
+      showToast(e.message || "No se pudo eliminar (puede tener equipos o partidos)", "err");
+    }
     setLoading(false);
   };
 
@@ -727,12 +790,14 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
 
       const payload = { nombre: equipoForm.nombre, color_playera: equipoForm.color_playera, color_camiseta_2: equipoForm.color_camiseta_2, diseno_camiseta: equipoForm.diseno_camiseta, escudo_url, liga_id: ligaSeleccionada.id };
 
+      // Mensaje diferenciado si subimos logo, para que el usuario vea la confirmación.
+      const conLogo = !!escudoFile;
       if (editEquipoId) {
         await db(`/equipos?id=eq.${editEquipoId}`, token, { method: "PATCH", body: JSON.stringify(payload) });
-        showToast("Equipo actualizado ✓");
+        showToast(conLogo ? "Equipo y logo actualizados ✓" : "Equipo actualizado ✓");
       } else {
         await db("/equipos", token, { method: "POST", body: JSON.stringify(payload) });
-        showToast("Equipo registrado ✓");
+        showToast(conLogo ? "Equipo registrado con logo ✓" : "Equipo registrado ✓");
       }
       setEquipoForm({ nombre: "", color_playera: "#3182ce", color_camiseta_2: "#ffffff", diseno_camiseta: "solido", escudo_url: "" });
       setEscudoFile(null); setEscudoPreview(null); setEditEquipoId(null);
@@ -774,8 +839,17 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
   const handleEscudoChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    // Revoca el preview anterior para no dejar URLs colgadas en memoria.
+    if (escudoPreview && escudoPreview.startsWith("blob:")) URL.revokeObjectURL(escudoPreview);
     setEscudoFile(file);
     setEscudoPreview(URL.createObjectURL(file));
+    showToast(`Logo "${file.name}" cargado ✓ se guardará con el equipo`);
+  };
+
+  const quitarEscudo = () => {
+    if (escudoPreview && escudoPreview.startsWith("blob:")) URL.revokeObjectURL(escudoPreview);
+    setEscudoFile(null);
+    setEscudoPreview(null);
   };
 
   // ── RENDER ────────────────────────────────────────────────────
@@ -784,8 +858,8 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
       <style>{css}</style>
       {toast && <div style={{ ...s.toast, background: toast.tipo === "err" ? "#ef4444" : "#4ade80", color: toast.tipo === "err" ? "#fff" : "#0d0d1a" }}>{toast.msg}</div>}
 
-      {/* ENCABEZADO — hero con gradiente verde. Se oculta en "calendario" y "fichas": esos componentes renderizan un hero combinado propio */}
-      {seccion !== "calendario" && seccion !== "fichas" && (
+      {/* ENCABEZADO — hero con gradiente verde. Se oculta en "calendario", "fichas" y "torneos": esas secciones renderizan un hero temático propio */}
+      {seccion !== "calendario" && seccion !== "fichas" && seccion !== "torneos" && (
         <div style={s.unitHero}>
           <div style={s.unitHeroGlow} />
           <div style={s.unitHeroRow}>
@@ -802,8 +876,12 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
         </div>
       )}
 
-      {/* SELECTOR DE LIGA — oculto en "Personalizar" (aplica a la unidad), "Calendario" y "Fichas" (se renderizan dentro de sus componentes bajo el hero), y "detalle" de equipo (volver atrás para verlos) */}
-      {seccion !== "personalizar" && seccion !== "calendario" && seccion !== "fichas" && seccion !== "detalle" && (
+      {/* SELECTOR DE LIGA — oculto en "Torneos" (vista dedicada), "Personalizar"
+          (aplica a la unidad), "Calendario" y "Fichas" (se renderizan dentro de
+          sus componentes bajo el hero), y "detalle" de equipo (volver atrás para
+          verlos). Aquí solo se elige torneo activo; alta/edición vive en la
+          sección "Torneos". */}
+      {seccion !== "torneos" && seccion !== "personalizar" && seccion !== "calendario" && seccion !== "fichas" && seccion !== "detalle" && (
         <div style={s.ligaSelector}>
           <span style={s.ligaLabel}>Torneos:</span>
           <div style={s.ligaTabs}>
@@ -814,8 +892,82 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                 🏆 {l.nombre}
               </button>
             ))}
-            {ligas.length === 0 && <span style={{ color: "#666", fontSize: 13 }}>No hay ligas activas. Pídele al Super Admin que cree una.</span>}
+            {ligas.length === 0 && (
+              <span style={{ color: "#666", fontSize: 13 }}>
+                Aún no tienes torneos. Créalos desde la sección "🏆 Torneos".
+              </span>
+            )}
           </div>
+        </div>
+      )}
+
+      {/* ── SECCIÓN TORNEOS — alta/edición/eliminación de torneos de la unidad ── */}
+      {seccion === "torneos" && (
+        <div>
+          {/* Hero temático: mismo patrón que "Personalizar" pero en verde-marca */}
+          <div style={s.torneosHero}>
+            <div style={s.torneosHeroIcon}>🏆</div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <h3 style={s.torneosHeroTitle}>Torneos</h3>
+              <p style={s.torneosHeroSub}>
+                Crea, edita y administra los torneos activos de {miUnidad?.nombre || "tu unidad"}.
+              </p>
+            </div>
+          </div>
+
+          {/* Acción principal */}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, flexWrap:"wrap", gap:10 }}>
+            <span style={{ fontSize:13, color:"#6b7280", fontWeight:600 }}>
+              {ligas.length} {ligas.length === 1 ? "torneo activo" : "torneos activos"}
+            </span>
+            <button style={s.btnAdd} onClick={abrirNuevoTorneo}>+ Nuevo torneo</button>
+          </div>
+
+          {ligas.length === 0 ? (
+            <div style={s.empty}>
+              <div style={s.emptyIcon}>🏆</div>
+              <div style={s.emptyTxt}>Aún no tienes torneos creados</div>
+              <p style={{ color:"#9ca3af", fontSize:13, marginBottom:14 }}>
+                Crea tu primer torneo para empezar a registrar equipos, jugadores y jornadas.
+              </p>
+              <button style={s.btnAdd} onClick={abrirNuevoTorneo}>+ Crear primer torneo</button>
+            </div>
+          ) : (
+            <div style={s.torneosGrid}>
+              {ligas.map(l => {
+                const color = l.color_marca || "#4f8f2f";
+                const dia = l.dia || "—";
+                const turno = l.turno || "—";
+                return (
+                  <div key={l.id} style={{ ...s.torneoCard, borderTop:`4px solid ${color}` }} className="la-card">
+                    <div style={s.torneoCardHeader}>
+                      <div style={{ ...s.torneoBadge, background:`${color}1a`, color }}>🏆</div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={s.torneoNombre} title={l.nombre}>{l.nombre}</div>
+                        {l.temporada && (
+                          <div style={s.torneoTemporada}>Temporada {l.temporada}</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={s.torneoMetaRow}>
+                      <span style={s.torneoMetaPill}>📅 {dia}</span>
+                      <span style={s.torneoMetaPill}>⏰ {turno}</span>
+                    </div>
+
+                    <div style={s.torneoActions}>
+                      <button style={{ ...s.btnVer, borderColor:color, color }}
+                        onClick={() => { setLigaSeleccionada(l); setSeccion("equipos"); }}
+                        title="Ver equipos y jornadas de este torneo">
+                        Abrir →
+                      </button>
+                      <button style={s.btnEdit} onClick={() => abrirEditarTorneo(l)} title="Editar torneo">✏️</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -845,6 +997,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                   form={personalizarForm} setForm={setPersonalizarForm}
                   logoPreview={personalizarLogoPreview} setLogoFile={setPersonalizarLogoFile} setLogoPreview={setPersonalizarLogoPreview}
                   portadaPreview={personalizarPortadaPreview} setPortadaFile={setPersonalizarPortadaFile} setPortadaPreview={setPersonalizarPortadaPreview}
+                  showToast={showToast}
                 />
                 <button style={{ ...s.btnSave, width:"100%", marginTop:8 }}
                   onClick={guardarPersonalizacion} disabled={loading}>
@@ -914,18 +1067,20 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                   {equipos.map(eq => {
                     const color = eq.color_playera || "#3182ce";
                     const numJug = jugadores.filter(j => j.equipo_id === eq.id).length;
+                    const inicial = (eq.nombre || "?").trim().charAt(0).toUpperCase();
                     return (
                       <div key={eq.id} style={{ ...s.equipoCard, borderTop: `3px solid ${color}` }} className="la-card">
                         <div style={s.equipoCardRow}>
-                          {/* Izquierda: camiseta + nombre del equipo (grandes) */}
+                          {/* Izquierda: logo del equipo (o inicial sobre el color del equipo si no hay) + nombre */}
                           <div style={s.equipoCardLeft}>
-                            <JerseySVG
-                              diseno={eq.diseno_camiseta || "solido"}
-                              color1={color}
-                              color2={eq.color_camiseta_2 || "#ffffff"}
-                              escudoUrl={eq.escudo_url || null}
-                              size={60}
-                            />
+                            {eq.escudo_url ? (
+                              <img src={eq.escudo_url} alt={eq.nombre}
+                                style={{ width: 60, height: 60, borderRadius: 12, objectFit: "cover", background: "#fff", border: `2px solid ${color}`, flexShrink: 0 }} />
+                            ) : (
+                              <div style={{ width: 60, height: 60, borderRadius: 12, background: color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 26, flexShrink: 0, border: `2px solid ${color}` }}>
+                                {inicial}
+                              </div>
+                            )}
                             <div style={s.equipoNombre}>{eq.nombre}</div>
                           </div>
                           {/* Derecha: acciones + jugadores inscritos */}
@@ -1162,7 +1317,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                           </div>
                         </div>
                         <div style={{ display:"flex", flexDirection:"column", gap:6, alignItems:"flex-end" }}>
-                          <button onClick={() => confirmarArbitro(arb)}
+                          <button onClick={() => abrirConfirmarArbitro(arb)}
                             style={{ ...s.arbBtnAcceso, background:"#dcfce7", color:"#15803d", boxShadow:"0 1px 4px rgba(21,128,61,0.18)" }}>
                             ✓ Confirmar
                           </button>
@@ -1205,28 +1360,13 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                           </div>
                         </div>
                         <div style={{ display:"flex", flexDirection:"column", gap:6, alignItems:"flex-end" }}>
-                          {arb.acceso_total ? (
-                            <button onClick={() => toggleAccesoTotal(arb)}
-                              style={{ ...s.arbBtnAcceso, background:"#fef3c7", color:"#92400e", border:"1px solid #fde68a", boxShadow:"0 1px 4px rgba(245,158,11,0.18)" }}>
-                              ★ Acceso total · quitar
-                            </button>
-                          ) : (
-                            <>
-                              <button onClick={() => toggleAccesoArbitro(arb)}
-                                style={{
-                                  ...s.arbBtnAcceso,
-                                  background: arb.tiene_acceso_liga ? "#fee2e2" : "#dcfce7",
-                                  color:      arb.tiene_acceso_liga ? "#dc2626" : "#15803d",
-                                  boxShadow:  arb.tiene_acceso_liga ? "0 1px 4px rgba(220,38,38,0.18)" : "0 1px 4px rgba(21,128,61,0.18)",
-                                }}>
-                                {arb.tiene_acceso_liga ? `✕ Quitar de ${ligaSeleccionada.nombre}` : `✓ Dar acceso a ${ligaSeleccionada.nombre}`}
-                              </button>
-                              <button onClick={() => toggleAccesoTotal(arb)}
-                                style={{ ...s.arbBtnAcceso, background:"#fff", color:"#92400e", border:"1px solid #fde68a" }}>
-                                ★ Dar acceso total
-                              </button>
-                            </>
-                          )}
+                          {/* Un solo botón para gestionar el acceso: reabre el mismo
+                              modal de confirmación, precargando si tiene acceso
+                              total o los torneos específicos donde está. */}
+                          <button onClick={() => abrirConfirmarArbitro(arb)}
+                            style={{ ...s.arbBtnAcceso, background:"#eff6ff", color:"#1d4ed8", border:"1px solid #bfdbfe", boxShadow:"0 1px 4px rgba(29,78,216,0.18)" }}>
+                            ✏️ Editar acceso
+                          </button>
                           <button onClick={() => setDesvincularArbTarget(arb)}
                             style={{ ...s.arbBtnAcceso, background:"#fff", color:"#6b7280", border:"1px solid #e5e7eb" }}>
                             🚪 Desvincular
@@ -1471,6 +1611,224 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
         </>
       )}
 
+      {/* ── MODAL TORNEO (alta/edición) ── */}
+      {modal === "liga" && (
+        <div style={s.overlay} onClick={() => setModal(null)}>
+          <div style={{ ...s.modalBox, maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+            <h3 style={s.modalTitle}>🏆 {editLigaId ? "Editar torneo" : "Nuevo torneo"}</h3>
+            <p style={{ fontSize: 13, color: "#6b7280", marginTop: -12, marginBottom: 18 }}>
+              {editLigaId
+                ? "Actualiza los datos generales del torneo."
+                : `El torneo se creará dentro de ${miUnidad?.nombre || "tu unidad"}.`}
+            </p>
+
+            <div style={s.field}>
+              <label style={s.label}>Nombre del torneo *</label>
+              <input style={s.input} placeholder="ej. Liga Miércoles Noche"
+                value={ligaForm.nombre}
+                onChange={e => setLigaForm({ ...ligaForm, nombre: e.target.value })} />
+            </div>
+
+            <div style={s.formRow}>
+              <div style={s.field}>
+                <label style={s.label}>Día</label>
+                <select style={s.input} value={ligaForm.dia}
+                  onChange={e => setLigaForm({ ...ligaForm, dia: e.target.value })}>
+                  {DIAS_LIGA.map(d => <option key={d}>{d}</option>)}
+                </select>
+              </div>
+              <div style={s.field}>
+                <label style={s.label}>Turno</label>
+                <select style={s.input} value={ligaForm.turno}
+                  onChange={e => setLigaForm({ ...ligaForm, turno: e.target.value })}>
+                  {TURNOS_LIGA.map(t => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div style={s.field}>
+              <label style={s.label}>Temporada (opcional)</label>
+              <input style={s.input} placeholder="ej. 2026-A"
+                value={ligaForm.temporada}
+                onChange={e => setLigaForm({ ...ligaForm, temporada: e.target.value })} />
+            </div>
+
+            <div style={s.field}>
+              <label style={s.label}>Color del torneo</label>
+              <ColorPicker
+                colores={COLORES_LIGA}
+                valor={ligaForm.color_marca}
+                onChange={c => setLigaForm({ ...ligaForm, color_marca: c })}
+              />
+              <div style={{ fontSize: 11.5, color: "#6b7280", marginTop: 8 }}>
+                🎨 Toca el círculo con paleta para elegir un color a tu gusto.
+              </div>
+              <div style={{ marginTop: 10, height: 40, borderRadius: 10, background: `linear-gradient(135deg, ${ligaForm.color_marca} 0%, ${ligaForm.color_marca}88 100%)`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 700, textShadow: "0 1px 2px rgba(0,0,0,0.3)" }}>
+                Vista previa del header
+              </div>
+            </div>
+
+            <div style={s.modalActions}>
+              {editLigaId && (
+                <button
+                  style={{ ...s.btnCancel, color:"#dc2626", borderColor:"#fecaca", marginRight:"auto" }}
+                  onClick={() => { const target = ligas.find(l => l.id === editLigaId); setModal(null); setEliminarLigaTarget(target || null); }}>
+                  🗑️ Eliminar
+                </button>
+              )}
+              <button style={s.btnCancel} onClick={() => setModal(null)}>Cancelar</button>
+              <button style={s.btnSave} onClick={guardarLiga} disabled={loading}>
+                {loading ? "Guardando..." : editLigaId ? "Guardar cambios" : "Crear torneo"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL CONFIRMAR / EDITAR ACCESO DE ÁRBITRO ── */}
+      {confirmarArbTarget && (
+        <div style={s.overlay} onClick={cerrarConfirmarArbitro}>
+          <div style={{ ...s.modalBox, maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+            <h3 style={s.modalTitle}>
+              {confirmarArbTarget.confirmado
+                ? `✏️ Editar acceso de ${confirmarArbTarget.nombre}`
+                : `🟡 Confirmar a ${confirmarArbTarget.nombre}`}
+            </h3>
+            <p style={{ fontSize: 13, color: "#6b7280", marginTop: -10, marginBottom: 16, lineHeight: 1.5 }}>
+              Elige a qué torneos podrá arbitrar dentro de tu unidad.
+            </p>
+
+            {/* Opción 1: Acceso total */}
+            <div
+              onClick={() => setConfirmarAccesoTotal(true)}
+              style={{
+                display: "flex", alignItems: "flex-start", gap: 12, padding: 14, borderRadius: 12, cursor: "pointer",
+                border: `2px solid ${confirmarAccesoTotal ? "#4f8f2f" : "#e5e7eb"}`,
+                background: confirmarAccesoTotal ? "#f0fdf4" : "#fff",
+                marginBottom: 10, transition: "all 0.15s",
+              }}>
+              <div style={{
+                flexShrink: 0, width: 20, height: 20, borderRadius: "50%", marginTop: 1,
+                border: `2px solid ${confirmarAccesoTotal ? "#4f8f2f" : "#cbd5e1"}`,
+                background: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                {confirmarAccesoTotal && <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#4f8f2f" }} />}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", marginBottom: 3 }}>🌐 Acceso total</div>
+                <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.4 }}>
+                  Podrá arbitrar en todos los torneos actuales y futuros de esta unidad.
+                </div>
+              </div>
+            </div>
+
+            {/* Opción 2: Torneos específicos */}
+            <div
+              onClick={() => setConfirmarAccesoTotal(false)}
+              style={{
+                display: "flex", alignItems: "flex-start", gap: 12, padding: 14, borderRadius: 12, cursor: "pointer",
+                border: `2px solid ${!confirmarAccesoTotal ? "#4f8f2f" : "#e5e7eb"}`,
+                background: !confirmarAccesoTotal ? "#f0fdf4" : "#fff",
+                marginBottom: 14, transition: "all 0.15s",
+              }}>
+              <div style={{
+                flexShrink: 0, width: 20, height: 20, borderRadius: "50%", marginTop: 1,
+                border: `2px solid ${!confirmarAccesoTotal ? "#4f8f2f" : "#cbd5e1"}`,
+                background: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                {!confirmarAccesoTotal && <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#4f8f2f" }} />}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", marginBottom: 3 }}>🏆 Torneos específicos</div>
+                <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.4 }}>
+                  Tú eliges en qué torneos puede arbitrar.
+                </div>
+              </div>
+            </div>
+
+            {/* Lista de torneos (solo si eligió específicos) */}
+            {!confirmarAccesoTotal && (
+              <div style={{ marginBottom: 14, paddingLeft: 4 }}>
+                {ligas.length === 0 ? (
+                  <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 14px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 10 }}>
+                    Aún no tienes torneos creados en esta unidad. Crea uno primero o marca "acceso total".
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+                      Selecciona los torneos
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {ligas.map(l => {
+                        const sel = confirmarLigasSel.includes(l.id);
+                        return (
+                          <div key={l.id} onClick={() => toggleLigaConfirm(l.id)}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 10,
+                              padding: "10px 14px", borderRadius: 10, cursor: "pointer",
+                              border: `2px solid ${sel ? "#4f8f2f" : "#e5e7eb"}`,
+                              background: sel ? "#f0fdf4" : "#fff",
+                              borderLeft: `4px solid ${l.color_marca || "#4f8f2f"}`,
+                              transition: "all 0.15s",
+                            }}>
+                            <div style={{
+                              width: 18, height: 18, borderRadius: 5, flexShrink: 0,
+                              border: `2px solid ${sel ? "#4f8f2f" : "#cbd5e1"}`,
+                              background: sel ? "#4f8f2f" : "#fff",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                            }}>
+                              {sel && <span style={{ color: "#fff", fontSize: 11, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>🏆 {l.nombre}</div>
+                              {(l.dia || l.turno) && (
+                                <div style={{ fontSize: 11, color: "#6b7280" }}>{[l.dia, l.turno].filter(Boolean).join(" · ")}</div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            <div style={s.modalActions}>
+              <button style={s.btnCancel} onClick={cerrarConfirmarArbitro} disabled={loading}>Cancelar</button>
+              <button style={s.btnSave} onClick={aplicarConfirmacion} disabled={loading}>
+                {loading
+                  ? "Guardando..."
+                  : confirmarArbTarget.confirmado
+                    ? "💾 Guardar cambios"
+                    : "✓ Confirmar árbitro"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL CONFIRMAR ELIMINAR TORNEO ── */}
+      {eliminarLigaTarget && (
+        <div style={s.overlay} onClick={() => setEliminarLigaTarget(null)}>
+          <div style={{ ...s.modalBox, maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <h3 style={s.modalTitle}>🗑️ Eliminar torneo</h3>
+            <p style={{ fontSize: 13.5, color:"#374151", lineHeight: 1.55 }}>
+              ¿Eliminar <strong>{eliminarLigaTarget.nombre}</strong>? Esta acción no se puede deshacer.
+            </p>
+            <p style={{ fontSize: 12.5, color:"#92400e", background:"#fffbeb", border:"1px solid #fde68a", padding:"8px 12px", borderRadius:8, marginTop:8 }}>
+              ⚠️ Si el torneo tiene equipos, jornadas o fichas, la base de datos puede impedir la eliminación.
+            </p>
+            <div style={s.modalActions}>
+              <button style={s.btnCancel} onClick={() => setEliminarLigaTarget(null)}>Cancelar</button>
+              <button style={{ ...s.btnSave, background:"#dc2626" }} onClick={eliminarLiga} disabled={loading}>
+                {loading ? "Eliminando..." : "Sí, eliminar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── MODAL PERSONALIZAR UNIDAD ── */}
       {/* ── MODAL COLOR DE LIGA ── */}
       {modal === "color_liga" && ligaSeleccionada && (
@@ -1483,16 +1841,14 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
 
             <div style={s.field}>
               <label style={s.label}>Elige un color</label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                {["#4f8f2f","#3182ce","#e53e3e","#dd6b20","#d69e2e","#805ad5","#d53f8c","#0ea5e9","#14b8a6","#1f2937"].map(c => (
-                  <div key={c} onClick={() => setColorLigaForm(c)}
-                    style={{ width: 32, height: 32, borderRadius: "50%", background: c, cursor: "pointer",
-                      boxShadow: colorLigaForm === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none" }} />
-                ))}
-                <input type="color" value={colorLigaForm}
-                  onChange={e => setColorLigaForm(e.target.value)}
-                  style={{ width: 32, height: 32, borderRadius: "50%", border: "none", cursor: "pointer", padding: 0 }}
-                  title="Color personalizado" />
+              <ColorPicker
+                size={32}
+                colores={COLORES_LIGA}
+                valor={colorLigaForm}
+                onChange={setColorLigaForm}
+              />
+              <div style={{ fontSize: 11.5, color: "#6b7280", marginTop: 8 }}>
+                🎨 Toca el círculo con paleta para elegir cualquier otro color.
               </div>
             </div>
 
@@ -1534,12 +1890,36 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                   size={72}
                 />
               </div>
-              <div style={{ flex: 1 }}>
-                <label style={s.uploadLabel}>
-                  📁 Subir logo del equipo
-                  <input type="file" accept="image/*" onChange={handleEscudoChange} style={{ display: "none" }} />
-                </label>
-                <p style={{ color: "#888", fontSize: 11, marginTop: 6 }}>Aparece en la camiseta. PNG o JPG.</p>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <label style={s.uploadLabel}>
+                    📁 {escudoPreview ? "Cambiar logo" : "Subir logo del equipo"}
+                    <input type="file" accept="image/*" onChange={handleEscudoChange} style={{ display: "none" }} />
+                  </label>
+                  {escudoPreview && (
+                    <>
+                      {/* Miniatura visible del archivo seleccionado, encima un check verde
+                          para que se entienda a simple vista que la foto está cargada. */}
+                      <div style={{ position: "relative", width: 44, height: 44, flexShrink: 0 }}>
+                        <img src={escudoPreview} alt="logo cargado"
+                          style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover", border: "2px solid #4f8f2f", background: "#fff" }} />
+                        <span style={{ position: "absolute", bottom: -2, right: -2, width: 18, height: 18, borderRadius: "50%", background: "#16a34a", color: "#fff", fontSize: 11, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", border: "2px solid #fff" }}>✓</span>
+                      </div>
+                      <button type="button" onClick={quitarEscudo}
+                        style={{ background: "transparent", border: "1px solid #fecaca", color: "#dc2626", borderRadius: 8, padding: "6px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                        title="Quitar este logo">
+                        ✕ Quitar
+                      </button>
+                    </>
+                  )}
+                </div>
+                {escudoPreview ? (
+                  <p style={{ color: "#16a34a", fontSize: 11.5, marginTop: 6, fontWeight: 600 }}>
+                    ✓ Logo listo. Se subirá al guardar el equipo.
+                  </p>
+                ) : (
+                  <p style={{ color: "#888", fontSize: 11, marginTop: 6 }}>Aparece en la camiseta. PNG o JPG.</p>
+                )}
               </div>
             </div>
 
@@ -1564,27 +1944,19 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
             <div style={{ display: "flex", gap: 16 }}>
               <div style={{ ...s.field, flex: 1 }}>
                 <label style={s.label}>Color principal</label>
-                <div style={s.colorGrid}>
-                  {COLORES.map(c => (
-                    <div key={c} onClick={() => setEquipoForm({ ...equipoForm, color_playera: c })}
-                      style={{ ...s.colorDot, background: c, boxShadow: equipoForm.color_playera === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none" }} />
-                  ))}
-                  <input type="color" value={equipoForm.color_playera}
-                    onChange={e => setEquipoForm({ ...equipoForm, color_playera: e.target.value })}
-                    style={s.colorCustom} title="Color personalizado" />
-                </div>
+                <ColorPicker
+                  colores={COLORES}
+                  valor={equipoForm.color_playera}
+                  onChange={c => setEquipoForm({ ...equipoForm, color_playera: c })}
+                />
               </div>
               <div style={{ ...s.field, flex: 1 }}>
                 <label style={s.label}>Color secundario</label>
-                <div style={s.colorGrid}>
-                  {["#ffffff","#000000","#f5f5f5","#fbbf24","#ef4444","#3b82f6","#10b981","#8b5cf6"].map(c => (
-                    <div key={c} onClick={() => setEquipoForm({ ...equipoForm, color_camiseta_2: c })}
-                      style={{ ...s.colorDot, background: c, boxShadow: equipoForm.color_camiseta_2 === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none", border: c === "#ffffff" ? "1px solid #e5e7eb" : "none" }} />
-                  ))}
-                  <input type="color" value={equipoForm.color_camiseta_2}
-                    onChange={e => setEquipoForm({ ...equipoForm, color_camiseta_2: e.target.value })}
-                    style={s.colorCustom} title="Color secundario personalizado" />
-                </div>
+                <ColorPicker
+                  colores={["#ffffff","#000000","#f5f5f5","#fbbf24","#ef4444","#3b82f6","#10b981","#8b5cf6"]}
+                  valor={equipoForm.color_camiseta_2}
+                  onChange={c => setEquipoForm({ ...equipoForm, color_camiseta_2: c })}
+                />
               </div>
             </div>
 
@@ -1885,6 +2257,21 @@ const s = {
   persHeroIcon: { width:48, height:48, borderRadius:12, background:"linear-gradient(135deg, #8b5cf6 0%, #d946ef 100%)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, color:"#fff", flexShrink:0, boxShadow:"0 4px 12px rgba(139,92,246,0.28)" },
   persHeroTitle: { fontSize:16, fontWeight:800, color:"#581c87", margin:0, marginBottom:3, letterSpacing:-0.3 },
   persHeroSub: { fontSize:12, color:"#7c3aed", lineHeight:1.4, margin:0 },
+
+  // ── Sección Torneos: hero verde + tarjetas individuales ──
+  torneosHero: { display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:"linear-gradient(135deg, #ecfccb 0%, #f0fdf4 100%)", border:"1px solid #bbf7d0", marginBottom:16 },
+  torneosHeroIcon: { width:48, height:48, borderRadius:12, background:"linear-gradient(135deg, #4f8f2f 0%, #7fbf4d 100%)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, color:"#fff", flexShrink:0, boxShadow:"0 4px 12px rgba(79,143,47,0.28)" },
+  torneosHeroTitle: { fontSize:18, fontWeight:800, color:"#14532d", margin:0, marginBottom:3, letterSpacing:-0.3 },
+  torneosHeroSub: { fontSize:12.5, color:"#15803d", lineHeight:1.4, margin:0 },
+  torneosGrid: { display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(240px, 1fr))", gap:12 },
+  torneoCard: { background:SURFACE, border:`1px solid ${BORDER}`, borderRadius:14, padding:"14px 14px 12px", boxShadow:"0 1px 4px rgba(0,0,0,0.05)", display:"flex", flexDirection:"column", gap:10, minWidth:0 },
+  torneoCardHeader: { display:"flex", alignItems:"center", gap:10, minWidth:0 },
+  torneoBadge: { width:38, height:38, borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, fontWeight:800, flexShrink:0 },
+  torneoNombre: { fontSize:15, fontWeight:800, color:"#111827", lineHeight:1.2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
+  torneoTemporada: { fontSize:11.5, color:"#6b7280", marginTop:2, fontWeight:600 },
+  torneoMetaRow: { display:"flex", gap:6, flexWrap:"wrap" },
+  torneoMetaPill: { fontSize:11.5, color:"#374151", background:"#f3f4f6", border:`1px solid ${BORDER}`, borderRadius:999, padding:"3px 10px", fontWeight:600 },
+  torneoActions: { display:"flex", gap:8, alignItems:"center", marginTop:4 },
   persCard: { background:"#ffffff", border:`1px solid ${BORDER}`, borderRadius:14, padding:16, boxShadow:"0 2px 10px rgba(0,0,0,0.04)" },
   persCardHead: { display:"flex", alignItems:"flex-start", gap:10, marginBottom:14, paddingBottom:12, borderBottom:`1px solid ${BORDER}` },
   persCardEmoji: { fontSize:22, width:38, height:38, borderRadius:10, background:"#f0fdf4", border:"1px solid #c3e6a3", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 },

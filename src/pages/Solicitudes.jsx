@@ -321,12 +321,18 @@ export default function Solicitudes({ session }) {
             const canchaSolicitada = esExtra ? canchas.find(c => c.id === sol.cancha_id) : null;
             return (
               <div key={sol.id} style={s.card}>
-                <div style={s.cardLeft}>
+                {/* Fila superior: avatar + nombre/estado + meta */}
+                <div style={s.cardTop}>
                   <div style={{ ...s.avatar, background: rolInfo.bg, border: `2px solid ${rolInfo.border}` }}>
                     <span style={{ fontSize:22 }}>{rolInfo.icon}</span>
                   </div>
                   <div style={s.info}>
-                    <div style={s.nombre}>{sol.nombre_completo}</div>
+                    <div style={s.nombreRow}>
+                      <div style={s.nombre}>{sol.nombre_completo}</div>
+                      <span style={{ ...s.estadoBadge, background: estadoInfo.bg, color: estadoInfo.color }}>
+                        {estadoInfo.label}
+                      </span>
+                    </div>
                     <div style={s.meta}>
                       <span style={{ ...s.rolPill, background: rolInfo.bg, color: rolInfo.color, border: `1px solid ${rolInfo.border}` }}>
                         {rolInfo.icon} {rolInfo.label}
@@ -336,31 +342,29 @@ export default function Solicitudes({ session }) {
                           ➕ Nueva unidad{canchaSolicitada ? ` · ${canchaSolicitada.nombre}` : ""}
                         </span>
                       )}
-                      <span style={s.fecha}>{formatFecha(sol.created_at)}</span>
                     </div>
+                    <div style={s.fecha}>📅 {formatFecha(sol.created_at)}</div>
                   </div>
                 </div>
-                <div style={s.cardRight}>
-                  <span style={{ ...s.estadoBadge, background: estadoInfo.bg, color: estadoInfo.color }}>
-                    {estadoInfo.label}
-                  </span>
-                  {sol.estado === "pendiente" && (
-                    <div style={s.acciones}>
-                      <button className="btn btn-primary" style={{ fontSize:13, padding:"8px 16px" }} onClick={() => abrirModal(sol)}>
-                        ✅ Aprobar
-                      </button>
-                      <button className="btn btn-danger" style={{ fontSize:13, padding:"8px 16px" }} onClick={() => handleRechazar(sol)} disabled={procesando}>
-                        ❌ Rechazar
-                      </button>
-                    </div>
-                  )}
-                  {sol.estado === "aprobado" && (
-                    <button style={{ fontSize:13, padding:"8px 14px", background:"#f3f4f6", color:"#374151", border:"1px solid #e5e7eb", borderRadius:8, cursor:"pointer", fontWeight:600 }}
-                      onClick={() => abrirEditar(sol)}>
-                      ✏️ Editar
+
+                {/* Fila inferior: acciones — full width para que los botones respiren */}
+                {sol.estado === "pendiente" && (
+                  <div style={s.accionesRow}>
+                    <button className="btn btn-primary" style={s.btnAprobar} onClick={() => abrirModal(sol)}>
+                      ✅ Aprobar
                     </button>
-                  )}
-                </div>
+                    <button className="btn btn-danger" style={s.btnRechazar} onClick={() => handleRechazar(sol)} disabled={procesando}>
+                      ❌ Rechazar
+                    </button>
+                  </div>
+                )}
+                {sol.estado === "aprobado" && (
+                  <div style={s.accionesRow}>
+                    <button style={s.btnEditar} onClick={() => abrirEditar(sol)}>
+                      ✏️ Editar asignaciones
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -499,17 +503,23 @@ const s = {
   filtros: { display:"flex", gap:8, marginBottom:24, flexWrap:"wrap" },
   count: { background:"rgba(0,0,0,0.1)", borderRadius:20, padding:"1px 7px", fontSize:11, fontWeight:800, marginLeft:5 },
   lista: { display:"flex", flexDirection:"column", gap:12 },
-  card: { background:"white", borderRadius:"var(--radius-md)", padding:"16px 20px", boxShadow:"var(--shadow-md)", border:"1px solid var(--border)", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap" },
-  cardLeft: { display:"flex", alignItems:"center", gap:14, flex:1, minWidth:0 },
-  avatar: { width:48, height:48, borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 },
-  info: { flex:1, minWidth:0 },
-  nombre: { fontSize:15, fontWeight:700, color:"var(--text)", marginBottom:5 },
-  meta: { display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" },
-  rolPill: { padding:"3px 10px", borderRadius:"var(--radius-full)", fontSize:12, fontWeight:600, display:"inline-flex", alignItems:"center", gap:4 },
-  fecha: { fontSize:11, color:"var(--text-muted)" },
-  cardRight: { display:"flex", alignItems:"center", gap:10, flexShrink:0, flexWrap:"wrap" },
-  estadoBadge: { padding:"4px 12px", borderRadius:"var(--radius-full)", fontSize:12, fontWeight:700 },
-  acciones: { display:"flex", gap:8 },
+  // Estructura nueva: la tarjeta se apila en 2 filas (info arriba, acciones abajo)
+  // para evitar amontonamiento en mobile. Los botones ocupan ancho completo.
+  card: { background:"white", borderRadius:"var(--radius-md)", padding:14, boxShadow:"var(--shadow-md)", border:"1px solid var(--border)", display:"flex", flexDirection:"column", gap:12 },
+  cardTop: { display:"flex", alignItems:"flex-start", gap:12, minWidth:0 },
+  avatar: { width:44, height:44, borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 },
+  info: { flex:1, minWidth:0, display:"flex", flexDirection:"column", gap:6 },
+  nombreRow: { display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:8, flexWrap:"wrap" },
+  nombre: { fontSize:15, fontWeight:700, color:"var(--text)", lineHeight:1.25, wordBreak:"break-word", minWidth:0, flex:1 },
+  meta: { display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" },
+  rolPill: { padding:"3px 10px", borderRadius:"var(--radius-full)", fontSize:11.5, fontWeight:600, display:"inline-flex", alignItems:"center", gap:4, whiteSpace:"nowrap" },
+  fecha: { fontSize:11, color:"var(--text-muted)", marginTop:2 },
+  estadoBadge: { padding:"3px 10px", borderRadius:"var(--radius-full)", fontSize:11, fontWeight:700, whiteSpace:"nowrap", flexShrink:0 },
+  // Botones full-width que se reparten el ancho disponible
+  accionesRow: { display:"flex", gap:8, borderTop:"1px solid var(--border)", paddingTop:12 },
+  btnAprobar: { flex:2, fontSize:13, padding:"10px 12px", minWidth:0 },
+  btnRechazar: { flex:1, fontSize:13, padding:"10px 12px", minWidth:0 },
+  btnEditar: { flex:1, fontSize:13, padding:"10px 12px", background:"#f3f4f6", color:"#374151", border:"1px solid #e5e7eb", borderRadius:8, cursor:"pointer", fontWeight:600 },
   // MODAL
   modal: {
     background:"white", borderRadius:"var(--radius-xl)",

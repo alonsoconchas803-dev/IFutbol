@@ -3,6 +3,8 @@ import Auditoria from "./Auditoria";
 import { useState, useEffect } from "react";
 import JerseySVG, { JerseyDesignPicker } from "../components/JerseySVG";
 import PersonalizacionUnidadFields from "../components/PersonalizacionUnidadFields";
+import { uploadFile } from "../lib/storage";
+import ColorPicker from "../components/ColorPicker";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -23,21 +25,6 @@ const db = async (path, token, options = {}) => {
     throw new Error(err.message || "Error en la base de datos");
   }
   return res.status === 204 ? null : res.json();
-};
-
-const uploadFile = async (bucket, path, file, token) => {
-  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`, {
-    method: "POST",
-    headers: {
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${token}`,
-      "Content-Type": file.type,
-      "x-upsert": "true"
-    },
-    body: file
-  });
-  if (!res.ok) throw new Error("Error al subir imagen");
-  return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
 };
 
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
@@ -802,6 +789,7 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
                 form={canchaForm} setForm={setCanchaForm}
                 logoPreview={logoPreview} setLogoFile={setLogoFile} setLogoPreview={setLogoPreview}
                 portadaPreview={portadaPreview} setPortadaFile={setPortadaFile} setPortadaPreview={setPortadaPreview}
+                showToast={showToast}
               />
             </div>
 
@@ -850,31 +838,26 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
             <div style={{ display: "flex", gap: 16 }}>
               <div style={{ flex: 1 }}>
                 <label style={s.label}>Color principal</label>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
-                  {COLORES.map(c => (
-                    <div key={c} onClick={() => setEquipoForm({ ...equipoForm, color_playera: c })}
-                      style={{ width: 28, height: 28, borderRadius: "50%", background: c, cursor: "pointer", transition: "box-shadow 0.15s",
-                        boxShadow: equipoForm.color_playera === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none" }} />
-                  ))}
-                  <input type="color" value={equipoForm.color_playera}
-                    onChange={e => setEquipoForm({ ...equipoForm, color_playera: e.target.value })}
-                    style={{ width: 28, height: 28, borderRadius: "50%", border: "none", cursor: "pointer", padding: 0 }}
-                    title="Color personalizado" />
+                <div style={{ marginTop: 6 }}>
+                  <ColorPicker
+                    size={28}
+                    gap={6}
+                    colores={COLORES}
+                    valor={equipoForm.color_playera}
+                    onChange={c => setEquipoForm({ ...equipoForm, color_playera: c })}
+                  />
                 </div>
               </div>
               <div style={{ flex: 1 }}>
                 <label style={s.label}>Color secundario</label>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
-                  {["#ffffff","#000000","#f5f5f5","#fbbf24","#ef4444","#3b82f6","#10b981","#8b5cf6"].map(c => (
-                    <div key={c} onClick={() => setEquipoForm({ ...equipoForm, color_camiseta_2: c })}
-                      style={{ width: 28, height: 28, borderRadius: "50%", background: c, cursor: "pointer", transition: "box-shadow 0.15s",
-                        boxShadow: equipoForm.color_camiseta_2 === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none",
-                        border: c === "#ffffff" ? "1px solid #e5e7eb" : "none" }} />
-                  ))}
-                  <input type="color" value={equipoForm.color_camiseta_2}
-                    onChange={e => setEquipoForm({ ...equipoForm, color_camiseta_2: e.target.value })}
-                    style={{ width: 28, height: 28, borderRadius: "50%", border: "none", cursor: "pointer", padding: 0 }}
-                    title="Color secundario personalizado" />
+                <div style={{ marginTop: 6 }}>
+                  <ColorPicker
+                    size={28}
+                    gap={6}
+                    colores={["#ffffff","#000000","#f5f5f5","#fbbf24","#ef4444","#3b82f6","#10b981","#8b5cf6"]}
+                    valor={equipoForm.color_camiseta_2}
+                    onChange={c => setEquipoForm({ ...equipoForm, color_camiseta_2: c })}
+                  />
                 </div>
               </div>
             </div>
@@ -927,16 +910,13 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
             </div>
             <div style={s.field}>
               <label style={s.label}>Color del torneo</label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                {["#4f8f2f","#3182ce","#e53e3e","#dd6b20","#d69e2e","#805ad5","#d53f8c","#0ea5e9","#14b8a6","#1f2937"].map(c => (
-                  <div key={c} onClick={() => setLigaForm({ ...ligaForm, color_marca: c })}
-                    style={{ width: 30, height: 30, borderRadius: "50%", background: c, cursor: "pointer",
-                      boxShadow: ligaForm.color_marca === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none" }} />
-                ))}
-                <input type="color" value={ligaForm.color_marca || "#4f8f2f"}
-                  onChange={e => setLigaForm({ ...ligaForm, color_marca: e.target.value })}
-                  style={{ width: 30, height: 30, borderRadius: "50%", border: "none", cursor: "pointer", padding: 0 }}
-                  title="Color personalizado" />
+              <ColorPicker
+                colores={["#4f8f2f","#3182ce","#e53e3e","#dd6b20","#d69e2e","#805ad5","#d53f8c","#0ea5e9","#14b8a6","#1f2937"]}
+                valor={ligaForm.color_marca}
+                onChange={c => setLigaForm({ ...ligaForm, color_marca: c })}
+              />
+              <div style={{ fontSize: 11.5, color: "#6b7280", marginTop: 8 }}>
+                🎨 Toca el círculo con paleta para elegir un color a tu gusto.
               </div>
               <div style={{ marginTop: 10, height: 40, borderRadius: 10, background: `linear-gradient(135deg, ${ligaForm.color_marca} 0%, ${ligaForm.color_marca}88 100%)`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 700, textShadow: "0 1px 2px rgba(0,0,0,0.3)" }}>
                 Vista previa del header

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import JerseySVG from "../components/JerseySVG";
+import FichaGenerator from "./FichaGenerator";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -34,6 +34,11 @@ export default function Referee({ session, setTopbarBack, seccionInicial }) {
   const [ligaActiva, setLigaActiva]       = useState(null); // objeto liga
   const [jornadaActiva, setJornadaActiva] = useState(null); // id
   const [partidoActivo, setPartidoActivo] = useState(null);
+
+  // ── Navegación dentro de "fichas": unidad → liga → FichaGenerator readOnly ──
+  // Estados independientes para no pisar la navegación de "partidos".
+  const [unidadFichas, setUnidadFichas] = useState(null);
+  const [ligaFichas, setLigaFichas]     = useState(null);
 
   // ── Datos cacheados ────────────────────────────────────────────
   const [unidades, setUnidades]       = useState([]); // unidades del árbitro (con ligas accesibles)
@@ -87,11 +92,19 @@ export default function Referee({ session, setTopbarBack, seccionInicial }) {
       } else {
         setTopbarBack(null);
       }
+    } else if (seccion === "fichas") {
+      if (ligaFichas) {
+        setTopbarBack({ label: "Volver a torneos", onClick: () => setLigaFichas(null) });
+      } else if (unidadFichas && unidades.length > 1) {
+        setTopbarBack({ label: "Volver a unidades", onClick: () => setUnidadFichas(null) });
+      } else {
+        setTopbarBack(null);
+      }
     } else {
       setTopbarBack(null);
     }
     return () => setTopbarBack(null);
-  }, [seccion, partidoActivo, ligaActiva, unidadActiva, unidades.length, setTopbarBack]);
+  }, [seccion, partidoActivo, ligaActiva, unidadActiva, unidadFichas, ligaFichas, unidades.length, setTopbarBack]);
 
   // ── seccionInicial cambia desde la sidebar → resetea vista ─────
   useEffect(() => {
@@ -103,8 +116,21 @@ export default function Referee({ session, setTopbarBack, seccionInicial }) {
       setJornadaActiva(null);
       // Si vamos a "unidades", limpiamos también la unidad activa para verlas todas como tarjetas.
       if (seccionInicial === "unidades") setUnidadActiva(null);
+      // Al cambiar de sección, soltamos también la nav de fichas para que vuelva al inicio.
+      if (seccionInicial !== "fichas") { setUnidadFichas(null); setLigaFichas(null); }
     }
   }, [seccionInicial]);
+
+  // ── Auto-salto en sección "fichas": si solo hay 1 unidad con 1 liga, entrar directo ──
+  useEffect(() => {
+    if (seccion !== "fichas") return;
+    if (unidadFichas || ligaFichas) return;
+    const usables = unidades.filter(u => u.confirmado && u.ligas.length > 0);
+    if (usables.length === 1) {
+      setUnidadFichas(usables[0]);
+      if (usables[0].ligas.length === 1) setLigaFichas(usables[0].ligas[0]);
+    }
+  }, [seccion, unidades, unidadFichas, ligaFichas]);
 
   // ── CARGAR UNIDADES DEL ÁRBITRO ───────────────────────────────
   // Devuelve [{cancha_id, nombre, direccion, logo_url, color_marca, acceso_total, confirmado, ligas:[...]}]
@@ -277,6 +303,10 @@ export default function Referee({ session, setTopbarBack, seccionInicial }) {
   const estaPresente = (jugadorId) => asistencia.includes(jugadorId);
 
   const agregarGoleador = (jugador, equipo, equipoNombre) => {
+    // Si un jugador anota, lógicamente jugó: lo marcamos presente automáticamente.
+    // Usamos updater de setAsistencia para evitar pisar otros toggles del mismo render.
+    setAsistencia(prev => prev.includes(jugador.jugador_id) ? prev : [...prev, jugador.jugador_id]);
+
     const yaExiste = goleadores.findIndex(g => g.jugador_id === jugador.jugador_id && g.equipo === equipo);
     if (yaExiste >= 0) {
       const updated = [...goleadores];
@@ -336,12 +366,15 @@ export default function Referee({ session, setTopbarBack, seccionInicial }) {
       if (cerrarFicha) {
         setCerrada(true);
         showToast("Ficha cerrada y guardada ✓");
+        // refrescar la lista para que la tarjeta del partido refleje "Cerrada"
+        if (ligaActiva?.id) cargarPartidosDeLiga(ligaActiva);
+        // volver a la lista de partidos para elegir otra ficha de la misma jornada
+        setPartidoActivo(null);
       } else {
         showToast("Ficha guardada ✓");
+        await cargarFicha(partidoActivo);
+        if (ligaActiva?.id) cargarPartidosDeLiga(ligaActiva);
       }
-      await cargarFicha(partidoActivo);
-      // refrescar partidosLiga para reflejar el estado nuevo en la lista
-      if (ligaActiva?.id) cargarPartidosDeLiga(ligaActiva);
     } catch (e) { showToast(e.message, "err"); }
     setGuardando(false);
   };
@@ -449,6 +482,69 @@ export default function Referee({ session, setTopbarBack, seccionInicial }) {
               guardando={guardando}
               onGuardarBorrador={() => guardarFicha(false)}
               onAbrirCerrar={() => setModalCerrar(true)}
+            />
+          )}
+        </>
+      )}
+
+      {/* ──────────────────────────────────── SECCIÓN "FICHAS" ──────── */}
+      {/* Acceso solo-lectura al generador: el árbitro puede visualizar
+          las fichas de su unidad e imprimirlas / guardarlas como PDF. */}
+      {seccion === "fichas" && (
+        <>
+          {!ligaFichas && (
+            <div style={s.header}>
+              <h2 style={s.title}>Fichas 📄</h2>
+              <p style={s.sub}>
+                {!unidadFichas ? "Selecciona la unidad de la que quieres imprimir fichas" : "Selecciona el torneo"}
+              </p>
+            </div>
+          )}
+
+          {loading && !unidadFichas ? (
+            <div style={s.empty}><div style={s.spinner} /></div>
+          ) : !unidadFichas ? (
+            <SeleccionUnidad
+              unidades={confirmadas}
+              onSelect={(u) => { setUnidadFichas(u); if (u.ligas.length === 1) setLigaFichas(u.ligas[0]); }}
+            />
+          ) : !ligaFichas ? (
+            <SeleccionLiga
+              unidad={unidadFichas}
+              onSelect={(l) => setLigaFichas(l)}
+            />
+          ) : (
+            <FichaGenerator
+              session={session}
+              liga={ligaFichas}
+              miUnidad={unidadFichas ? { nombre: unidadFichas.nombre, logo_url: unidadFichas.logo_url } : null}
+              readOnly
+              headerExtra={
+                unidadFichas.ligas.length > 1 ? (
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: "var(--text-sub)", display: "block", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.7 }}>
+                      Torneo
+                    </label>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {unidadFichas.ligas.map(l => (
+                        <button key={l.id}
+                          onClick={() => setLigaFichas(l)}
+                          style={{
+                            padding: "8px 14px", cursor: "pointer", fontSize: 13,
+                            border: `2px solid ${ligaFichas?.id === l.id ? "#4f8f2f" : "var(--border)"}`,
+                            borderRadius: 10,
+                            background: ligaFichas?.id === l.id ? "#f0fdf4" : "white",
+                            color: ligaFichas?.id === l.id ? "#4f8f2f" : "var(--text)",
+                            fontWeight: ligaFichas?.id === l.id ? 700 : 500,
+                            minHeight: 44,
+                          }}>
+                          🏆 {l.nombre}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null
+              }
             />
           )}
         </>
@@ -574,6 +670,25 @@ function SeleccionLiga({ unidad, onSelect }) {
 }
 
 // PASO 3: LISTA POR JORNADAS
+// Logo del club para las tarjetas de partido. Si no hay escudo_url, dibuja un
+// cuadrado del color del equipo con la inicial — coherente con el patrón de
+// LeagueAdmin → Equipos.
+function LogoEquipo({ equipo, size = 32 }) {
+  const color = equipo?.color_playera || "#6b7280";
+  const inicial = (equipo?.nombre || "?").trim().charAt(0).toUpperCase();
+  if (equipo?.escudo_url) {
+    return (
+      <img src={equipo.escudo_url} alt={equipo.nombre || "equipo"}
+        style={{ width: size, height: size, borderRadius: 8, objectFit: "cover", background: "#fff", border: `1.5px solid ${color}`, flexShrink: 0 }} />
+    );
+  }
+  return (
+    <div style={{ width: size, height: size, borderRadius: 8, background: color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: Math.round(size * 0.45), flexShrink: 0, border: `1.5px solid ${color}` }}>
+      {inicial}
+    </div>
+  );
+}
+
 function ListaJornadas({ liga, partidos, jornadaActiva, setJornadaActiva, onSelectPartido }) {
   // Agrupa por jornada (objeto jornada extraído del primer partido de la jornada)
   const grupos = {};
@@ -639,23 +754,35 @@ function ListaJornadas({ liga, partidos, jornadaActiva, setJornadaActiva, onSele
               </div>
               <div style={s.vsRow}>
                 <div style={s.equipoVs}>
-                  <JerseySVG diseno={p.equipos_local?.diseno_camiseta || "solido"} color1={p.equipos_local?.color_playera || "#666"} color2={p.equipos_local?.color_camiseta_2 || "#fff"} escudoUrl={p.equipos_local?.escudo_url || null} size={32} />
+                  <LogoEquipo equipo={p.equipos_local} size={48} />
                   <span style={s.equipoVsNombre}>{p.equipos_local?.nombre}</span>
                 </div>
                 <div style={s.vsLabel}>VS</div>
                 <div style={{ ...s.equipoVs, justifyContent: "flex-end" }}>
                   <span style={s.equipoVsNombre}>{p.equipos_visitante?.nombre}</span>
-                  <JerseySVG diseno={p.equipos_visitante?.diseno_camiseta || "solido"} color1={p.equipos_visitante?.color_playera || "#666"} color2={p.equipos_visitante?.color_camiseta_2 || "#fff"} escudoUrl={p.equipos_visitante?.escudo_url || null} size={32} />
+                  <LogoEquipo equipo={p.equipos_visitante} size={48} />
                 </div>
               </div>
+              {/* Footer en una sola fila: estado a la izquierda, CTA chica a la derecha.
+                  El click en la tarjeta entera sigue funcionando como atajo. */}
               <div style={s.partidoBottom}>
                 {fichaCerrada ? (
-                  <span style={{ ...s.statusBadge, background: "#dcfce7", color: "#15803d", border: "1px solid #bbf7d0" }}>🔒 Cerrada — ver ficha</span>
+                  <span style={{ ...s.statusBadge, background: "#dcfce7", color: "#15803d", border: "1px solid #bbf7d0" }}>🔒 Cerrada</span>
                 ) : tieneficha ? (
-                  <span style={{ ...s.statusBadge, background: "#dbeafe", color: "#1d4ed8", border: "1px solid #bfdbfe" }}>📝 Borrador guardado</span>
+                  <span style={{ ...s.statusBadge, background: "#dbeafe", color: "#1d4ed8", border: "1px solid #bfdbfe" }}>📝 Borrador</span>
                 ) : (
                   <span style={{ ...s.statusBadge, background: "#fef9c3", color: "#854d0e", border: "1px solid #fde68a" }}>⏳ Pendiente</span>
                 )}
+                <button
+                  onClick={(e) => { e.stopPropagation(); onSelectPartido(p); }}
+                  style={{
+                    ...s.partidoCTA,
+                    background: fichaCerrada ? "#f3f4f6" : tieneficha ? "#1d4ed8" : GREEN,
+                    color: fichaCerrada ? "#374151" : "#fff",
+                    border: fichaCerrada ? "1px solid #e5e7eb" : "none",
+                  }}>
+                  {fichaCerrada ? "👁️ Ver" : tieneficha ? "✏️ Continuar" : "📝 Registrar →"}
+                </button>
               </div>
             </div>
           );
@@ -682,36 +809,42 @@ function FichaPartido({
         <div style={s.cerradaBanner}>🔒 Esta ficha está cerrada — visualización en modo solo lectura</div>
       )}
 
-      {/* CABECERA DEL PARTIDO */}
+      {/* CABECERA DEL PARTIDO — layout mobile-first:
+          fila 1: chip de torneo y jornada.
+          fila 2: equipo local | VS | equipo visitante (compacto, sin desbordar).
+          fila 3: marcador completo (− 0 + : − 0 +) centrado y a ancho completo. */}
       <div style={s.fichaHeader}>
         <div style={s.fichaLiga}>
-          <span style={{ background: "rgba(0,0,0,0.22)", color: "#fff", padding: "5px 14px", borderRadius: 99, fontSize: 13, fontWeight: 700, letterSpacing: 0.3 }}>
+          <span style={{ background: "rgba(0,0,0,0.22)", color: "#fff", padding: "5px 14px", borderRadius: 99, fontSize: 12.5, fontWeight: 700, letterSpacing: 0.3, textAlign: "center" }}>
             🏆 {partidoActivo.jornadas?.ligas?.nombre} · Jornada {partidoActivo.jornadas?.numero}
           </span>
         </div>
-        <div style={s.fichaVsGrande}>
+
+        {/* Equipos en una sola fila compacta */}
+        <div style={s.fichaEquiposRow}>
           <div style={s.fichaEquipo}>
-            <JerseySVG diseno={partidoActivo.equipos_local?.diseno_camiseta || "solido"} color1={partidoActivo.equipos_local?.color_playera || "#666"} color2={partidoActivo.equipos_local?.color_camiseta_2 || "#fff"} escudoUrl={partidoActivo.equipos_local?.escudo_url || null} size={60} />
+            <LogoEquipo equipo={partidoActivo.equipos_local} size={52} />
             <span style={s.fichaEquipoNombre}>{partidoActivo.equipos_local?.nombre}</span>
           </div>
-
-          <div style={s.marcadorBox}>
-            <div style={s.marcadorRow}>
-              <button style={s.marcadorBtn} onClick={() => !cerrada && setGolesLocal(Math.max(0, golesLocal - 1))} disabled={cerrada}>−</button>
-              <div style={s.marcadorNum}>{golesLocal}</div>
-              <button style={s.marcadorBtn} onClick={() => !cerrada && setGolesLocal(golesLocal + 1)} disabled={cerrada}>+</button>
-              <span style={s.marcadorGuion}>:</span>
-              <button style={s.marcadorBtn} onClick={() => !cerrada && setGolesVisitante(Math.max(0, golesVisitante - 1))} disabled={cerrada}>−</button>
-              <div style={s.marcadorNum}>{golesVisitante}</div>
-              <button style={s.marcadorBtn} onClick={() => !cerrada && setGolesVisitante(golesVisitante + 1)} disabled={cerrada}>+</button>
-            </div>
-            <div style={s.marcadorLabel}>Marcador final</div>
-          </div>
-
+          <div style={s.fichaVsMini}>VS</div>
           <div style={s.fichaEquipo}>
-            <JerseySVG diseno={partidoActivo.equipos_visitante?.diseno_camiseta || "solido"} color1={partidoActivo.equipos_visitante?.color_playera || "#666"} color2={partidoActivo.equipos_visitante?.color_camiseta_2 || "#fff"} escudoUrl={partidoActivo.equipos_visitante?.escudo_url || null} size={60} />
+            <LogoEquipo equipo={partidoActivo.equipos_visitante} size={52} />
             <span style={s.fichaEquipoNombre}>{partidoActivo.equipos_visitante?.nombre}</span>
           </div>
+        </div>
+
+        {/* Marcador centrado debajo */}
+        <div style={s.marcadorBox}>
+          <div style={s.marcadorRow}>
+            <button style={s.marcadorBtn} onClick={() => !cerrada && setGolesLocal(Math.max(0, golesLocal - 1))} disabled={cerrada}>−</button>
+            <div style={s.marcadorNum}>{golesLocal}</div>
+            <button style={s.marcadorBtn} onClick={() => !cerrada && setGolesLocal(golesLocal + 1)} disabled={cerrada}>+</button>
+            <span style={s.marcadorGuion}>:</span>
+            <button style={s.marcadorBtn} onClick={() => !cerrada && setGolesVisitante(Math.max(0, golesVisitante - 1))} disabled={cerrada}>−</button>
+            <div style={s.marcadorNum}>{golesVisitante}</div>
+            <button style={s.marcadorBtn} onClick={() => !cerrada && setGolesVisitante(golesVisitante + 1)} disabled={cerrada}>+</button>
+          </div>
+          <div style={s.marcadorLabel}>Marcador final</div>
         </div>
       </div>
 
@@ -1026,6 +1159,7 @@ const s = {
   // PARTIDOS
   partidoList: { display: "flex", flexDirection: "column", gap: 12 },
   partidoCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "16px 20px", cursor: "pointer", boxShadow: "0 2px 8px rgba(79,143,47,0.08)", borderTop: `3px solid ${GREEN}` },
+  partidoCTA: { padding: "8px 14px", borderRadius: 10, fontSize: 12.5, fontWeight: 800, cursor: "pointer", minHeight: 36, letterSpacing: 0.2, flexShrink: 0, transition: "transform 0.12s, box-shadow 0.12s" },
   partidoTop: { display: "flex", justifyContent: "space-between", marginBottom: 14 },
   ligaBadge: { fontSize: 12, color: "#6b7280", fontWeight: 600 },
   fechaBadge: { fontSize: 12, color: "#6b7280" },
@@ -1033,25 +1167,29 @@ const s = {
   equipoVs: { display: "flex", alignItems: "center", gap: 10, flex: 1 },
   equipoVsNombre: { fontSize: 16, fontWeight: 700, color: "#111827" },
   vsLabel: { fontSize: 12, color: "#9ca3af", fontWeight: 700, padding: "0 16px" },
-  partidoBottom: { display: "flex", justifyContent: "flex-start", alignItems: "center" },
+  partidoBottom: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 12, flexWrap: "wrap" },
   statusBadge: { fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 6 },
 
   // FICHA
   cerradaBanner: { background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 18px", color: "#ca8a04", fontSize: 13, marginBottom: 20 },
-  fichaHeader: { background: "linear-gradient(135deg, #4f8f2f 0%, #7fbf4d 100%)", borderRadius: 18, padding: "26px 28px", marginBottom: 24, boxShadow: "0 4px 16px rgba(79,143,47,0.35)" },
-  fichaLiga: { fontSize: 13, fontWeight: 700, marginBottom: 20, textAlign: "center", display: "flex", justifyContent: "center" },
-  fichaVsGrande: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20 },
-  fichaEquipo: { display: "flex", flexDirection: "column", alignItems: "center", gap: 10, flex: 1 },
-  fichaEquipoNombre: { fontSize: 14, fontWeight: 800, color: "#fff", textAlign: "center", textShadow: "0 1px 4px rgba(0,0,0,0.4)" },
-  marcadorBox: { display: "flex", flexDirection: "column", alignItems: "center", gap: 8 },
-  marcadorRow: { display: "flex", alignItems: "center", gap: 8 },
-  marcadorBtn: { width: 34, height: 34, borderRadius: 8, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.25)", color: "#fff", fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
-  marcadorNum: { width: 60, height: 60, background: "rgba(255,255,255,0.95)", border: "none", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, fontWeight: 900, color: "#111827", boxShadow: "0 2px 12px rgba(0,0,0,0.2)" },
-  marcadorGuion: { fontSize: 26, color: "rgba(255,255,255,0.4)", padding: "0 4px" },
-  marcadorLabel: { fontSize: 11, color: "rgba(255,255,255,0.55)", letterSpacing: 0.5 },
-  seccion: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "20px 24px", marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  fichaHeader: { background: "linear-gradient(135deg, #4f8f2f 0%, #7fbf4d 100%)", borderRadius: 18, padding: "20px 16px", marginBottom: 20, boxShadow: "0 4px 16px rgba(79,143,47,0.35)" },
+  fichaLiga: { fontSize: 13, fontWeight: 700, marginBottom: 16, textAlign: "center", display: "flex", justifyContent: "center" },
+  // Equipos en fila compacta, con VS chico en el centro
+  fichaEquiposRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 16 },
+  fichaVsMini: { fontSize: 12, fontWeight: 900, color: "rgba(255,255,255,0.7)", letterSpacing: 1.2, padding: "0 4px", flexShrink: 0 },
+  fichaEquipo: { display: "flex", flexDirection: "column", alignItems: "center", gap: 8, flex: 1, minWidth: 0 },
+  fichaEquipoNombre: { fontSize: 13, fontWeight: 800, color: "#fff", textAlign: "center", textShadow: "0 1px 4px rgba(0,0,0,0.4)", wordBreak: "break-word", lineHeight: 1.2 },
+  marcadorBox: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6 },
+  marcadorRow: { display: "flex", alignItems: "center", gap: 4, flexWrap: "nowrap" },
+  marcadorBtn: { width: 30, height: 36, borderRadius: 8, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.25)", color: "#fff", fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  marcadorNum: { width: 44, height: 50, background: "rgba(255,255,255,0.95)", border: "none", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, fontWeight: 900, color: "#111827", boxShadow: "0 2px 12px rgba(0,0,0,0.2)", flexShrink: 0 },
+  marcadorGuion: { fontSize: 22, color: "rgba(255,255,255,0.55)", padding: "0 2px", flexShrink: 0 },
+  marcadorLabel: { fontSize: 11, color: "rgba(255,255,255,0.7)", letterSpacing: 0.5, fontWeight: 600 },
+  seccion: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "18px 16px", marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
   seccionTitle: { fontSize: 15, fontWeight: 700, color: "#111827", marginBottom: 16 },
-  dosCol: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 },
+  // En mobile apilamos los dos equipos en columna — antes era grid 1fr 1fr y
+  // los jugadores quedaban cortados. Ahora cada equipo usa el ancho completo.
+  dosCol: { display: "flex", flexDirection: "column", gap: 18 },
   colHeader: { fontSize: 13, fontWeight: 700, color: "#111827", paddingBottom: 8, marginBottom: 6, borderBottom: "2px solid", display: "flex", justifyContent: "space-between", alignItems: "center" },
   contadorBadge: { fontSize: 11, background: "#f3f4f6", borderRadius: 6, padding: "2px 7px", color: "#6b7280", fontWeight: 700 },
   jugadorRow: { display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 8, transition: "background 0.15s" },

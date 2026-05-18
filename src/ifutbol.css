@@ -351,6 +351,64 @@ select option { background: #fff; color: var(--text); }
   font-size: 13px;
 }
 
+/* ── SLIDER VERDE GRANDE (.ifutbol-slider) ── */
+/* El thumb default del navegador es muy chico para tocarlo bien en móvil.
+   Este slider usa pista delgada gris + bolita grande verde con borde blanco,
+   pensado para ser cómodo al deslizar con el dedo. */
+input[type="range"].ifutbol-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 30px;            /* área de toque generosa, aunque el track sea delgado */
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+  padding: 0;
+  margin: 4px 0;
+}
+/* Track */
+input[type="range"].ifutbol-slider::-webkit-slider-runnable-track {
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 999px;
+}
+input[type="range"].ifutbol-slider::-moz-range-track {
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 999px;
+}
+/* Thumb (la "bolita") */
+input[type="range"].ifutbol-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--green, #4f8f2f);
+  border: 3px solid #ffffff;
+  box-shadow: 0 2px 8px rgba(79,143,47,0.45);
+  margin-top: -9px;        /* (track 8 - thumb 26)/2 para centrar */
+  cursor: grab;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+input[type="range"].ifutbol-slider::-webkit-slider-thumb:hover { transform: scale(1.08); }
+input[type="range"].ifutbol-slider::-webkit-slider-thumb:active { cursor: grabbing; transform: scale(1.15); box-shadow: 0 3px 12px rgba(79,143,47,0.55); }
+input[type="range"].ifutbol-slider::-moz-range-thumb {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--green, #4f8f2f);
+  border: 3px solid #ffffff;
+  box-shadow: 0 2px 8px rgba(79,143,47,0.45);
+  cursor: grab;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+input[type="range"].ifutbol-slider::-moz-range-thumb:hover { transform: scale(1.08); }
+input[type="range"].ifutbol-slider::-moz-range-thumb:active { cursor: grabbing; transform: scale(1.15); box-shadow: 0 3px 12px rgba(79,143,47,0.55); }
+input[type="range"].ifutbol-slider:focus { outline: none; }
+input[type="range"].ifutbol-slider:focus::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgba(79,143,47,0.20), 0 2px 8px rgba(79,143,47,0.45); }
+input[type="range"].ifutbol-slider:focus::-moz-range-thumb { box-shadow: 0 0 0 4px rgba(79,143,47,0.20), 0 2px 8px rgba(79,143,47,0.45); }
+
 /* ── RESPONSIVE ── */
 @media (max-width: 768px) {
   .hide-mobile { display: none !important; }

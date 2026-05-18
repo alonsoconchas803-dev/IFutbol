@@ -413,15 +413,15 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
         </div>
       </div>
 
-      {/* TABS */}
+      {/* Selector de torneos: arriba para elegir primero sobre cuál se trabaja */}
+      {headerExtra}
+
+      {/* TABS — quedan por debajo del selector de torneos */}
       <div className="ifutbol-tabs">
         {[["jornada","📅 Generar jornada"],["liguilla","🏆 Liguilla y Copa"],["bracket","🎯 Bracket"]].map(([key,label])=>(
           <button key={key} className={`ifutbol-tab ${tab===key?"active":""}`} onClick={()=>setTab(key)}>{label}</button>
         ))}
       </div>
-
-      {/* Selector de torneos: abajo de los tabs según el flujo deseado */}
-      {headerExtra}
 
       {loading ? <div style={{ padding:60, textAlign:"center" }}><div className="spinner"/></div> : <>
 
@@ -450,16 +450,112 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
                 </div>
                 <div style={s.field}>
                   <label style={s.label}>Duración partido: <strong>{config.duracion} min</strong></label>
-                  <input type="range" min="20" max="90" step="5" value={config.duracion} onChange={e=>setConfig({...config,duracion:+e.target.value})} style={{ width:"100%", accentColor:"var(--green)" }} />
+                  <input type="range" className="ifutbol-slider" min="20" max="90" step="5"
+                    value={config.duracion}
+                    onChange={e=>setConfig({...config,duracion:+e.target.value})} />
                 </div>
                 <div style={s.field}>
                   <label style={s.label}>Tiempo entre partidos: <strong>{config.intervalo} min</strong></label>
-                  <input type="range" min="0" max="30" step="5" value={config.intervalo} onChange={e=>setConfig({...config,intervalo:+e.target.value})} style={{ width:"100%", accentColor:"var(--green)" }} />
+                  <input type="range" className="ifutbol-slider" min="0" max="30" step="5"
+                    value={config.intervalo}
+                    onChange={e=>setConfig({...config,intervalo:+e.target.value})} />
                 </div>
                 <button className="btn btn-premium" style={{ width:"100%" }} onClick={handlePreviewJornada}>
                   Vista previa jornada {jornadasGuardadas.length+1} →
                 </button>
               </div>
+
+              {/* PREVIEW — colocada entre Configuración y Equipos activos para
+                  que el resultado aparezca justo debajo del formulario que lo
+                  generó (los Equipos activos pasan al final de la columna). */}
+              {preview && (
+                <div style={s.card}>
+                  <div style={s.previewHeader}>
+                    <div>
+                      <h3 style={{ fontSize:18, fontWeight:800, marginBottom:4 }}>Vista previa — Jornada {preview.numero}</h3>
+                      <p style={{ color:"var(--text-muted)", fontSize:13 }}>{formatFecha(config.fecha)} · {preview.partidos.length} partidos</p>
+                    </div>
+                    <button className="btn btn-ghost" onClick={()=>setPreview(null)}>✕ Descartar</button>
+                  </div>
+                  <div style={ej.hint}>
+                    👆 Edita antes de guardar: toca un equipo para sacarlo al pool de descansos; toca un equipo del pool para colocarlo en el siguiente hueco libre (horario más temprano primero). Una vez guardada, la jornada no podrá modificarse.
+                  </div>
+
+                  {Array.from({length:config.numCanchas},(_,ci)=>{
+                    // Indices originales en preview.partidos para que sacarEquipoPreview reciba el idx correcto
+                    const pcs = preview.partidos
+                      .map((p, idx) => ({ p, idx }))
+                      .filter(({ p }) => p.cancha === ci+1);
+                    if (!pcs.length) return null;
+                    return (
+                      <div key={ci} style={{ marginBottom:16 }}>
+                        <div style={s.canchaLabel}>🏟️ Cancha {ci+1}</div>
+                        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                          {pcs.map(({ p, idx }) => (
+                            <div key={idx} style={s.partidoRow}>
+                              <span style={s.hora}>{p.hora}</span>
+                              <div style={s.vsBlock}>
+                                <div style={{ ...ej.slot, ...(p.local ? {} : ej.slotVacio) }}
+                                     onClick={() => p.local && sacarEquipoPreview(idx, "local")}
+                                     title={p.local ? "Sacar este equipo al pool" : "Hueco vacío"}>
+                                  {p.local ? (
+                                    <>
+                                      <span style={{ ...ej.dot, background: p.local.color_playera || "var(--green)" }}/>
+                                      <span style={ej.eqNombre}>{p.local.nombre}</span>
+                                    </>
+                                  ) : (
+                                    <span style={ej.huecoTxt}>+ Hueco</span>
+                                  )}
+                                </div>
+                                <span style={s.vsTag}>VS</span>
+                                <div style={{ ...ej.slot, ...(p.visitante ? {} : ej.slotVacio), justifyContent: "flex-end" }}
+                                     onClick={() => p.visitante && sacarEquipoPreview(idx, "visitante")}
+                                     title={p.visitante ? "Sacar este equipo al pool" : "Hueco vacío"}>
+                                  {p.visitante ? (
+                                    <>
+                                      <span style={ej.eqNombre}>{p.visitante.nombre}</span>
+                                      <span style={{ ...ej.dot, background: p.visitante.color_playera || "#999" }}/>
+                                    </>
+                                  ) : (
+                                    <span style={ej.huecoTxt}>+ Hueco</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <div style={{ paddingTop:12, borderTop:"1px solid var(--border)" }}>
+                    <div style={s.canchaLabel}>😴 Descansa esta jornada ({preview.descansos.length})</div>
+                    {preview.descansos.length === 0 ? (
+                      <div style={ej.poolEmpty}>Sin equipos en descanso</div>
+                    ) : (
+                      <div style={ej.poolGrid}>
+                        {preview.descansos.map(d => (
+                          <button key={d.id} style={ej.poolChip} onClick={() => asignarEquipoPreview(d.id)}
+                                  title="Asignar al primer hueco disponible">
+                            <span style={{ ...ej.dot, background: d.color_playera || "#9ca3af" }}/>
+                            <span style={ej.poolChipNombre}>{d.nombre}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display:"flex", justifyContent:"flex-end", marginTop:16, gap:8, flexWrap:"wrap" }}>
+                    <button className="btn btn-ghost" onClick={handlePreviewJornada} disabled={guardando}
+                            title="Regenerar enfrentamientos automáticamente">
+                      🔄 Regenerar
+                    </button>
+                    <button className="btn btn-premium" style={{ padding:"12px 28px" }} onClick={handleGuardarJornada} disabled={guardando}>
+                      {guardando ? "Guardando..." : "💾 Guardar jornada"}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* EQUIPOS Y HISTORIAL */}
               <div style={s.card}>
@@ -486,96 +582,6 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
                 </div>
               </div>
             </div>
-
-            {/* PREVIEW */}
-            {preview && (
-              <div style={{ ...s.card, marginTop:20 }}>
-                <div style={s.previewHeader}>
-                  <div>
-                    <h3 style={{ fontSize:18, fontWeight:800, marginBottom:4 }}>Vista previa — Jornada {preview.numero}</h3>
-                    <p style={{ color:"var(--text-muted)", fontSize:13 }}>{formatFecha(config.fecha)} · {preview.partidos.length} partidos</p>
-                  </div>
-                  <button className="btn btn-ghost" onClick={()=>setPreview(null)}>✕ Descartar</button>
-                </div>
-                <div style={ej.hint}>
-                  👆 Edita antes de guardar: toca un equipo para sacarlo al pool de descansos; toca un equipo del pool para colocarlo en el siguiente hueco libre (horario más temprano primero). Una vez guardada, la jornada no podrá modificarse.
-                </div>
-
-                {Array.from({length:config.numCanchas},(_,ci)=>{
-                  // Indices originales en preview.partidos para que sacarEquipoPreview reciba el idx correcto
-                  const pcs = preview.partidos
-                    .map((p, idx) => ({ p, idx }))
-                    .filter(({ p }) => p.cancha === ci+1);
-                  if (!pcs.length) return null;
-                  return (
-                    <div key={ci} style={{ marginBottom:16 }}>
-                      <div style={s.canchaLabel}>🏟️ Cancha {ci+1}</div>
-                      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                        {pcs.map(({ p, idx }) => (
-                          <div key={idx} style={s.partidoRow}>
-                            <span style={s.hora}>{p.hora}</span>
-                            <div style={s.vsBlock}>
-                              <div style={{ ...ej.slot, ...(p.local ? {} : ej.slotVacio) }}
-                                   onClick={() => p.local && sacarEquipoPreview(idx, "local")}
-                                   title={p.local ? "Sacar este equipo al pool" : "Hueco vacío"}>
-                                {p.local ? (
-                                  <>
-                                    <span style={{ ...ej.dot, background: p.local.color_playera || "var(--green)" }}/>
-                                    <span style={ej.eqNombre}>{p.local.nombre}</span>
-                                  </>
-                                ) : (
-                                  <span style={ej.huecoTxt}>+ Hueco</span>
-                                )}
-                              </div>
-                              <span style={s.vsTag}>VS</span>
-                              <div style={{ ...ej.slot, ...(p.visitante ? {} : ej.slotVacio), justifyContent: "flex-end" }}
-                                   onClick={() => p.visitante && sacarEquipoPreview(idx, "visitante")}
-                                   title={p.visitante ? "Sacar este equipo al pool" : "Hueco vacío"}>
-                                {p.visitante ? (
-                                  <>
-                                    <span style={ej.eqNombre}>{p.visitante.nombre}</span>
-                                    <span style={{ ...ej.dot, background: p.visitante.color_playera || "#999" }}/>
-                                  </>
-                                ) : (
-                                  <span style={ej.huecoTxt}>+ Hueco</span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-
-                <div style={{ paddingTop:12, borderTop:"1px solid var(--border)" }}>
-                  <div style={s.canchaLabel}>😴 Descansa esta jornada ({preview.descansos.length})</div>
-                  {preview.descansos.length === 0 ? (
-                    <div style={ej.poolEmpty}>Sin equipos en descanso</div>
-                  ) : (
-                    <div style={ej.poolGrid}>
-                      {preview.descansos.map(d => (
-                        <button key={d.id} style={ej.poolChip} onClick={() => asignarEquipoPreview(d.id)}
-                                title="Asignar al primer hueco disponible">
-                          <span style={{ ...ej.dot, background: d.color_playera || "#9ca3af" }}/>
-                          <span style={ej.poolChipNombre}>{d.nombre}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ display:"flex", justifyContent:"flex-end", marginTop:16, gap:8, flexWrap:"wrap" }}>
-                  <button className="btn btn-ghost" onClick={handlePreviewJornada} disabled={guardando}
-                          title="Regenerar enfrentamientos automáticamente">
-                    🔄 Regenerar
-                  </button>
-                  <button className="btn btn-premium" style={{ padding:"12px 28px" }} onClick={handleGuardarJornada} disabled={guardando}>
-                    {guardando ? "Guardando..." : "💾 Guardar jornada"}
-                  </button>
-                </div>
-              </div>
-            )}
 
           </div>
         )}

@@ -63,7 +63,25 @@ const PRINT_CSS = `
 // ─────────────────────────────────────────────────────────────────
 // FICHA INDIVIDUAL
 // ─────────────────────────────────────────────────────────────────
-function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, isLast }) {
+// Logo del equipo para el marcador. Si no tiene escudo_url, muestra un círculo
+// con el color del equipo y la inicial — así nunca queda un hueco vacío.
+function EscudoEquipo({ equipo, size = 14 }) {
+  const color = equipo?.color_playera || "#6b7280";
+  const inicial = (equipo?.nombre || "?").trim().charAt(0).toUpperCase();
+  if (equipo?.escudo_url) {
+    return (
+      <img src={equipo.escudo_url} alt={equipo.nombre}
+        style={{ width: `${size}mm`, height: `${size}mm`, borderRadius: "1.5mm", objectFit: "cover", background: "#fff", border: `0.5pt solid ${color}`, flexShrink: 0 }} />
+    );
+  }
+  return (
+    <div style={{ width: `${size}mm`, height: `${size}mm`, borderRadius: "1.5mm", background: color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: `${Math.round(size * 0.55)}pt`, flexShrink: 0 }}>
+      {inicial}
+    </div>
+  );
+}
+
+function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, miUnidad, isLast }) {
   const jornada = partido.jornadas;
   const eqL = partido.equipos_local;
   const eqV = partido.equipos_visitante;
@@ -147,27 +165,49 @@ function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, is
       flexDirection: "column",
     }}>
 
-      {/* ── ENCABEZADO ── */}
+      {/* ── ENCABEZADO ──
+          Izquierda: logo de la unidad.
+          Centro: nombre de la unidad (destacado) + nombre del torneo (chico).
+          Derecha: bloque de jornada/fecha/cancha, pegado al logo de iFutbol. */}
       <div style={{ display: "flex", background: "white", color: "#111827", alignItems: "stretch", borderBottom: "2.5pt solid #4f8f2f" }}>
-        <div style={{ padding: "3mm 4mm", display: "flex", alignItems: "center", gap: "2mm", borderRight: "0.5pt solid #e5e7eb", flexShrink: 0 }}>
-          <IFutbolLogo color="#4f8f2f" height={14} />
+        {/* Logo de la unidad (con fallback si no tiene logo cargado) */}
+        <div style={{ padding: "2mm 4mm", display: "flex", alignItems: "center", justifyContent: "center", borderRight: "0.5pt solid #e5e7eb", flexShrink: 0, width: "16mm" }}>
+          {miUnidad?.logo_url ? (
+            <img src={miUnidad.logo_url} alt={miUnidad.nombre || "Unidad"}
+              style={{ maxWidth: "14mm", maxHeight: "14mm", objectFit: "contain" }} />
+          ) : (
+            <span style={{ fontSize: "12pt" }}>🏟️</span>
+          )}
         </div>
+        {/* Bloque central: unidad arriba (destacada), torneo abajo */}
         <div style={{ flex: 1, padding: "2.5mm 4mm" }}>
-          <div style={{ fontSize: "8.5pt", fontWeight: 800, lineHeight: 1.2, color: "#111827" }}>{liga?.nombre}</div>
-          <div style={{ fontSize: "7pt", color: "#6b7280", marginTop: "0.5mm" }}>
-            {liga?.canchas?.nombre || "Unidad Deportiva"}
+          <div style={{ fontSize: "9.5pt", fontWeight: 900, lineHeight: 1.2, color: "#111827", letterSpacing: -0.2 }}>
+            {miUnidad?.nombre || liga?.canchas?.nombre || "Unidad Deportiva"}
+          </div>
+          <div style={{ fontSize: "7pt", color: "#6b7280", marginTop: "0.8mm", fontWeight: 600 }}>
+            🏆 {liga?.nombre}
           </div>
         </div>
-        <div style={{ padding: "2.5mm 4mm", textAlign: "right", borderLeft: "0.5pt solid #e5e7eb", flexShrink: 0 }}>
+        {/* Bloque jornada (pegado al logo iFutbol).
+            Sin borderLeft propio: la única línea visible será la que separa
+            la jornada del logo iFutbol (el borderLeft del bloque siguiente). */}
+        <div style={{ padding: "2.5mm 3mm", textAlign: "right", flexShrink: 0 }}>
           <div style={{ fontSize: "8pt", fontWeight: 800, color: "#3B6D11" }}>Jornada {jornada?.numero ?? "—"}</div>
           <div style={{ fontSize: "6.5pt", color: "#6b7280", marginTop: "0.5mm" }}>📅 {fmtFecha(jornada?.fecha)}</div>
           <div style={{ fontSize: "6.5pt", color: "#6b7280" }}>⏰ {fmtHora(partido.hora)}  ·  Campo {partido.cancha_numero ?? "—"}</div>
         </div>
+        {/* Logo iFutbol al extremo derecho */}
+        <div style={{ padding: "3mm 4mm", display: "flex", alignItems: "center", borderLeft: "0.5pt solid #e5e7eb", flexShrink: 0 }}>
+          <IFutbolLogo color="#4f8f2f" height={14} />
+        </div>
       </div>
 
-      {/* ── MARCADOR ── */}
+      {/* ── MARCADOR ──
+          Logo a los extremos (izquierda y derecha) con el nombre del equipo
+          al lado, mirando hacia el centro donde está el marcador. */}
       <div style={{ display: "flex", alignItems: "center", padding: "4mm 6mm", borderBottom: "0.8pt solid #e5e7eb", gap: "3mm", background: "white" }}>
-        <div style={{ flex: 1, textAlign: "right" }}>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "3mm", minWidth: 0 }}>
+          <EscudoEquipo equipo={eqL} />
           <span style={{ fontSize: "10pt", fontWeight: 900, color: "#111827" }}>{eqL?.nombre}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "1.5mm", flexShrink: 0 }}>
@@ -175,8 +215,9 @@ function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, is
           <span style={{ fontSize: "14pt", fontWeight: 900, color: "#111827", lineHeight: 1 }}>:</span>
           <span style={{ border: "1.5pt solid #111827", width: "13mm", height: "13mm", display: "inline-block", borderRadius: "2mm" }} />
         </div>
-        <div style={{ flex: 1, textAlign: "left" }}>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: "3mm", minWidth: 0 }}>
           <span style={{ fontSize: "10pt", fontWeight: 900, color: "#111827" }}>{eqV?.nombre}</span>
+          <EscudoEquipo equipo={eqV} />
         </div>
       </div>
 
@@ -253,7 +294,7 @@ function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, is
 // ─────────────────────────────────────────────────────────────────
 // COMPONENTE PRINCIPAL
 // ─────────────────────────────────────────────────────────────────
-export default function FichaGenerator({ session, liga, miUnidad, headerExtra }) {
+export default function FichaGenerator({ session, liga, miUnidad, headerExtra, readOnly = false }) {
   const [jornadas,    setJornadas]   = useState([]);
   const [jornadaSel,  setJornadaSel] = useState(null);
   const [resumen,     setResumen]    = useState([]);   // partidos + ficha (siempre auto-cargados)
@@ -459,7 +500,7 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra })
 
             {/* Lista de partidos */}
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
-              {resumen.map(p => <PartidoCard key={p.id} partido={p} onVerFicha={setFichaModalPartido} />)}
+              {resumen.map(p => <PartidoCard key={p.id} partido={p} onVerFicha={setFichaModalPartido} readOnly={readOnly} />)}
             </div>
           </>
         )}
@@ -509,21 +550,31 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra })
               jugadoresLocal={f.jugadoresLocal}
               jugadoresVisitante={f.jugadoresVisitante}
               liga={liga}
+              miUnidad={miUnidad}
               isLast={i === fichasData.length - 1}
             />
           ))}
         </div>
       )}
 
-      {/* MODAL DE EDICIÓN DE FICHA — el admin de unidad puede corregir cualquier ficha cerrada */}
+      {/* MODAL DE FICHA — admin de unidad edita; árbitro (readOnly) solo consulta */}
       {fichaModalPartido && (
-        <FichaEditorModal
-          partido={fichaModalPartido}
-          token={token}
-          liga={liga}
-          onClose={() => setFichaModalPartido(null)}
-          onGuardado={() => { setFichaModalPartido(null); cargarResumenJornada(); }}
-        />
+        readOnly ? (
+          <FichaDetalleModal
+            partido={fichaModalPartido}
+            token={token}
+            liga={liga}
+            onClose={() => setFichaModalPartido(null)}
+          />
+        ) : (
+          <FichaEditorModal
+            partido={fichaModalPartido}
+            token={token}
+            liga={liga}
+            onClose={() => setFichaModalPartido(null)}
+            onGuardado={() => { setFichaModalPartido(null); cargarResumenJornada(); }}
+          />
+        )
       )}
     </div>
   );
@@ -532,7 +583,7 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra })
 // ─────────────────────────────────────────────────────────────────
 // TARJETA DE PARTIDO (resumen breve, estilo "partido")
 // ─────────────────────────────────────────────────────────────────
-function PartidoCard({ partido, onVerFicha }) {
+function PartidoCard({ partido, onVerFicha, readOnly = false }) {
   const f = partido.ficha;
   const cerrada = !!f?.cerrada;
   const eqL = partido.equipos_local;
@@ -579,7 +630,7 @@ function PartidoCard({ partido, onVerFicha }) {
 
       {cerrada && (
         <button style={hs.btnVerFicha} onClick={() => onVerFicha(partido)}>
-          ✏️ Modificar ficha
+          {readOnly ? "👁️ Ver ficha" : "✏️ Modificar ficha"}
         </button>
       )}
     </div>

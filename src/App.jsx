@@ -76,6 +76,7 @@ const MENU = {
     { icon:"📜", label:"Registro de acciones", key:"auditoria" },
   ],
   league_admin: [
+    { icon:"🏆", label:"Torneos",    key:"torneos" },
     { icon:"👕", label:"Equipos",    key:"equipos" },
     { icon:"👥", label:"Jugadores",  key:"jugadores" },
     { icon:"📅", label:"Calendario", key:"calendario" },
@@ -86,6 +87,7 @@ const MENU = {
   ],
   referee: [
     { icon:"🟡", label:"Mis Partidos", key:"partidos" },
+    { icon:"📄", label:"Fichas",       key:"fichas" },
     { icon:"🏟️", label:"Mis Unidades", key:"unidades" },
   ],
   player: [
@@ -281,8 +283,8 @@ function DashboardLayout({ session, userRole, jugadorData, displayName, onLogout
   const [activeSection, setActiveSection] = useState(seccionInicial || menuItems[0]?.key || "panel");
 
   const SUPER_MAP  = { canchas:"canchas", ligas:"ligas", equipos:"equipos", stats:"stats", solicitudes:"solicitudes", resultados:"resultados", auditoria:"auditoria" };
-  const LEAGUE_MAP = { equipos:"equipos", jugadores:"jugadores", calendario:"calendario", arbitros:"arbitros", fichas:"fichas", resultados:"resultados", personalizar:"personalizar" };
-  const REFEREE_MAP = { partidos:"partidos", unidades:"unidades" };
+  const LEAGUE_MAP = { torneos:"torneos", equipos:"equipos", jugadores:"jugadores", calendario:"calendario", arbitros:"arbitros", fichas:"fichas", resultados:"resultados", personalizar:"personalizar" };
+  const REFEREE_MAP = { partidos:"partidos", fichas:"fichas", unidades:"unidades" };
   const PLAYER_MAP = { perfil:"perfil", ligas:"ligas", estadisticas:"estadisticas" };
 
   const renderContent = () => {
@@ -1324,15 +1326,45 @@ function RegisterPlayerModal({ onClose, showToast, onLogin }) {
         <ModalHeader title="Crear cuenta de jugador" subtitle="Tu número de afiliado se genera automáticamente" onClose={onClose}/>
         {error&&<div style={m.err}>⚠️ {error}</div>}
         <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:18,background:"var(--bg)",borderRadius:12,padding:14 }}>
-          <div style={{ width:60,height:60,borderRadius:"50%",background:"var(--border)",overflow:"hidden",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:26 }}>
-            {fotoPreview?<img src={fotoPreview} style={{ width:"100%",height:"100%",objectFit:"cover" }} alt=""/>:"📷"}
+          <div style={{ position:"relative", width:60, height:60, flexShrink:0 }}>
+            <div style={{ width:60,height:60,borderRadius:"50%",background:"var(--border)",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26 }}>
+              {fotoPreview?<img src={fotoPreview} style={{ width:"100%",height:"100%",objectFit:"cover" }} alt=""/>:"📷"}
+            </div>
+            {fotoPreview && (
+              <span title="Foto cargada"
+                style={{ position:"absolute", bottom:-2, right:-2, width:20, height:20, borderRadius:"50%", background:"#16a34a", color:"#fff", fontSize:11, fontWeight:900, display:"flex", alignItems:"center", justifyContent:"center", border:"2px solid #fff", boxShadow:"0 2px 6px rgba(0,0,0,0.18)" }}>
+                ✓
+              </span>
+            )}
           </div>
-          <div>
-            <label style={{ display:"inline-block",background:"white",border:"1px solid var(--border)",borderRadius:8,padding:"6px 12px",color:"var(--text-sub)",fontSize:13,cursor:"pointer",marginBottom:3 }}>
-              Subir foto de rostro *
-              <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{const f=e.target.files[0];setFotoPreview(URL.createObjectURL(f));}}/>
-            </label>
-            <p style={{ fontSize:11,color:"var(--text-muted)",margin:0 }}>Foto de cédula, perfil y estadísticas</p>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+              <label style={{ display:"inline-block",background:"white",border:"1px solid var(--border)",borderRadius:8,padding:"6px 12px",color:"var(--text-sub)",fontSize:13,cursor:"pointer" }}>
+                {fotoPreview ? "Cambiar foto" : "Subir foto de rostro *"}
+                <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  if (typeof fotoPreview === "string" && fotoPreview.startsWith("blob:")) URL.revokeObjectURL(fotoPreview);
+                  setFotoPreview(URL.createObjectURL(f));
+                  showToast && showToast(`Foto "${f.name}" cargada ✓`);
+                }}/>
+              </label>
+              {fotoPreview && (
+                <button type="button"
+                  style={{ background:"transparent",border:"1px solid #fecaca",color:"#dc2626",borderRadius:8,padding:"5px 10px",fontSize:11.5,fontWeight:600,cursor:"pointer" }}
+                  onClick={()=>{
+                    if (typeof fotoPreview === "string" && fotoPreview.startsWith("blob:")) URL.revokeObjectURL(fotoPreview);
+                    setFotoPreview(null);
+                  }}>
+                  ✕ Quitar
+                </button>
+              )}
+            </div>
+            {fotoPreview ? (
+              <p style={{ fontSize:11,color:"#16a34a",margin:"4px 0 0",fontWeight:600 }}>✓ Foto lista para enviar.</p>
+            ) : (
+              <p style={{ fontSize:11,color:"var(--text-muted)",margin:"4px 0 0" }}>Foto de cédula, perfil y estadísticas</p>
+            )}
           </div>
         </div>
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px" }}>
@@ -1402,21 +1434,44 @@ function RegisterStaffModal({ onClose, showToast }) {
     setLoading(false);
   };
 
-  if (success) return (
-    <div className="ifutbol-overlay" onClick={onClose}>
-      <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:360,textAlign:"center" }}>
-        <div style={{ fontSize:52,marginBottom:14 }}>📬</div>
-        <h3 style={{ fontSize:22,fontWeight:800,marginBottom:8 }}>Confirma tu correo</h3>
-        <p style={{ color:"var(--text-sub)",marginBottom:24 }}>Te enviamos un enlace a <b>{form.email}</b>. Ábrelo y haz click para que tu solicitud llegue al administrador. Revisa también la carpeta de spam.</p>
-        <button className="btn btn-premium" style={{ width:"100%" }} onClick={onClose}>Entendido →</button>
+  if (success) {
+    const esArbitro = form.tipo === "referee";
+    const rolLabel = esArbitro ? "árbitro" : "administrador de unidad";
+    return (
+      <div className="ifutbol-overlay" onClick={onClose}>
+        <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:440 }}>
+          <div style={{ textAlign:"center", marginBottom:18 }}>
+            <div style={{ fontSize:52, marginBottom:10 }}>📬</div>
+            <h3 style={{ fontSize:22, fontWeight:800, marginBottom:6 }}>Confirma tu correo para continuar</h3>
+            <p style={{ color:"var(--text-sub)", fontSize:13.5, lineHeight:1.5, margin:0 }}>
+              Tu cuenta de <b>{rolLabel}</b> está casi lista. Aún no puedes iniciar sesión: primero confirma tu correo para que tu solicitud quede activa.
+            </p>
+          </div>
+
+          {/* Pasos del flujo: deja claro por qué importa confirmar el correo */}
+          <div style={{ background:"var(--bg)", border:"1px solid var(--border)", borderRadius:12, padding:"14px 14px 6px", marginBottom:16 }}>
+            <Step n={1} title="Abre el correo que te enviamos" desc={<>Va dirigido a <b>{form.email}</b>. Si no lo ves, revisa la carpeta de spam o promociones.</>} />
+            <Step n={2} title="Haz click en el enlace de confirmación" desc="Esto verifica que el correo es tuyo. Solo cuando lo confirmes, tu solicitud entrará en revisión." />
+            <Step n={3} title="Espera la aprobación de tu solicitud" desc={esArbitro
+              ? "Una vez aprobada, tendrás acceso a la unidad y a los torneos en los que vas a arbitrar."
+              : "Una vez aprobada, tendrás acceso a tu unidad deportiva."} />
+            <Step n={4} title="Inicia sesión" desc="Cuando tu solicitud sea aprobada, podrás entrar con el correo y la contraseña que registraste." last />
+          </div>
+
+          <p style={{ fontSize:12, color:"#92400e", background:"#fffbeb", border:"1px solid #fde68a", padding:"8px 12px", borderRadius:8, marginBottom:16, lineHeight:1.45 }}>
+            ⚠️ Si no confirmas el correo, tu solicitud <b>no se procesará</b>.
+          </p>
+
+          <button className="btn btn-premium" style={{ width:"100%" }} onClick={onClose}>Entendido →</button>
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
 
   return (
     <div className="ifutbol-overlay" onClick={onClose}>
       <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:420 }}>
-        <ModalHeader title="Solicitud de registro" subtitle="Tu solicitud será revisada por el administrador" onClose={onClose}/>
+        <ModalHeader title="Solicitud de registro" subtitle="Tu solicitud quedará pendiente de aprobación" onClose={onClose}/>
         {error&&<div style={m.err}>⚠️ {error}</div>}
         <Field label="Nombre completo *"><input className="form-input" type="text" placeholder="Juan Pérez" value={form.nombre_completo} onChange={e=>setForm({...form,nombre_completo:toTitleCase(e.target.value)})}/></Field>
         <div style={{ marginBottom:16 }}>
@@ -1452,6 +1507,21 @@ function ModalHeader({ title, subtitle, onClose }) {
 
 function Field({ label, children }) {
   return <div style={{ marginBottom:16 }}><label className="form-label">{label}</label>{children}</div>;
+}
+
+// Paso numerado para flujos guiados (modal post-registro, etc.)
+function Step({ n, title, desc, last = false }) {
+  return (
+    <div style={{ display:"flex", gap:12, paddingBottom: last ? 14 : 14, position:"relative" }}>
+      <div style={{ flexShrink:0, width:28, height:28, borderRadius:"50%", background:"var(--green)", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:13, boxShadow:"0 2px 6px rgba(79,143,47,0.35)" }}>
+        {n}
+      </div>
+      <div style={{ flex:1, minWidth:0, paddingTop:2 }}>
+        <div style={{ fontSize:13.5, fontWeight:700, color:"var(--text)", marginBottom:3 }}>{title}</div>
+        <div style={{ fontSize:12.5, color:"var(--text-sub)", lineHeight:1.45 }}>{desc}</div>
+      </div>
+    </div>
+  );
 }
 
 function Avatar({ initials, size=38 }) {

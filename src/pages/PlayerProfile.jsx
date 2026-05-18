@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import JerseySVG, { JerseyDesignPicker } from "../components/JerseySVG";
 import { toTitleCase } from "../App";
+import { uploadFile } from "../lib/storage";
+import ColorPicker from "../components/ColorPicker";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -42,21 +44,6 @@ const db = async (path, token, options = {}) => {
     throw new Error(err.message || "Error");
   }
   return res.status === 204 ? null : res.json();
-};
-
-const uploadFile = async (bucket, path, file, token) => {
-  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`, {
-    method: "POST",
-    headers: {
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${token}`,
-      "Content-Type": file.type,
-      "x-upsert": "true",
-    },
-    body: file,
-  });
-  if (!res.ok) throw new Error("Error al subir foto");
-  return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
 };
 
 const POSICIONES = ["Portero", "Defensa", "Mediocampista", "Delantero"];
@@ -211,8 +198,11 @@ export default function PlayerProfile({ session, seccionInicial = "perfil" }) {
   const handleFotoChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    // Revoca el blob anterior para no acumular URLs en memoria.
+    if (typeof fotoPreview === "string" && fotoPreview.startsWith("blob:")) URL.revokeObjectURL(fotoPreview);
     setFotoFile(file);
     setFotoPreview(URL.createObjectURL(file));
+    showToast(`Foto "${file.name}" cargada ✓ se guardará al confirmar`);
   };
 
   // ── PANEL DE CAPITÁN ──────────────────────────────────────────
@@ -264,8 +254,16 @@ export default function PlayerProfile({ session, seccionInicial = "perfil" }) {
   const handleTarjetaEscudoChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (typeof tarjetaEscudoPreview === "string" && tarjetaEscudoPreview.startsWith("blob:")) URL.revokeObjectURL(tarjetaEscudoPreview);
     setTarjetaEscudoFile(file);
     setTarjetaEscudoPreview(URL.createObjectURL(file));
+    showToast(`Logo "${file.name}" cargado ✓ se guardará con la tarjeta`);
+  };
+
+  const quitarTarjetaEscudo = () => {
+    if (typeof tarjetaEscudoPreview === "string" && tarjetaEscudoPreview.startsWith("blob:")) URL.revokeObjectURL(tarjetaEscudoPreview);
+    setTarjetaEscudoFile(null);
+    setTarjetaEscudoPreview(null);
   };
 
   const guardarTarjetaEquipo = async () => {
@@ -615,6 +613,13 @@ export default function PlayerProfile({ session, seccionInicial = "perfil" }) {
                       📷
                       <input type="file" accept="image/*" onChange={handleFotoChange} style={{ display: "none" }} />
                     </label>
+                  )}
+                  {/* Check verde cuando la foto es nueva (blob) y aún no se guardó */}
+                  {editando && typeof fotoPreview === "string" && fotoPreview.startsWith("blob:") && (
+                    <span title="Foto lista. Se guardará al confirmar."
+                      style={{ position:"absolute", top:-2, right:-2, width:22, height:22, borderRadius:"50%", background:"#16a34a", color:"#fff", fontSize:12, fontWeight:900, display:"flex", alignItems:"center", justifyContent:"center", border:"2px solid #fff", boxShadow:"0 2px 6px rgba(0,0,0,0.18)" }}>
+                      ✓
+                    </span>
                   )}
                 </div>
               </div>
@@ -1012,12 +1017,26 @@ export default function PlayerProfile({ session, seccionInicial = "perfil" }) {
                 escudoUrl={tarjetaEscudoPreview || null}
                 size={72}
               />
-              <div style={{ flex: 1 }}>
-                <label style={s.uploadLabelCap}>
-                  📁 Subir logo del equipo
-                  <input type="file" accept="image/*" onChange={handleTarjetaEscudoChange} style={{ display: "none" }} />
-                </label>
-                <p style={{ color: "#9ca3af", fontSize: 11, marginTop: 6 }}>PNG o JPG. Aparece en la camiseta.</p>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <label style={s.uploadLabelCap}>
+                    📁 {tarjetaEscudoPreview ? "Cambiar logo" : "Subir logo del equipo"}
+                    <input type="file" accept="image/*" onChange={handleTarjetaEscudoChange} style={{ display: "none" }} />
+                  </label>
+                  {tarjetaEscudoPreview && (
+                    <button type="button" onClick={quitarTarjetaEscudo}
+                      style={{ background: "transparent", border: "1px solid #fecaca", color: "#dc2626", borderRadius: 8, padding: "5px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>
+                      ✕ Quitar
+                    </button>
+                  )}
+                </div>
+                {typeof tarjetaEscudoPreview === "string" && tarjetaEscudoPreview.startsWith("blob:") ? (
+                  <p style={{ color: "#16a34a", fontSize: 11.5, marginTop: 6, fontWeight: 600 }}>
+                    ✓ Logo listo. Se subirá al guardar.
+                  </p>
+                ) : (
+                  <p style={{ color: "#9ca3af", fontSize: 11, marginTop: 6 }}>PNG o JPG. Aparece en la camiseta.</p>
+                )}
               </div>
             </div>
 
@@ -1033,28 +1052,20 @@ export default function PlayerProfile({ session, seccionInicial = "perfil" }) {
 
             <div style={s.field}>
               <label style={s.label}>Color principal</label>
-              <div style={s.colorGridCap}>
-                {COLORES_CAMISETA.map(c => (
-                  <div key={c} onClick={() => setTarjetaForm({ ...tarjetaForm, color_playera: c })}
-                    style={{ ...s.colorDotCap, background: c, boxShadow: tarjetaForm.color_playera === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none" }} />
-                ))}
-                <input type="color" value={tarjetaForm.color_playera}
-                  onChange={e => setTarjetaForm({ ...tarjetaForm, color_playera: e.target.value })}
-                  style={s.colorCustomCap} />
-              </div>
+              <ColorPicker
+                colores={COLORES_CAMISETA}
+                valor={tarjetaForm.color_playera}
+                onChange={c => setTarjetaForm({ ...tarjetaForm, color_playera: c })}
+              />
             </div>
 
             <div style={s.field}>
               <label style={s.label}>Color secundario</label>
-              <div style={s.colorGridCap}>
-                {COLORES_SECUNDARIOS.map(c => (
-                  <div key={c} onClick={() => setTarjetaForm({ ...tarjetaForm, color_camiseta_2: c })}
-                    style={{ ...s.colorDotCap, background: c, boxShadow: tarjetaForm.color_camiseta_2 === c ? `0 0 0 3px #fff, 0 0 0 5px ${c}` : "none", border: c === "#ffffff" ? "1px solid #e5e7eb" : "none" }} />
-                ))}
-                <input type="color" value={tarjetaForm.color_camiseta_2}
-                  onChange={e => setTarjetaForm({ ...tarjetaForm, color_camiseta_2: e.target.value })}
-                  style={s.colorCustomCap} />
-              </div>
+              <ColorPicker
+                colores={COLORES_SECUNDARIOS}
+                valor={tarjetaForm.color_camiseta_2}
+                onChange={c => setTarjetaForm({ ...tarjetaForm, color_camiseta_2: c })}
+              />
             </div>
 
             <div style={s.modalActions}>
