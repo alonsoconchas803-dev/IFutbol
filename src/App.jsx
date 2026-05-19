@@ -111,6 +111,13 @@ export default function App() {
   const [canchas, setCanchas]           = useState([]);
   const [topbarBack, setTopbarBack]     = useState(null);
   const [recoveryToken, setRecoveryToken] = useState(null);
+  // Cuando se crea el perfil de jugador por primera vez (auto-creado desde
+  // user_metadata o desde el modal de completar perfil) mostramos un modal
+  // de bienvenida con el número de afiliado y la instrucción al capitán.
+  const [welcomeAfiliado, setWelcomeAfiliado] = useState(null);
+  // Si la sesión es válida pero no hay rol ni jugador ni metadata para
+  // auto-crear, abrimos un modal donde el usuario completa lo mínimo.
+  const [needsPlayerProfile, setNeedsPlayerProfile] = useState(false);
 
   const showToast = (msg, tipo = "ok") => {
     setToast({ msg, tipo });
@@ -164,7 +171,7 @@ export default function App() {
     });
     if (data.access_token) {
       setSession(data);
-      await loadUserRole(data.access_token, data.user.id);
+      await loadUserRole(data.access_token, data.user.id, data.user?.user_metadata);
       setModal(null);
       showToast("¡Bienvenido!");
       return { ok: true };
@@ -172,7 +179,34 @@ export default function App() {
     return { ok: false, error: "Correo o contraseña incorrectos" };
   };
 
-  const loadUserRole = async (token, userId) => {
+  // Crea la fila en jugadores con los datos de player_signup (vienen de
+  // user_metadata cuando el usuario se registra por el modal o del modal de
+  // "completar perfil" cuando se quedó en limbo).
+  // Devuelve el jugador creado o null. Despeja errores comunes y muestra toast.
+  const crearJugadorDesdeDatos = async (token, userId, datos) => {
+    try {
+      const payload = {
+        user_id: userId,
+        nombre_completo: datos.nombre_completo,
+        fecha_nacimiento: datos.fecha_nacimiento || null,
+        domicilio: datos.domicilio || null,
+        posicion_preferida: datos.posicion_preferida || "Delantero",
+        numero_preferido: datos.numero_preferido ?? null,
+        nombre_camiseta_preferido: datos.nombre_camiseta_preferido || null,
+      };
+      const created = await dbAuth("/jugadores", token, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      if (Array.isArray(created) && created[0]?.numero_afiliado) return created[0];
+      return null;
+    } catch (e) {
+      console.error("crearJugadorDesdeDatos:", e);
+      return null;
+    }
+  };
+
+  const loadUserRole = async (token, userId, userMeta) => {
     try {
       const roles = await dbAuth(`/user_roles?user_id=eq.${userId}&select=rol,liga_id,cancha_id&limit=1`, token);
       if (Array.isArray(roles) && roles.length > 0) {
@@ -191,12 +225,34 @@ export default function App() {
         setJugadorData(jugador[0]);
         if (jugador[0].nombre_completo) setUserName(jugador[0].nombre_completo);
         setScreen("dashboard");
+        return;
       }
+      // Sin jugador todavía: intentamos auto-crearlo desde la metadata del signup.
+      // Esto cubre el caso donde se requiere confirmar correo: el insert en
+      // jugadores no se hizo durante el signup porque no había token, pero los
+      // datos quedaron guardados en user_metadata.player_signup.
+      const datos = userMeta?.player_signup;
+      if (datos?.nombre_completo) {
+        const creado = await crearJugadorDesdeDatos(token, userId, datos);
+        if (creado) {
+          setUserRole({ rol: "player" });
+          setJugadorData(creado);
+          setUserName(creado.nombre_completo);
+          setScreen("dashboard");
+          setWelcomeAfiliado(creado.numero_afiliado);
+          return;
+        }
+      }
+      // Sin rol, sin jugador y sin metadata utilizable: pedirle al usuario que
+      // complete su perfil para no dejarlo en limbo.
+      setNeedsPlayerProfile(true);
+      setScreen("dashboard");
     } catch (e) { console.error(e); }
   };
 
   const handleLogout = () => {
     setSession(null); setUserRole(null); setJugadorData(null); setUserName(null);
+    setWelcomeAfiliado(null); setNeedsPlayerProfile(false);
     setScreen("home"); setSidebarOpen(false);
     showToast("Sesión cerrada");
   };
@@ -221,14 +277,35 @@ export default function App() {
 
   if (screen === "dashboard" && session) {
     return (
-      <DashboardLayout
-        session={session} userRole={userRole} jugadorData={jugadorData}
-        displayName={displayName}
-        onLogout={handleLogout} toast={toast} showToast={showToast}
-        onHome={goHome} initials={initials()}
-        seccionInicial={dashSeccion}
-        topbarBack={topbarBack} setTopbarBack={setTopbarBack}
-      />
+      <>
+        <DashboardLayout
+          session={session} userRole={userRole} jugadorData={jugadorData}
+          displayName={displayName}
+          onLogout={handleLogout} toast={toast} showToast={showToast}
+          onHome={goHome} initials={initials()}
+          seccionInicial={dashSeccion}
+          topbarBack={topbarBack} setTopbarBack={setTopbarBack}
+        />
+        {welcomeAfiliado && (
+          <WelcomeAfiliadoModal
+            afiliado={welcomeAfiliado}
+            onClose={() => setWelcomeAfiliado(null)}
+          />
+        )}
+        {needsPlayerProfile && (
+          <CompletarPerfilJugadorModal
+            session={session}
+            onCancel={handleLogout}
+            onCreated={(jug) => {
+              setNeedsPlayerProfile(false);
+              setUserRole({ rol: "player" });
+              setJugadorData(jug);
+              setUserName(jug.nombre_completo);
+              setWelcomeAfiliado(jug.numero_afiliado);
+            }}
+          />
+        )}
+      </>
     );
   }
 
@@ -1276,12 +1353,27 @@ function RegisterPlayerModal({ onClose, showToast, onLogin }) {
     const pwdErr = validarPassword(form.password);
     if (pwdErr) return setError(pwdErr);
     setLoading(true); setError("");
-    const data = await api("/auth/v1/signup",{method:"POST",body:JSON.stringify({email:form.email,password:form.password})});
+    // Guardamos los datos del jugador en user_metadata. Si la confirmación de
+    // correo está activa el signup NO devuelve token (no se crea la fila en
+    // jugadores ahora mismo); el primer login post-confirmación leerá esta
+    // metadata y creará el perfil automáticamente.
+    const playerSignup = {
+      nombre_completo: form.nombre_completo,
+      fecha_nacimiento: form.fecha_nacimiento || null,
+      domicilio: form.domicilio,
+      posicion_preferida: form.posicion_preferida,
+      numero_preferido: form.numero_camiseta ? +form.numero_camiseta : null,
+      nombre_camiseta_preferido: form.nombre_camiseta?.trim() ? form.nombre_camiseta.trim().toUpperCase() : null,
+    };
+    const data = await api("/auth/v1/signup",{
+      method:"POST",
+      body:JSON.stringify({ email:form.email, password:form.password, data:{ player_signup: playerSignup } })
+    });
     if (data.user||data.id) {
       const token = data.session?.access_token||data.access_token;
       const userId = data.user?.id||data.id;
       if (token) {
-        const jugRes = await fetch(`${SUPABASE_URL}/rest/v1/jugadores`,{method:"POST",headers:{"apikey":SUPABASE_KEY,"Authorization":`Bearer ${token}`,"Content-Type":"application/json","Prefer":"return=representation"},body:JSON.stringify({user_id:userId,nombre_completo:form.nombre_completo,fecha_nacimiento:form.fecha_nacimiento||null,domicilio:form.domicilio,posicion_preferida:form.posicion_preferida,numero_preferido:form.numero_camiseta?+form.numero_camiseta:null,nombre_camiseta_preferido:form.nombre_camiseta?.trim()?form.nombre_camiseta.trim().toUpperCase():null})});
+        const jugRes = await fetch(`${SUPABASE_URL}/rest/v1/jugadores`,{method:"POST",headers:{"apikey":SUPABASE_KEY,"Authorization":`Bearer ${token}`,"Content-Type":"application/json","Prefer":"return=representation"},body:JSON.stringify({ user_id:userId, ...playerSignup })});
         const jugData = await jugRes.json();
         if (!jugRes.ok) {
           setError(jugData?.message || "No se pudo crear el perfil de jugador");
@@ -1296,22 +1388,42 @@ function RegisterPlayerModal({ onClose, showToast, onLogin }) {
         }
         setSuccess(afiliado);
       } else {
-        setError("Confirma tu correo y vuelve a entrar para completar el registro.");
+        // Confirm email activo: el perfil se creará al primer login.
+        setSuccess("pending_confirmation");
       }
     } else { setError(data.msg||data.error_description||"Error al registrarse"); }
     setLoading(false);
   };
 
+  if (success === "pending_confirmation") return (
+    <div className="ifutbol-overlay" onClick={onClose}>
+      <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:380,textAlign:"center" }}>
+        <div style={{ fontSize:52,marginBottom:14 }}>📧</div>
+        <h3 style={{ fontSize:22,fontWeight:800,marginBottom:8 }}>Revisa tu correo</h3>
+        <p style={{ color:"var(--text-sub)",marginBottom:16,lineHeight:1.5 }}>
+          Te enviamos un enlace de confirmación a <b>{form.email}</b>. Confírmalo y vuelve a iniciar sesión.
+        </p>
+        <p style={{ fontSize:13,color:"var(--text-sub)",marginBottom:22,lineHeight:1.45 }}>
+          La primera vez que entres te mostraremos tu <b>número de afiliado</b>.
+        </p>
+        <button className="btn btn-premium" style={{ width:"100%" }} onClick={onLogin}>Ir a iniciar sesión →</button>
+      </div>
+    </div>
+  );
+
   if (success) return (
     <div className="ifutbol-overlay" onClick={onClose}>
-      <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:360,textAlign:"center" }}>
+      <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:380,textAlign:"center" }}>
         <div style={{ fontSize:52,marginBottom:14 }}>🎉</div>
         <h3 style={{ fontSize:22,fontWeight:800,marginBottom:8 }}>¡Registro exitoso!</h3>
         <p style={{ color:"var(--text-sub)",marginBottom:20 }}>Tu cuenta ha sido creada correctamente</p>
-        <div style={{ background:"var(--green-light)",border:"1px solid #c3e6a3",borderRadius:12,padding:"16px 24px",marginBottom:20 }}>
+        <div style={{ background:"var(--green-light)",border:"1px solid #c3e6a3",borderRadius:12,padding:"16px 24px",marginBottom:16 }}>
           <div style={{ fontSize:11,color:"var(--green)",fontWeight:700,marginBottom:4 }}>TU NÚMERO DE AFILIADO</div>
           <div style={{ fontSize:28,fontWeight:900,color:"var(--green)",letterSpacing:2 }}>{success}</div>
         </div>
+        <p style={{ fontSize:12.5,color:"var(--text-sub)",marginBottom:20,lineHeight:1.45 }}>
+          Pásale este código al <b>capitán</b> del equipo donde quieras jugar. Solo él podrá inscribirte.
+        </p>
         <button className="btn btn-premium" style={{ width:"100%" }} onClick={onClose}>Ir al inicio →</button>
       </div>
     </div>
@@ -1364,19 +1476,162 @@ function RegisterPlayerModal({ onClose, showToast, onLogin }) {
             )}
           </div>
         </div>
-        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px" }}>
+        <div style={{ display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:"0 14px" }}>
           <div style={{ gridColumn:"1/-1",marginBottom:14 }}><Field label="Nombre completo *"><input className="form-input" type="text" placeholder="Juan Pérez" value={form.nombre_completo} onChange={e=>setForm({...form,nombre_completo:toTitleCase(e.target.value)})}/></Field></div>
-          <div style={{ marginBottom:14 }}><Field label="Fecha de nacimiento"><input className="form-input" type="date" value={form.fecha_nacimiento} onChange={e=>setForm({...form,fecha_nacimiento:e.target.value})}/></Field></div>
-          <div style={{ marginBottom:14 }}><Field label="Posición preferida"><select className="form-input" value={form.posicion_preferida} onChange={e=>setForm({...form,posicion_preferida:e.target.value})}>{POSITIONS.map(p=><option key={p}>{p}</option>)}</select></Field></div>
-          <div style={{ marginBottom:14 }}><Field label="Número preferido (1-99)"><input className="form-input" type="number" min="1" max="99" placeholder="ej. 10" value={form.numero_camiseta} onChange={e=>setForm({...form,numero_camiseta:e.target.value})}/></Field></div>
-          <div style={{ marginBottom:14 }}><Field label="Nombre en camiseta"><input className="form-input" type="text" placeholder="GARCÍA" value={form.nombre_camiseta} onChange={e=>setForm({...form,nombre_camiseta:e.target.value.toUpperCase()})}/></Field></div>
+          <div style={{ marginBottom:14,minWidth:0 }}><Field label="Fecha de nacimiento"><input className="form-input" type="date" value={form.fecha_nacimiento} onChange={e=>setForm({...form,fecha_nacimiento:e.target.value})}/></Field></div>
+          <div style={{ marginBottom:14,minWidth:0 }}><Field label="Posición preferida"><select className="form-input" value={form.posicion_preferida} onChange={e=>setForm({...form,posicion_preferida:e.target.value})}>{POSITIONS.map(p=><option key={p}>{p}</option>)}</select></Field></div>
+          <div style={{ marginBottom:14,minWidth:0 }}><Field label="Número preferido (1-99)"><input className="form-input" type="number" min="1" max="99" placeholder="ej. 10" value={form.numero_camiseta} onChange={e=>setForm({...form,numero_camiseta:e.target.value})}/></Field></div>
+          <div style={{ marginBottom:14,minWidth:0 }}><Field label="Nombre en camiseta"><input className="form-input" type="text" placeholder="GARCÍA" value={form.nombre_camiseta} onChange={e=>setForm({...form,nombre_camiseta:e.target.value.toUpperCase()})}/></Field></div>
           <div style={{ gridColumn:"1/-1",marginBottom:14 }}><Field label="Domicilio"><input className="form-input" type="text" placeholder="Calle, Ciudad" value={form.domicilio} onChange={e=>setForm({...form,domicilio:e.target.value})}/></Field></div>
           <div style={{ gridColumn:"1/-1",marginBottom:14 }}><Field label="Correo electrónico *"><input className="form-input" type="email" placeholder="tu@correo.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></Field></div>
-          <div style={{ marginBottom:14 }}><Field label="Contraseña *"><input className="form-input" type="password" placeholder="Mín. 8, con mayús, minús y número" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></Field></div>
-          <div style={{ marginBottom:20 }}><Field label="Confirmar contraseña *"><input className="form-input" type="password" placeholder="Repite tu contraseña" value={form.confirm} onChange={e=>setForm({...form,confirm:e.target.value})}/></Field></div>
+          <div style={{ marginBottom:14,minWidth:0 }}><Field label="Contraseña *"><input className="form-input" type="password" placeholder="Mín. 8, con mayús, minús y número" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></Field></div>
+          <div style={{ marginBottom:20,minWidth:0 }}><Field label="Confirmar contraseña *"><input className="form-input" type="password" placeholder="Repite tu contraseña" value={form.confirm} onChange={e=>setForm({...form,confirm:e.target.value})}/></Field></div>
         </div>
         <button className="btn btn-premium" style={{ width:"100%",marginBottom:14 }} onClick={handle} disabled={loading}>{loading?"Creando cuenta...":"Crear cuenta de jugador →"}</button>
         <p style={{ textAlign:"center",fontSize:13,color:"var(--text-muted)" }}>¿Ya tienes cuenta? <span style={m.link} onClick={onLogin}>Inicia sesión</span></p>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// WELCOME AFILIADO MODAL
+// Aparece la primera vez que el jugador entra al dashboard tras crear su
+// perfil (sea por signup inline o por auto-creación desde metadata).
+// ─────────────────────────────────────────────────────────────────
+function WelcomeAfiliadoModal({ afiliado, onClose }) {
+  return (
+    <div className="ifutbol-overlay" onClick={onClose}>
+      <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:380, textAlign:"center" }}>
+        <div style={{ fontSize:52, marginBottom:14 }}>🎉</div>
+        <h3 style={{ fontSize:22, fontWeight:800, marginBottom:8 }}>¡Bienvenido a iFútbol!</h3>
+        <p style={{ color:"var(--text-sub)", marginBottom:18, lineHeight:1.45 }}>Tu cuenta de jugador está lista. Este es tu número de afiliado:</p>
+        <div style={{ background:"var(--green-light)", border:"1px solid #c3e6a3", borderRadius:12, padding:"20px 24px", marginBottom:18 }}>
+          <div style={{ fontSize:11, color:"var(--green)", fontWeight:700, marginBottom:6, letterSpacing:1 }}>TU NÚMERO DE AFILIADO</div>
+          <div style={{ fontSize:30, fontWeight:900, color:"var(--green)", letterSpacing:2 }}>{afiliado}</div>
+        </div>
+        <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:10, padding:"12px 14px", marginBottom:22, textAlign:"left" }}>
+          <div style={{ fontSize:12.5, fontWeight:700, color:"#92400e", marginBottom:4 }}>📋 Para que te inscriban a un equipo</div>
+          <div style={{ fontSize:12.5, color:"#92400e", lineHeight:1.5 }}>
+            Pásale este número al <b>capitán</b> del equipo donde quieras jugar. Solo él puede registrarte usando tu afiliado.
+          </div>
+        </div>
+        <button className="btn btn-premium" style={{ width:"100%" }} onClick={onClose}>Entendido →</button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// COMPLETAR PERFIL JUGADOR MODAL
+// Fallback para sesiones donde el usuario está autenticado pero no tiene
+// perfil de jugador NI metadata utilizable (registros viejos, errores RLS,
+// etc.). Pide los datos mínimos para crear el perfil y desbloquear la app.
+// ─────────────────────────────────────────────────────────────────
+function CompletarPerfilJugadorModal({ session, onCancel, onCreated }) {
+  const [form, setForm] = useState({
+    nombre_completo: "",
+    fecha_nacimiento: "",
+    posicion_preferida: "Delantero",
+    numero_camiseta: "",
+    nombre_camiseta: "",
+  });
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const token = session?.access_token;
+  const userId = session?.user?.id;
+
+  const handle = async () => {
+    if (!form.nombre_completo.trim()) return setError("Escribe tu nombre completo");
+    setLoading(true); setError("");
+    try {
+      const payload = {
+        user_id: userId,
+        nombre_completo: form.nombre_completo.trim(),
+        fecha_nacimiento: form.fecha_nacimiento || null,
+        posicion_preferida: form.posicion_preferida,
+        numero_preferido: form.numero_camiseta ? +form.numero_camiseta : null,
+        nombre_camiseta_preferido: form.nombre_camiseta?.trim() ? form.nombre_camiseta.trim().toUpperCase() : null,
+      };
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/jugadores`, {
+        method: "POST",
+        headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${token}`, "Content-Type": "application/json", "Prefer": "return=representation" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data?.message || "No se pudo crear el perfil. Intenta de nuevo.");
+        setLoading(false);
+        return;
+      }
+      const jug = Array.isArray(data) ? data[0] : data;
+      if (!jug?.numero_afiliado) {
+        setError("No se generó el número de afiliado. Intenta de nuevo.");
+        setLoading(false);
+        return;
+      }
+      onCreated(jug);
+    } catch (e) {
+      setError(e.message || "Error inesperado");
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="ifutbol-overlay">
+      <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:420 }}>
+        <div style={{ marginBottom:18 }}>
+          <h3 style={{ fontSize:20, fontWeight:800, marginBottom:6 }}>Completa tu perfil</h3>
+          <p style={{ fontSize:13, color:"var(--text-sub)", lineHeight:1.45 }}>
+            Necesitamos algunos datos para generar tu número de afiliado y permitirte usar la app.
+          </p>
+        </div>
+        {error && <div style={m.err}>⚠️ {error}</div>}
+        <div style={{ marginBottom:14 }}>
+          <Field label="Nombre completo *">
+            <input className="form-input" type="text" placeholder="Juan Pérez"
+              value={form.nombre_completo}
+              onChange={e=>setForm({...form, nombre_completo: toTitleCase(e.target.value)})}/>
+          </Field>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)", gap:"0 14px" }}>
+          <div style={{ marginBottom:14, minWidth:0 }}>
+            <Field label="Fecha de nacimiento">
+              <input className="form-input" type="date"
+                value={form.fecha_nacimiento}
+                onChange={e=>setForm({...form, fecha_nacimiento: e.target.value})}/>
+            </Field>
+          </div>
+          <div style={{ marginBottom:14, minWidth:0 }}>
+            <Field label="Posición preferida">
+              <select className="form-input"
+                value={form.posicion_preferida}
+                onChange={e=>setForm({...form, posicion_preferida: e.target.value})}>
+                {POSITIONS.map(p=><option key={p}>{p}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div style={{ marginBottom:14, minWidth:0 }}>
+            <Field label="Número preferido (1-99)">
+              <input className="form-input" type="number" min="1" max="99" placeholder="ej. 10"
+                value={form.numero_camiseta}
+                onChange={e=>setForm({...form, numero_camiseta: e.target.value})}/>
+            </Field>
+          </div>
+          <div style={{ marginBottom:14, minWidth:0 }}>
+            <Field label="Nombre en camiseta">
+              <input className="form-input" type="text" placeholder="GARCÍA"
+                value={form.nombre_camiseta}
+                onChange={e=>setForm({...form, nombre_camiseta: e.target.value.toUpperCase()})}/>
+            </Field>
+          </div>
+        </div>
+        <button className="btn btn-premium" style={{ width:"100%", marginBottom:10 }} onClick={handle} disabled={loading}>
+          {loading ? "Creando perfil..." : "Crear mi perfil →"}
+        </button>
+        <button className="btn btn-ghost" style={{ width:"100%" }} onClick={onCancel}>
+          Cerrar sesión
+        </button>
       </div>
     </div>
   );

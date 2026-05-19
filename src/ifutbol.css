@@ -213,6 +213,8 @@ select option { background: #fff; color: var(--text); }
 }
 .form-input {
   width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
   background: var(--bg);
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
@@ -222,6 +224,22 @@ select option { background: #fff; color: var(--text); }
   font-family: 'DM Sans', sans-serif;
 }
 .form-input::placeholder { color: var(--text-muted); }
+
+/* select/date: quitar apariencia nativa de iOS para que respeten el width del grid
+   y dibujar una flecha propia que no se encime con el texto. */
+select.form-input,
+input.form-input[type="date"] {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='%236b7280' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 8px;
+}
+input.form-input[type="date"]::-webkit-date-and-time-value { text-align: left; }
+input.form-input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0; }
 
 /* ── TABS ── (mobile-only: siempre scrollean horizontalmente, no wrap) */
 .ifutbol-tabs {
