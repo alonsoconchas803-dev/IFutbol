@@ -64,6 +64,42 @@ const NIVEL_FILTROS = {
   equipo: ["jugador_equipo", "ficha_partido"],
 };
 
+// Breadcrumb fuera del componente padre para que React no lo remonte en cada render.
+function Breadcrumb({ unidadActiva, ligaActiva, equipoActivo, setUnidadActiva, setLigaActiva, setEquipoActivo }) {
+  return (
+    <div style={s.crumb}>
+      <span style={{ ...s.crumbStep, ...(unidadActiva ? s.crumbDone : s.crumbActive) }}
+            onClick={() => { setUnidadActiva(null); setLigaActiva(null); setEquipoActivo(null); }}>
+        🏟️ Unidades
+      </span>
+      {unidadActiva && (
+        <>
+          <span style={s.crumbSep}>›</span>
+          <span style={{ ...s.crumbStep, ...(ligaActiva ? s.crumbDone : s.crumbActive) }}
+                onClick={() => { setLigaActiva(null); setEquipoActivo(null); }}>
+            {unidadActiva.nombre}
+          </span>
+        </>
+      )}
+      {ligaActiva && (
+        <>
+          <span style={s.crumbSep}>›</span>
+          <span style={{ ...s.crumbStep, ...(equipoActivo ? s.crumbDone : s.crumbActive) }}
+                onClick={() => setEquipoActivo(null)}>
+            🏆 {ligaActiva.nombre}
+          </span>
+        </>
+      )}
+      {equipoActivo && (
+        <>
+          <span style={s.crumbSep}>›</span>
+          <span style={{ ...s.crumbStep, ...s.crumbActive }}>👕 {equipoActivo.nombre}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function Auditoria({ session, setTopbarBack }) {
   const [unidades, setUnidades] = useState([]);
   const [ligas, setLigas]       = useState([]);
@@ -189,42 +225,7 @@ export default function Auditoria({ session, setTopbarBack }) {
     return d.toLocaleString("es-MX", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
   };
 
-  // ── BREADCRUMB ───────────────────────────────────────────────
-  const Breadcrumb = () => (
-    <div style={s.crumb}>
-      <span style={{ ...s.crumbStep, ...(unidadActiva ? s.crumbDone : s.crumbActive) }}
-            onClick={() => { setUnidadActiva(null); setLigaActiva(null); setEquipoActivo(null); }}>
-        🏟️ Unidades
-      </span>
-      {unidadActiva && (
-        <>
-          <span style={s.crumbSep}>›</span>
-          <span style={{ ...s.crumbStep, ...(ligaActiva ? s.crumbDone : s.crumbActive) }}
-                onClick={() => { setLigaActiva(null); setEquipoActivo(null); }}>
-            {unidadActiva.nombre}
-          </span>
-        </>
-      )}
-      {ligaActiva && (
-        <>
-          <span style={s.crumbSep}>›</span>
-          <span style={{ ...s.crumbStep, ...(equipoActivo ? s.crumbDone : s.crumbActive) }}
-                onClick={() => setEquipoActivo(null)}>
-            🏆 {ligaActiva.nombre}
-          </span>
-        </>
-      )}
-      {equipoActivo && (
-        <>
-          <span style={s.crumbSep}>›</span>
-          <span style={{ ...s.crumbStep, ...s.crumbActive }}>👕 {equipoActivo.nombre}</span>
-        </>
-      )}
-    </div>
-  );
-
   // ── RENDER ────────────────────────────────────────────────────
-  const nivelTexto = equipoActivo ? "equipo" : ligaActiva ? "liga" : unidadActiva ? "unidad" : null;
 
   return (
     <div style={s.wrap}>
@@ -235,7 +236,14 @@ export default function Auditoria({ session, setTopbarBack }) {
         Solo se muestran acciones de admins de unidad, árbitros y capitanes. Los registros se borran automáticamente después de 14 días.
       </div>
 
-      <Breadcrumb />
+      <Breadcrumb
+        unidadActiva={unidadActiva}
+        ligaActiva={ligaActiva}
+        equipoActivo={equipoActivo}
+        setUnidadActiva={setUnidadActiva}
+        setLigaActiva={setLigaActiva}
+        setEquipoActivo={setEquipoActivo}
+      />
 
       {/* NIVEL 1: UNIDADES */}
       {!unidadActiva && (

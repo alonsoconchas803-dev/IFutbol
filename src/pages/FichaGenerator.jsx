@@ -316,16 +316,6 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
     return () => document.getElementById("ifb-print-css")?.remove();
   }, []);
 
-  useEffect(() => { if (liga?.id) cargarJornadas(); }, [liga?.id]);
-
-  // Al seleccionar una jornada: cargar automáticamente partidos + fichas guardadas
-  useEffect(() => {
-    if (jornadaSel) cargarResumenJornada();
-    else setResumen([]);
-    setFichasData([]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jornadaSel]);
-
   const cargarJornadas = async () => {
     const data = await db(`/jornadas?liga_id=eq.${liga.id}&order=numero`, token);
     setJornadas(data || []);
@@ -356,6 +346,16 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
     } catch (e) { showToast(e.message, "err"); }
     setCargandoResumen(false);
   };
+
+  useEffect(() => { if (liga?.id) cargarJornadas(); }, [liga?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Al seleccionar una jornada: cargar automáticamente partidos + fichas guardadas
+  useEffect(() => {
+    if (jornadaSel) cargarResumenJornada();
+    else setResumen([]);
+    setFichasData([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jornadaSel]);
 
   const generarFichas = async () => {
     if (!jornadaSel) return showToast("Selecciona una jornada", "err");

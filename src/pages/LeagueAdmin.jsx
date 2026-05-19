@@ -28,7 +28,6 @@ const db = async (path, token, options = {}) => {
 };
 
 const COLORES = ["#e53e3e","#dd6b20","#d69e2e","#38a169","#3182ce","#805ad5","#d53f8c","#2d3748"];
-const POSICIONES = ["Portero","Defensa","Mediocampista","Delantero"];
 const DIAS_LIGA = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"];
 const TURNOS_LIGA = ["Mañana","Tarde","Noche"];
 const COLORES_LIGA = ["#4f8f2f","#3182ce","#e53e3e","#dd6b20","#d69e2e","#805ad5","#d53f8c","#0ea5e9","#14b8a6","#1f2937"];

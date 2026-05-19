@@ -4,7 +4,6 @@ import SuperAdmin from "./pages/SuperAdmin";
 import LeagueAdmin from "./pages/LeagueAdmin";
 import Referee from "./pages/Referee";
 import PlayerProfile from "./pages/PlayerProfile";
-import Solicitudes from "./pages/Solicitudes";
 import JerseySVG from "./components/JerseySVG";
 import IFutbolLogo from "./components/IFutbolLogo";
 
@@ -13,7 +12,7 @@ const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
 
 // Capitaliza la primera letra de cada palabra (respeta tildes y ñ; soporta guión)
 export const toTitleCase = (s) =>
-  String(s || "").replace(/(^|[\s\-])(\p{Ll})/gu, (_, sep, c) => sep + c.toUpperCase());
+  String(s || "").replace(/(^|[\s-])(\p{Ll})/gu, (_, sep, c) => sep + c.toUpperCase());
 
 // Valida que la contraseña cumpla la política de Supabase Auth:
 // mínimo 8 caracteres, con mayúscula, minúscula y número.
@@ -561,7 +560,6 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
   const [equipos, setEquipos] = useState([]);
   const [clasificacion, setClasificacion] = useState([]);
   const [calendario, setCalendario] = useState([]);
-  const [partidos, setPartidos] = useState([]);
   const [goleadores, setGoleadores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedCell, setSelectedCell] = useState(null); // [rowIdx, colIdx]
@@ -609,7 +607,6 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
 
     // PostgREST devuelve ficha_partido como objeto {} (relación 1-a-1), no array
     const fichas = parts.filter(p=>p.ficha_partido?.cerrada);
-    setPartidos(fichas);
 
     // Clasificación usando IDs directos (no búsqueda por nombre)
     const tabla = {};

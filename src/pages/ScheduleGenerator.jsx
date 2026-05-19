@@ -141,10 +141,6 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
     setTimeout(() => setToast(null), 3000);
   };
 
-  useEffect(() => {
-    if (liga?.id) { cargarTodo(); }
-  }, [liga?.id]);
-
   const cargarTodo = async () => {
     setLoading(true);
     try {
@@ -195,6 +191,10 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
     });
     return Object.values(tabla).sort((a,b) => b.pts-a.pts || (b.gf-b.gc)-(a.gf-a.gc));
   };
+
+  useEffect(() => {
+    if (liga?.id) { cargarTodo(); }
+  }, [liga?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── GENERAR PREVIEW DE JORNADA ──
   const handlePreviewJornada = () => {

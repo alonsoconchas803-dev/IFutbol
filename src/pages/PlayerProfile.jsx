@@ -218,12 +218,6 @@ export default function PlayerProfile({ session, seccionInicial = "perfil" }) {
     }
   }, [seccion, equiposComoCapitan, equipoCapActivoId]);
 
-  // Carga datos completos del equipo activo cuando cambia la selección
-  useEffect(() => {
-    if (!equipoCapActivoId) return;
-    cargarEquipoCap(equipoCapActivoId);
-  }, [equipoCapActivoId]);
-
   const cargarEquipoCap = async (equipoId) => {
     try {
       const insc = inscripciones.find(i => i.equipo_id === equipoId);
@@ -237,6 +231,12 @@ export default function PlayerProfile({ session, seccionInicial = "perfil" }) {
       setJugadoresEquipoCap(jugs || []);
     } catch (e) { showToast(e.message, "err"); }
   };
+
+  // Carga datos completos del equipo activo cuando cambia la selección
+  useEffect(() => {
+    if (!equipoCapActivoId) return;
+    cargarEquipoCap(equipoCapActivoId);
+  }, [equipoCapActivoId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const abrirEditarTarjeta = () => {
     if (!equipoCapData) return;
@@ -411,14 +411,6 @@ export default function PlayerProfile({ session, seccionInicial = "perfil" }) {
   };
 
   // ── ESTADÍSTICAS ──────────────────────────────────────────────
-  // Recarga cada vez que se entra a la sección o cambian las inscripciones,
-  // para reflejar fichas recién cerradas o cambios del árbitro.
-  useEffect(() => {
-    if (seccion === "estadisticas" && jugador && inscripciones.length > 0) {
-      cargarEstadisticas();
-    }
-  }, [seccion, jugador?.id, inscripciones.length]);
-
   const cargarEstadisticas = async () => {
     if (!jugador || inscripciones.length === 0) return;
     setStatsLoading(true);
@@ -519,6 +511,14 @@ export default function PlayerProfile({ session, seccionInicial = "perfil" }) {
     } catch (e) { showToast(e.message, "err"); }
     setStatsLoading(false);
   };
+
+  // Recarga cada vez que se entra a la sección o cambian las inscripciones,
+  // para reflejar fichas recién cerradas o cambios del árbitro.
+  useEffect(() => {
+    if (seccion === "estadisticas" && jugador && inscripciones.length > 0) {
+      cargarEstadisticas();
+    }
+  }, [seccion, jugador?.id, inscripciones.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Datos derivados para el selector y agregados
   const ligasInscrito = useMemo(() => {
@@ -1372,7 +1372,6 @@ const s = {
   confirmCamiseta: { textAlign: "right", flexShrink: 0 },
   confirmCamisetaLabel: { fontSize: 9, color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 },
   confirmCamisetaNombre: { fontSize: 12, fontWeight: 800, color: GREEN, letterSpacing: 1 },
-  btnAdd: { background: GREEN, color: "#ffffff", border: "none", borderRadius: 10, padding: "10px 18px", fontWeight: 700, fontSize: 13, cursor: "pointer" },
   // ── Estadísticas ──
   statsFiltros: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 },
   statsFiltro: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 20, padding: "7px 14px", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" },

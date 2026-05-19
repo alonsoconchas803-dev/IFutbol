@@ -39,7 +39,6 @@ const ESTADO_LABEL = {
 
 export default function Solicitudes({ session }) {
   const [solicitudes, setSolicitudes]                   = useState([]);
-  const [ligas, setLigas]                               = useState([]);
   const [canchas, setCanchas]                           = useState([]);
   const [filtro, setFiltro]                             = useState("pendiente");
   const [loading, setLoading]                           = useState(true);
@@ -49,8 +48,6 @@ export default function Solicitudes({ session }) {
   const [canchasSeleccionadas, setCanchasSeleccionadas] = useState([]);
   const [procesando, setProcesando]                     = useState(false);
   const [modoEditar, setModoEditar]                     = useState(false);
-  const [accesoTotal, setAccesoTotal]                   = useState(true);
-  const [ligasEspecificas, setLigasEspecificas]         = useState([]);
 
   const token = session?.access_token;
 
@@ -62,13 +59,11 @@ export default function Solicitudes({ session }) {
   const cargarDatos = async () => {
     setLoading(true);
     try {
-      const [sols, ligs, canchasData] = await Promise.all([
+      const [sols, canchasData] = await Promise.all([
         db("/solicitudes_registro?select=*&order=created_at.desc", token),
-        db("/ligas?activa=eq.true&select=*&order=nombre", token),
         db("/canchas?select=*&order=nombre", token),
       ]);
       setSolicitudes(sols || []);
-      setLigas(ligs || []);
       setCanchas(canchasData || []);
     } catch (e) { showToast(e.message, "err"); }
     setLoading(false);
@@ -84,8 +79,6 @@ export default function Solicitudes({ session }) {
     setModoEditar(false);
     setLigaSeleccionada("");
     setCanchasSeleccionadas([]);
-    setAccesoTotal(true);
-    setLigasEspecificas([]);
   };
 
   const abrirModal = (sol) => {
@@ -94,8 +87,6 @@ export default function Solicitudes({ session }) {
     setLigaSeleccionada("");
     // Si es solicitud de unidad extra, pre-seleccionamos la cancha solicitada (no editable por el super admin).
     setCanchasSeleccionadas(esSolicitudUnidadExtra(sol) ? [sol.cancha_id] : []);
-    setAccesoTotal(true);
-    setLigasEspecificas([]);
   };
 
   const abrirEditar = async (sol) => {
@@ -106,11 +97,9 @@ export default function Solicitudes({ session }) {
         // Super admin solo ubica al árbitro en unidades; acceso_total y torneos los gestiona el admin de la unidad.
         const arbsCanchaData = await db(`/arbitro_cancha?user_id=eq.${sol.user_id}&select=cancha_id`, token);
         setCanchasSeleccionadas((arbsCanchaData || []).map(r => r.cancha_id));
-      } catch (e) {
+      } catch {
         setCanchasSeleccionadas([]);
       }
-      setAccesoTotal(false);
-      setLigasEspecificas([]);
     } else {
       // league_admin: cargar cancha_id actual desde user_roles
       try {
@@ -120,20 +109,12 @@ export default function Solicitudes({ session }) {
         setLigaSeleccionada("");
       }
       setCanchasSeleccionadas([]);
-      setAccesoTotal(true);
-      setLigasEspecificas([]);
     }
   };
 
   const toggleCancha = (id) => {
     setCanchasSeleccionadas(prev =>
       prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
-    );
-  };
-
-  const toggleLigaEspecifica = (id) => {
-    setLigasEspecificas(prev =>
-      prev.includes(id) ? prev.filter(l => l !== id) : [...prev, id]
     );
   };
 
@@ -197,8 +178,12 @@ export default function Solicitudes({ session }) {
         }
       } else {
         // Flujo original: solicitud de registro nueva (árbitro o admin de liga).
-        await db("/user_roles", token, {
+        // UPSERT: si el usuario ya tiene un rol asignado (re-aprobación, edición
+        // por otro super admin, etc.) la fila se actualiza en vez de chocar con
+        // UNIQUE(user_id) y dejar la solicitud en pendiente.
+        await db("/user_roles?on_conflict=user_id", token, {
           method: "POST",
+          headers: { "Prefer": "resolution=merge-duplicates,return=representation" },
           body: JSON.stringify({
             user_id: modalSolicitud.user_id,
             rol: modalSolicitud.tipo_rol,
