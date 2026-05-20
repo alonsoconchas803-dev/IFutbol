@@ -5,12 +5,27 @@ import IFutbolLogo from "../components/IFutbolLogo";
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
 
-const db = async (path, token) => {
+const db = async (path, token, options = {}) => {
+  const method = (options.method || "GET").toUpperCase();
   const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
-    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    ...options,
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      // Prefer solo en mutaciones: pide a PostgREST devolver la fila escrita.
+      ...(method !== "GET" ? { Prefer: "return=representation" } : {}),
+      ...(options.headers || {}),
+    },
   });
-  if (!res.ok) return [];
-  return res.json();
+  if (!res.ok) {
+    // En GET mantenemos el comportamiento tolerante (lista vacía). En
+    // mutaciones lanzamos el error para que el editor pueda mostrarlo.
+    if (method === "GET") return [];
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `Error ${res.status}`);
+  }
+  return res.status === 204 ? null : res.json();
 };
 
 const FILAS = 17;
@@ -571,6 +586,7 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
             partido={fichaModalPartido}
             token={token}
             liga={liga}
+            showToast={showToast}
             onClose={() => setFichaModalPartido(null)}
             onGuardado={() => { setFichaModalPartido(null); cargarResumenJornada(); }}
           />
@@ -628,11 +644,29 @@ function PartidoCard({ partido, onVerFicha, readOnly = false }) {
         </div>
       </div>
 
-      {cerrada && (
-        <button style={hs.btnVerFicha} onClick={() => onVerFicha(partido)}>
-          {readOnly ? "👁️ Ver ficha" : "✏️ Modificar ficha"}
-        </button>
-      )}
+      {(() => {
+        // El árbitro (readOnly) solo consulta fichas ya cerradas desde aquí;
+        // las pendientes las llena en su panel "Mis Partidos".
+        if (readOnly) {
+          return cerrada ? (
+            <button style={hs.btnVerFicha} onClick={() => onVerFicha(partido)}>
+              👁️ Ver ficha
+            </button>
+          ) : null;
+        }
+        // El admin de unidad puede registrar pendientes, continuar borradores
+        // o corregir fichas ya cerradas.
+        const accion = cerrada
+          ? { label: "✏️ Modificar ficha", bg: "#b45309" }
+          : f
+            ? { label: "✏️ Continuar ficha", bg: "#1d4ed8" }
+            : { label: "📝 Registrar ficha", bg: "#4f8f2f" };
+        return (
+          <button style={{ ...hs.btnVerFicha, background: accion.bg }} onClick={() => onVerFicha(partido)}>
+            {accion.label}
+          </button>
+        );
+      })()}
     </div>
   );
 }
@@ -815,10 +849,15 @@ export function FichaDetalleModal({ partido, token, liga, onClose }) {
 // ─────────────────────────────────────────────────────────────────
 // MODAL: EDITOR DE FICHA — el admin de unidad corrige fichas cerradas
 // ─────────────────────────────────────────────────────────────────
-function FichaEditorModal({ partido, token, liga, onClose, onGuardado }) {
+function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado }) {
   const f = partido.ficha;
   const eqL = partido.equipos_local;
   const eqV = partido.equipos_visitante;
+
+  // Estado de la ficha: inexistente (registrar), borrador (continuar) o cerrada (corregir).
+  const existe    = !!f;
+  const esCerrada = !!f?.cerrada;
+  const titulo    = esCerrada ? "MODIFICAR FICHA" : existe ? "CONTINUAR FICHA" : "REGISTRAR FICHA";
 
   // Estado local editable, inicializado desde la ficha cerrada
   const [golesLocal, setGolesLocal]         = useState(f?.goles_local ?? 0);
@@ -834,6 +873,7 @@ function FichaEditorModal({ partido, token, liga, onClose, onGuardado }) {
   const [cargando, setCargando]             = useState(true);
   const [guardando, setGuardando]           = useState(false);
   const [error, setError]                   = useState(null);
+  const [confirmarCierre, setConfirmarCierre] = useState(false);
 
   useEffect(() => {
     let cancelado = false;
@@ -870,6 +910,8 @@ function FichaEditorModal({ partido, token, liga, onClose, onGuardado }) {
   };
 
   const agregarGoleador = (jugInfo, equipoId, equipoNombre) => {
+    // Si un jugador anota, lógicamente jugó: lo marcamos presente.
+    setAsistencia(prev => prev.includes(jugInfo.jugador_id) ? prev : [...prev, jugInfo.jugador_id]);
     const idx = goleadores.findIndex(g => g.jugador_id === jugInfo.jugador_id && g.equipo === equipoId);
     if (idx >= 0) {
       const updated = [...goleadores];
@@ -898,8 +940,10 @@ function FichaEditorModal({ partido, token, liga, onClose, onGuardado }) {
     else setGolesVisitante(v => Math.max(0, v - 1));
   };
 
-  const guardar = async () => {
-    if (!f?.id) { setError("No se encontró el id de la ficha"); return; }
+  // cerrar=true cierra la ficha (cuenta para la tabla); cerrar=false la deja
+  // como borrador. Al corregir una ficha ya cerrada se llama con cerrar=true
+  // para que conserve su estado.
+  const guardar = async (cerrar) => {
     setGuardando(true);
     setError(null);
     try {
@@ -911,9 +955,19 @@ function FichaEditorModal({ partido, token, liga, onClose, onGuardado }) {
         faltas_local: faltasLocal,
         faltas_visitante: faltasVisit,
         observaciones,
-        // cerrada permanece true — solo corregimos datos
+        cerrada: cerrar,
       };
-      await db(`/ficha_partido?id=eq.${f.id}`, token, { method: "PATCH", body: JSON.stringify(payload) });
+      if (existe) {
+        await db(`/ficha_partido?id=eq.${f.id}`, token, { method: "PATCH", body: JSON.stringify(payload) });
+      } else {
+        await db(`/ficha_partido`, token, {
+          method: "POST",
+          body: JSON.stringify({ ...payload, partido_id: partido.id }),
+        });
+      }
+      showToast && showToast(
+        esCerrada ? "Ficha corregida ✓" : cerrar ? "Ficha cerrada y guardada ✓" : "Borrador guardado ✓"
+      );
       onGuardado && onGuardado();
     } catch (e) {
       setError(e.message || "Error al guardar");
@@ -957,7 +1011,7 @@ function FichaEditorModal({ partido, token, liga, onClose, onGuardado }) {
         {/* Header */}
         <div style={fd.header}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ ...fd.headerLabel, color: "#b45309" }}>MODIFICAR FICHA</div>
+            <div style={{ ...fd.headerLabel, color: esCerrada ? "#b45309" : "#4f8f2f" }}>{titulo}</div>
             <div style={fd.headerMeta}>
               Jornada {partido.jornadas?.numero ?? "—"} · ⏰ {fmtHora(partido.hora)} · Cancha {partido.cancha_numero ?? "—"}
             </div>
@@ -965,10 +1019,12 @@ function FichaEditorModal({ partido, token, liga, onClose, onGuardado }) {
           <button style={fd.closeBtn} onClick={onClose} aria-label="Cerrar">✕</button>
         </div>
 
-        {/* Aviso */}
-        <div style={fe.warningBox}>
-          ⚠️ Estás corrigiendo una ficha ya cerrada. Los cambios se registrarán en el log de auditoría.
-        </div>
+        {/* Aviso — solo al corregir una ficha que ya estaba cerrada */}
+        {esCerrada && (
+          <div style={fe.warningBox}>
+            ⚠️ Estás corrigiendo una ficha ya cerrada. Los cambios se registrarán en el log de auditoría.
+          </div>
+        )}
 
         {/* Marcador editable */}
         <div style={fd.marcadorRow}>
@@ -1054,12 +1110,43 @@ function FichaEditorModal({ partido, token, liga, onClose, onGuardado }) {
           <div style={fe.errorBox}>⚠️ {error}</div>
         )}
 
-        <div style={fe.acciones}>
-          <button style={fe.btnCancel} onClick={onClose} disabled={guardando}>Cancelar</button>
-          <button style={fe.btnGuardar} onClick={guardar} disabled={guardando}>
-            {guardando ? "Guardando..." : "💾 Guardar cambios"}
-          </button>
-        </div>
+        {esCerrada ? (
+          /* Ficha ya cerrada: se corrige y conserva su estado de cerrada. */
+          <div style={fe.acciones}>
+            <button style={fe.btnCancel} onClick={onClose} disabled={guardando}>Cancelar</button>
+            <button style={fe.btnGuardar} onClick={() => guardar(true)} disabled={guardando}>
+              {guardando ? "Guardando..." : "💾 Guardar cambios"}
+            </button>
+          </div>
+        ) : confirmarCierre ? (
+          /* Confirmación previa al cierre de una ficha pendiente. */
+          <div>
+            <div style={fe.confirmTxt}>
+              🔒 Al cerrar la ficha, el resultado cuenta para la tabla de posiciones. Podrás corregirla después si hace falta.
+            </div>
+            <div style={fe.acciones}>
+              <button style={fe.btnCancel} onClick={() => setConfirmarCierre(false)} disabled={guardando}>
+                No, volver
+              </button>
+              <button style={fe.btnGuardar} onClick={() => guardar(true)} disabled={guardando}>
+                {guardando ? "Cerrando..." : "Sí, cerrar ficha"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* Ficha nueva o borrador: guardar como borrador o cerrarla. */
+          <div style={fe.accionesCol}>
+            <div style={fe.acciones}>
+              <button style={fe.btnBorrador} onClick={() => guardar(false)} disabled={guardando}>
+                {guardando ? "Guardando..." : "💾 Guardar borrador"}
+              </button>
+              <button style={fe.btnCerrar} onClick={() => setConfirmarCierre(true)} disabled={guardando}>
+                🔒 Cerrar ficha
+              </button>
+            </div>
+            <button style={fe.btnCancelFull} onClick={onClose} disabled={guardando}>Cancelar</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1082,8 +1169,13 @@ const fe = {
   textarea: { width: "100%", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: "8px 10px", fontSize: 12, color: "#111827", outline: "none", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" },
   errorBox: { background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 9, padding: "8px 12px", color: "#b91c1c", fontSize: 12, marginBottom: 10 },
   acciones: { display: "flex", gap: 8, marginTop: 4 },
+  accionesCol: { display: "flex", flexDirection: "column", gap: 8, marginTop: 4 },
   btnCancel: { flex: 1, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: "10px 12px", color: "#6b7280", fontSize: 13, fontWeight: 700, cursor: "pointer" },
+  btnCancelFull: { background: "transparent", border: "none", padding: "6px", color: "#9ca3af", fontSize: 12.5, fontWeight: 700, cursor: "pointer" },
   btnGuardar: { flex: 2, background: "#4f8f2f", border: "none", borderRadius: 10, padding: "10px 12px", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" },
+  btnBorrador: { flex: 1, background: "#fff", border: "2px solid #4f8f2f", borderRadius: 10, padding: "10px 12px", color: "#4f8f2f", fontSize: 13, fontWeight: 800, cursor: "pointer" },
+  btnCerrar: { flex: 1, background: "#4f8f2f", border: "none", borderRadius: 10, padding: "10px 12px", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" },
+  confirmTxt: { background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 9, padding: "9px 12px", color: "#15803d", fontSize: 11.5, lineHeight: 1.5, marginBottom: 8 },
 };
 
 // Estilos del modal de ficha detallada
