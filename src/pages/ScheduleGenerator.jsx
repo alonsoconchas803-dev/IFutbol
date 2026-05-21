@@ -151,7 +151,10 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
         db(`/ficha_partido?select=*,partidos(jornada_id,equipo_local_id,equipo_visitante_id,jornadas(liga_id))`, token),
         db(`/liguilla_partidos?liga_id=eq.${liga.id}&select=*&order=created_at`, token),
       ]);
-      setEquipos(eqs || []);
+      // Solo los equipos activos entran al emparejamiento de jornadas nuevas.
+      // Los dados de baja se excluyen aquí, pero siguen contando en la
+      // clasificación (ver calcularClasificacion) para no alterar a sus rivales.
+      setEquipos((eqs || []).filter(e => e.activo !== false));
       setJornadasGuardadas(jors || []);
 
       // Reconstruir historial
@@ -175,6 +178,9 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
     setLoading(false);
   };
 
+  // Recibe TODOS los equipos (activos + dados de baja) para que las fichas
+  // cerradas contra un equipo dado de baja sigan sumando a sus rivales. Los
+  // equipos dados de baja se descartan al final, solo de la presentación.
   const calcularClasificacion = (eqs, fichas) => {
     const tabla = {};
     eqs.forEach(eq => { tabla[eq.id] = { equipo: eq, pj:0, g:0, e:0, d:0, gf:0, gc:0, pts:0 }; });
@@ -189,7 +195,9 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
       else if ((f.goles_local||0) < (f.goles_visitante||0)) { tabla[vId].g++; tabla[vId].pts+=3; tabla[lId].d++; }
       else { tabla[lId].e++; tabla[lId].pts++; tabla[vId].e++; tabla[vId].pts++; }
     });
-    return Object.values(tabla).sort((a,b) => b.pts-a.pts || (b.gf-b.gc)-(a.gf-a.gc));
+    return Object.values(tabla)
+      .filter(r => r.equipo.activo !== false)
+      .sort((a,b) => b.pts-a.pts || (b.gf-b.gc)-(a.gf-a.gc));
   };
 
   useEffect(() => {

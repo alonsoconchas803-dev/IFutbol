@@ -809,14 +809,33 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
   // Abre el modal de confirmación (en vez del confirm nativo del navegador)
   const eliminarEquipo = (eq) => setEliminarEquipoTarget(eq);
 
+  // Baja lógica: el equipo no se borra, se marca inactivo. Así conserva su id
+  // y las fichas ya cerradas (propias y de los rivales) quedan intactas.
   const confirmarEliminarEquipo = async () => {
     if (!eliminarEquipoTarget) return;
     setLoading(true);
     try {
-      await db(`/equipos?id=eq.${eliminarEquipoTarget.id}`, token, { method: "DELETE" });
-      showToast("Equipo eliminado");
+      await db(`/equipos?id=eq.${eliminarEquipoTarget.id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ activo: false, dado_baja_en: new Date().toISOString() }),
+      });
+      showToast("Equipo dado de baja");
       if (equipoDetalle?.id === eliminarEquipoTarget.id) setEquipoDetalle(null);
       setEliminarEquipoTarget(null);
+      cargarEquipos(ligaSeleccionada.id);
+    } catch (e) { showToast(e.message, "err"); }
+    setLoading(false);
+  };
+
+  // Reincorpora un equipo dado de baja a la competencia.
+  const reactivarEquipo = async (eq) => {
+    setLoading(true);
+    try {
+      await db(`/equipos?id=eq.${eq.id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ activo: true, dado_baja_en: null }),
+      });
+      showToast("Equipo reactivado ✓");
       cargarEquipos(ligaSeleccionada.id);
     } catch (e) { showToast(e.message, "err"); }
     setLoading(false);
@@ -852,6 +871,10 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
   };
 
   // ── RENDER ────────────────────────────────────────────────────
+  // Equipos activos (en competencia) vs. dados de baja (fuera de tabla/generador).
+  const equiposActivos = equipos.filter(e => e.activo !== false);
+  const equiposBaja = equipos.filter(e => e.activo === false);
+
   return (
     <div style={s.wrap}>
       <style>{css}</style>
@@ -1049,7 +1072,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
           {(seccion === "equipos") && (
             <div>
               <div style={s.secHeader}>
-                <span style={s.secCount}>{equipos.length} equipos en {ligaSeleccionada.nombre}</span>
+                <span style={s.secCount}>{equiposActivos.length} equipos en {ligaSeleccionada.nombre}</span>
                 <button style={s.btnAdd} onClick={() => { setEquipoForm({ nombre: "", color_playera: "#3182ce", color_camiseta_2: "#ffffff", diseno_camiseta: "solido", escudo_url: "" }); setEscudoPreview(null); setEscudoFile(null); setEditEquipoId(null); setModal("equipo"); }}>
                   + Nuevo equipo
                 </button>
@@ -1062,8 +1085,10 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                   <button style={s.btnAdd} onClick={() => setModal("equipo")}>Registrar primer equipo</button>
                 </div>
               ) : (
+                <>
+                {equiposActivos.length > 0 && (
                 <div style={s.equipoGrid}>
-                  {equipos.map(eq => {
+                  {equiposActivos.map(eq => {
                     const color = eq.color_playera || "#3182ce";
                     const numJug = jugadores.filter(j => j.equipo_id === eq.id).length;
                     const inicial = (eq.nombre || "?").trim().charAt(0).toUpperCase();
@@ -1086,7 +1111,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                           <div style={s.equipoCardRight}>
                             <div style={s.equipoActionsRow}>
                               <button style={s.btnEdit} onClick={() => editarEquipo(eq)} title="Editar">✏️</button>
-                              <button style={s.btnDel} onClick={() => eliminarEquipo(eq)} title="Eliminar">🗑️</button>
+                              <button style={s.btnDel} onClick={() => eliminarEquipo(eq)} title="Dar de baja">🗑️</button>
                             </div>
                             <div style={s.equipoMetaRight}>
                               {numJug} {numJug === 1 ? "jug. inscrito" : "jug. inscritos"}
@@ -1101,6 +1126,42 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                     );
                   })}
                 </div>
+                )}
+
+                {equiposBaja.length > 0 && (
+                  <div style={{ marginTop: 22 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#6b7280", marginBottom: 10 }}>
+                      📁 Equipos dados de baja ({equiposBaja.length})
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {equiposBaja.map(eq => {
+                        const cBaja = eq.color_playera || "#9ca3af";
+                        const fBaja = eq.dado_baja_en
+                          ? new Date(eq.dado_baja_en).toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: "numeric" })
+                          : null;
+                        return (
+                          <div key={eq.id} style={{ display: "flex", alignItems: "center", gap: 10, background: "#f9fafb", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px" }}>
+                            <div style={{ width: 38, height: 38, borderRadius: 9, background: cBaja, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 17, flexShrink: 0, filter: "grayscale(0.45)" }}>
+                              {(eq.nombre || "?").trim().charAt(0).toUpperCase()}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontWeight: 700, fontSize: 14, color: "#374151" }}>{eq.nombre}</div>
+                              <div style={{ fontSize: 11.5, color: "#9ca3af" }}>
+                                Dado de baja{fBaja ? ` · ${fBaja}` : ""}
+                              </div>
+                            </div>
+                            <button
+                              style={{ background: "#ecfdf5", color: "#047857", border: "1px solid #6ee7b7", borderRadius: 8, padding: "6px 12px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}
+                              onClick={() => reactivarEquipo(eq)} disabled={loading}>
+                              Reactivar
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                </>
               )}
             </div>
           )}
@@ -2182,24 +2243,24 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
         </div>
       )}
 
-      {/* ── MODAL ELIMINAR EQUIPO ── */}
+      {/* ── MODAL DAR DE BAJA EQUIPO ── */}
       {eliminarEquipoTarget && (
         <div style={s.overlay} onClick={() => !loading && setEliminarEquipoTarget(null)}>
           <div style={{ ...s.modalBox, maxWidth: 400 }} onClick={e => e.stopPropagation()}>
             <div style={{ textAlign: "center", marginBottom: 18 }}>
-              <div style={{ fontSize: 42, marginBottom: 10 }}>⚠️</div>
-              <h3 style={{ ...s.modalTitle, marginBottom: 10 }}>¿Eliminar este equipo?</h3>
+              <div style={{ fontSize: 42, marginBottom: 10 }}>🚪</div>
+              <h3 style={{ ...s.modalTitle, marginBottom: 10 }}>¿Dar de baja este equipo?</h3>
               <div style={{ fontSize: 15, fontWeight: 700, color: "#111827", marginBottom: 6 }}>
                 {eliminarEquipoTarget.nombre}
               </div>
             </div>
-            <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 10, padding: "12px 14px", fontSize: 12, color: "#991b1b", lineHeight: 1.45, marginBottom: 18 }}>
-              <strong>Aviso:</strong> Se perderán todos sus jugadores inscritos en este torneo. Esta acción no se puede deshacer.
+            <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 10, padding: "12px 14px", fontSize: 12, color: "#92400e", lineHeight: 1.45, marginBottom: 18 }}>
+              El equipo saldrá de la tabla general y dejará de aparecer en el generador de jornadas. Sus partidos ya jugados se conservan y no afectan a los demás equipos. Podrás reactivarlo más adelante.
             </div>
             <div style={s.modalActions}>
               <button style={s.btnCancel} onClick={() => setEliminarEquipoTarget(null)} disabled={loading}>Cancelar</button>
               <button style={{ ...s.btnSave, background: "#dc2626" }} onClick={confirmarEliminarEquipo} disabled={loading}>
-                {loading ? "Eliminando..." : "Sí, eliminar"}
+                {loading ? "Dando de baja..." : "Sí, dar de baja"}
               </button>
             </div>
           </div>

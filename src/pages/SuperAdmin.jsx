@@ -323,16 +323,35 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
     setLoading(false);
   };
 
+  // Baja lógica: conserva el id del equipo y su historial; solo lo marca inactivo.
   const eliminarEquipo = async (id) => {
-    if (!confirm("¿Eliminar este equipo?")) return;
+    if (!confirm("¿Dar de baja este equipo? Saldrá de la tabla general y del generador, pero sus partidos ya jugados se conservan.")) return;
     try {
-      await db(`/equipos?id=eq.${id}`, token, { method: "DELETE" });
-      showToast("Equipo eliminado");
+      await db(`/equipos?id=eq.${id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ activo: false, dado_baja_en: new Date().toISOString() }),
+      });
+      showToast("Equipo dado de baja");
+      cargarEquipos(ligaEquipos.id);
+    } catch (e) { showToast(e.message, "err"); }
+  };
+
+  const reactivarEquipo = async (id) => {
+    try {
+      await db(`/equipos?id=eq.${id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ activo: true, dado_baja_en: null }),
+      });
+      showToast("Equipo reactivado ✓");
       cargarEquipos(ligaEquipos.id);
     } catch (e) { showToast(e.message, "err"); }
   };
 
   // ── RENDER ────────────────────────────────────────────────────
+  // Equipos activos (en competencia) vs. dados de baja (fuera de tabla/generador).
+  const equiposActivos = equipos.filter(e => e.activo !== false);
+  const equiposBaja = equipos.filter(e => e.activo === false);
+
   return (
     <div style={s.wrap}>
       <style>{css}</style>
@@ -561,7 +580,7 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
           {ligaEquipos && (
             <>
               <div style={s.secHeader}>
-                <span style={s.secCount}>{equipos.length} equipos en {ligaEquipos.nombre}</span>
+                <span style={s.secCount}>{equiposActivos.length} equipos en {ligaEquipos.nombre}</span>
                 <button style={s.btnAdd} onClick={() => { setEquipoForm({ nombre: "", color_playera: "#3182ce", color_camiseta_2: "#ffffff", diseno_camiseta: "solido" }); setEditEquipoId(null); setModal("equipo"); }}>
                   + Nuevo equipo
                 </button>
@@ -576,8 +595,10 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
                   </button>
                 </div>
               ) : (
+                <>
+                {equiposActivos.length > 0 && (
                 <div style={s.grid}>
-                  {equipos.map(eq => (
+                  {equiposActivos.map(eq => (
                     <div key={eq.id} style={{ ...s.card, borderTop: `3px solid ${eq.color_playera}` }} className="sa-card">
                       <div style={s.cardTop}>
                         <JerseySVG
@@ -595,6 +616,39 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
                     </div>
                   ))}
                 </div>
+                )}
+
+                {equiposBaja.length > 0 && (
+                  <div style={{ marginTop: 22 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#6b7280", marginBottom: 10 }}>
+                      📁 Equipos dados de baja ({equiposBaja.length})
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {equiposBaja.map(eq => {
+                        const fBaja = eq.dado_baja_en
+                          ? new Date(eq.dado_baja_en).toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: "numeric" })
+                          : null;
+                        return (
+                          <div key={eq.id} style={{ display: "flex", alignItems: "center", gap: 10, background: "#f9fafb", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px" }}>
+                            <JerseySVG diseno={eq.diseno_camiseta || "solido"} color1={eq.color_playera || "#9ca3af"} color2={eq.color_camiseta_2 || "#ffffff"} size={34} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontWeight: 700, fontSize: 14, color: "#374151" }}>{eq.nombre}</div>
+                              <div style={{ fontSize: 11.5, color: "#9ca3af" }}>
+                                Dado de baja{fBaja ? ` · ${fBaja}` : ""}
+                              </div>
+                            </div>
+                            <button
+                              style={{ background: "#ecfdf5", color: "#047857", border: "1px solid #6ee7b7", borderRadius: 8, padding: "6px 12px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}
+                              onClick={() => reactivarEquipo(eq.id)}>
+                              Reactivar
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                </>
               )}
             </>
           )}

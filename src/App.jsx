@@ -668,7 +668,10 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
       db(`/jornadas?liga_id=eq.${ligaId}&select=id,numero,fecha&order=numero`),
     ]);
     const eqsF = eqs || [];
-    setEquipos(eqsF);
+    // La clasificación se calcula con TODOS los equipos (incl. dados de baja)
+    // para que las fichas cerradas de sus rivales sigan contando; al estado
+    // visible solo van los activos.
+    setEquipos(eqsF.filter(e => e.activo !== false));
     const jornadaIds = (jornadas||[]).map(j=>j.id);
     const jornadasMap = Object.fromEntries((jornadas||[]).map(j=>[j.id,j]));
 
@@ -700,7 +703,7 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
       else if ((f.goles_local||0)<(f.goles_visitante||0)){tabla[vId].g++;tabla[vId].pts+=3;tabla[lId].d++;}
       else{tabla[lId].e++;tabla[lId].pts++;tabla[vId].e++;tabla[vId].pts++;}
     });
-    setClasificacion(Object.values(tabla).sort((a,b)=>b.pts-a.pts||(b.gf-b.gc)-(a.gf-a.gc)));
+    setClasificacion(Object.values(tabla).filter(r=>r.equipo.activo!==false).sort((a,b)=>b.pts-a.pts||(b.gf-b.gc)-(a.gf-a.gc)));
 
     const gm={};
     fichas.forEach(p=>(p.ficha_partido?.goleadores||[]).forEach(g=>{
