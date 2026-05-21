@@ -705,11 +705,28 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
     });
     setClasificacion(Object.values(tabla).filter(r=>r.equipo.activo!==false).sort((a,b)=>b.pts-a.pts||(b.gf-b.gc)-(a.gf-a.gc)));
 
+    // Goleadores: acumula goles por jugador desde las fichas cerradas.
     const gm={};
     fichas.forEach(p=>(p.ficha_partido?.goleadores||[]).forEach(g=>{
+      if(!g.jugador_id)return;
       if(!gm[g.jugador_id])gm[g.jugador_id]={nombre:g.nombre,equipo_nombre:g.equipo_nombre,goles:0};
-      gm[g.jugador_id].goles+=g.goles;
+      gm[g.jugador_id].goles+=g.goles||0;
     }));
+    // El equipo mostrado debe ser el equipo ACTUAL del jugador, no el que quedó
+    // congelado en la ficha: si se cambió de club, sus goles lo siguen pero bajo
+    // el equipo nuevo. Se resuelve por su inscripción vigente en jugador_equipo.
+    const golJugIds=Object.keys(gm);
+    if(golJugIds.length>0){
+      const inscripciones=await db(`/jugador_equipo?liga_id=eq.${ligaId}&jugador_id=in.(${golJugIds.join(",")})&select=jugador_id,equipo_id,created_at&order=created_at.desc`);
+      const equipoActualPorJug={};
+      (inscripciones||[]).forEach(i=>{ if(!equipoActualPorJug[i.jugador_id])equipoActualPorJug[i.jugador_id]=i.equipo_id; });
+      const nombrePorEquipo=Object.fromEntries(eqsF.map(e=>[e.id,e.nombre]));
+      golJugIds.forEach(jid=>{
+        const eqActual=equipoActualPorJug[jid];
+        // Si no tiene inscripción vigente, se conserva el equipo de la ficha.
+        if(eqActual&&nombrePorEquipo[eqActual])gm[jid].equipo_nombre=nombrePorEquipo[eqActual];
+      });
+    }
     setGoleadores(Object.values(gm).sort((a,b)=>b.goles-a.goles).slice(0,10));
     setLoading(false);
   };
