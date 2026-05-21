@@ -568,8 +568,7 @@ function UnidadCard({ c, onClick }) {
         <div style={{ position:"relative", zIndex:1, marginTop: 60 }}>
           <div style={{ fontSize:16, fontWeight:800, color:"#fff", marginBottom:3, textShadow:"0 1px 3px rgba(0,0,0,0.6)" }}>{c.nombre}</div>
           {c.lema && <div style={{ fontSize:12, color:"rgba(255,255,255,0.92)", fontStyle:"italic", marginBottom:6, textShadow:"0 1px 2px rgba(0,0,0,0.5)" }}>{c.lema}</div>}
-          <div style={{ fontSize:13, color:"rgba(255,255,255,0.85)", marginBottom:14, textShadow:"0 1px 2px rgba(0,0,0,0.5)" }}>{c.direccion || "Ver torneos →"}</div>
-          <div style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:12, color:"#fff", fontWeight:700, background:"rgba(255,255,255,0.18)", padding:"3px 10px", borderRadius:99, backdropFilter:"blur(4px)" }}>⚽ {c.num_canchas} {c.num_canchas===1?"cancha":"canchas"}</div>
+          <div style={{ fontSize:13, color:"rgba(255,255,255,0.85)", textShadow:"0 1px 2px rgba(0,0,0,0.5)" }}>{c.direccion || "Ver torneos →"}</div>
         </div>
       </div>
     );
@@ -590,8 +589,7 @@ function UnidadCard({ c, onClick }) {
         </div>
         <div style={{ fontSize:16, fontWeight:800, color:"var(--text)", marginBottom: c.lema ? 3 : 5 }}>{c.nombre}</div>
         {c.lema && <div style={{ fontSize:12, color: color, fontStyle:"italic", fontWeight:600, marginBottom:6 }}>{c.lema}</div>}
-        <div style={{ fontSize:13, color:"var(--text-sub)", marginBottom:14 }}>{c.direccion || "Ver torneos →"}</div>
-        <div style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:12, color: color, fontWeight:700, background: colorBg10, padding:"3px 10px", borderRadius:99 }}>⚽ {c.num_canchas} {c.num_canchas===1?"cancha":"canchas"}</div>
+        <div style={{ fontSize:13, color:"var(--text-sub)" }}>{c.direccion || "Ver torneos →"}</div>
       </div>
     </div>
   );

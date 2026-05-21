@@ -125,7 +125,8 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
   const [liguilla, setLiguilla] = useState(null);
   const [preview, setPreview] = useState(null);
   const [config, setConfig] = useState({
-    numCanchas: cancha?.num_canchas || 2,
+    // El número de canchas se toma del registro de la unidad (cancha o miUnidad).
+    numCanchas: cancha?.num_canchas || miUnidad?.num_canchas || 2,
     duracion: 50,
     intervalo: 10,
     horaInicio: "08:00",
