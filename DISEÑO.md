@@ -232,7 +232,7 @@ El drawer es el patrón de navegación principal de la app. **Reemplaza al sideb
 - Altura: 56px mínimo (suficiente para tap en hamburguesa)
 - Sombra sutil inferior
 - **Botón hamburguesa a la izquierda** (siempre visible, mínimo 44×44px tappable)
-- Logo IFútbol centrado o pegado al hamburguesa
+- Logo iFutbol centrado o pegado al hamburguesa
 - Pill de rol y/o botón de acción contextual a la derecha (máximo 1 acción para no saturar)
 - Si hay título de sección, va centrado debajo del topbar como subtítulo, no dentro del topbar
 
@@ -302,14 +302,15 @@ El drawer es el patrón de navegación principal de la app. **Reemplaza al sideb
 | Descanso | 😴 |
 | Publicidad | 📢 |
 
-### 6.3 Logo de IFútbol
+### 6.3 Logo de iFutbol
 
-- Cuadrado con bordes redondeados (radius 9)
-- Gradiente verde de `#4f8f2f` a `#7fbf4d`
-- Icono SVG de balón de fútbol en blanco (círculo con líneas curvas)
-- Tamaño en topbar: 36-40px (suficiente para identidad sin competir con la hamburguesa)
-- Texto "IFútbol" en peso 800, letter-spacing -0.5
-- En la ficha imprimible: el logo se mantiene en su tamaño calculado para Letter (7mm) — la ficha es la única vista que NO sigue la regla mobile-only porque su destino es papel
+- **Isotipo:** campo de futbol abstracto, minimalista y geométrico, dibujado **solo con trazos de contorno** (sin relleno). Se compone de: marco rectangular de esquinas redondeadas (el campo), línea vertical de medio campo, círculo central y dos porterías (un rectángulo pequeño pegado a cada lado corto). viewBox `64×40` (proporción 1.6:1)
+- **Estilo flat:** monocromático, **sin degradados ni sombras**. Una sola tinta controlada por la prop `color`
+- **Versiones canónicas:** blanco (`#FFFFFF`) sobre fondo verde · verde principal (`#4f8f2f`) sobre fondo blanco
+- **Wordmark:** el texto `iFutbol` en tipografía **Montserrat** (respaldo DM Sans), peso 600, letter-spacing -0.3, del mismo color que el isotipo
+- Tamaño del isotipo en topbar: ~28-40px de alto (suficiente para identidad sin competir con la hamburguesa)
+- En la ficha imprimible: el logo se mantiene en su tamaño calculado para Letter — la ficha es la única vista que NO sigue la regla mobile-only porque su destino es papel
+- Implementado en el componente `IFutbolLogo.jsx`
 
 ---
 
@@ -445,7 +446,7 @@ El drawer es el patrón de navegación principal de la app. **Reemplaza al sideb
 - Texto blanco
 - Izquierda: logo unidad + nombre unidad + nombre torneo
 - Centro: jornada, fecha, hora, cancha
-- Derecha: logo IFútbol + nombre
+- Derecha: logo iFutbol + nombre
 
 ### 10.3 Marcador central
 
