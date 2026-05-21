@@ -87,7 +87,7 @@ function UploadFieldRow({
 
 function OpcionPicker({ opciones, valor, onChange, columnas = 3 }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: `repeat(${columnas}, 1fr)`, gap: 8 }}>
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${columnas}, minmax(0, 1fr))`, gap: 8 }}>
       {opciones.map(op => (
         <div key={op.val} onClick={() => onChange(op.val)}
           style={{
@@ -173,13 +173,15 @@ export default function PersonalizacionUnidadFields({
       </div>
 
       {/* TAMAÑO Y FORMA DEL LOGO */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, ...fieldStyle }}>
-        <div>
+      {/* flex-wrap: lado a lado cuando hay espacio, apilados (ancho completo)
+          cuando el modal es angosto, para que el texto de los botones quepa. */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, ...fieldStyle }}>
+        <div style={{ flex: "1 1 200px", minWidth: 0 }}>
           <label style={labelStyle}>Tamaño del logo</label>
           <OpcionPicker opciones={TAMANOS_LOGO} valor={form.tamano_logo || "mediano"}
             onChange={v => setForm({ ...form, tamano_logo: v })} columnas={3} />
         </div>
-        <div>
+        <div style={{ flex: "1 1 200px", minWidth: 0 }}>
           <label style={labelStyle}>Forma del logo</label>
           <OpcionPicker opciones={FORMAS_LOGO} valor={form.forma_logo || "cuadrado"}
             onChange={v => setForm({ ...form, forma_logo: v })} columnas={2} />

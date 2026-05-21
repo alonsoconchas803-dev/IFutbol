@@ -1053,7 +1053,7 @@ const s = {
   barFill: { height: "100%", background: GREEN, borderRadius: 4, transition: "width 0.5s ease" },
   barCount: { fontSize: 11.5, fontWeight: 700, color: "#111827", width: 18, textAlign: "right" },
   overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 12 },
-  modalBox: { background: "#ffffff", border: `1px solid ${BORDER}`, borderRadius: 14, padding: 20, width: "100%", maxWidth: 440, boxShadow: "0 8px 32px rgba(0,0,0,0.12)", maxHeight: "92vh", overflowY: "auto" },
+  modalBox: { background: "#ffffff", border: `1px solid ${BORDER}`, borderRadius: 14, padding: 20, width: "100%", maxWidth: 440, boxSizing: "border-box", boxShadow: "0 8px 32px rgba(0,0,0,0.12)", maxHeight: "92vh", overflowY: "auto", overflowX: "hidden" },
   modalTitle: { fontSize: 17, fontWeight: 800, color: "#111827", marginBottom: 18 },
   field: { marginBottom: 14, flex: 1 },
   formRow: { display: "flex", gap: 10, flexWrap: "wrap" },
