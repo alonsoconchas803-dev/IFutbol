@@ -374,49 +374,61 @@ Si el equipo tiene menos de 17 jugadores, las filas restantes quedan en blanco p
 - Se cobra **por semana jugada**
 - Las semanas de Liguilla y Copa también se cobran (3 semanas extra)
 - Una temporada típica son 23 semanas (20 regulares + 3 de liguilla)
+- Los **tres planes incluyen exactamente las mismas funciones** (tabla de posiciones, calendario, generador de jornadas, fichas digitales, generador de fichas PDF, registro de jugadores, Liguilla y Copa, estadísticas, escudos de equipos, fotos de jugadores, perfil público y personalización de la unidad). Lo único que cambia entre planes es el **tope de equipos por torneo**
 
 ### 7.2 Plan Básico
 
-- **Precio normal:** $89 MXN/semana
-- **Precio lanzamiento:** $89 MXN/semana
-- Hasta 10 equipos
-- Hasta 150 jugadores
-- 1 torneo
-- Incluye: tabla de posiciones, calendario, fichas digitales, registro de jugadores, perfil público
+- **Precio:** $70 MXN/semana
+- Hasta **12 equipos** por torneo
 
 ### 7.3 Plan Estándar
 
-- **Precio normal:** $129 MXN/semana
-- **Precio lanzamiento:** $89 MXN/semana
-- Hasta 20 equipos
-- Hasta 300 jugadores
-- Incluye lo del Básico + Liguilla y Copa, estadísticas avanzadas, escudos de equipos, foto de jugadores, generador de fichas PDF
+- **Precio:** $100 MXN/semana
+- Hasta **16 equipos** por torneo
 
 ### 7.4 Plan Pro
 
-- **Precio normal:** $179 MXN/semana
-- **Precio lanzamiento:** $129 MXN/semana
-- Equipos ilimitados
-- Jugadores ilimitados
-- Incluye todo lo del Estándar + soporte prioritario, estadísticas históricas entre temporadas, personalización del perfil de la unidad deportiva
+- **Precio:** $130 MXN/semana
+- Hasta **25 equipos** por torneo
 
 ### 7.5 Estrategia de lanzamiento
 
-- Durante el primer lanzamiento, cada plan se cobra al precio del plan inmediatamente inferior durante 13 semanas
-- Estrategia de price anchoring: el cliente percibe que está obteniendo más valor al mismo precio
+- Los clientes nuevos reciben **50% de descuento durante las primeras 5 jornadas** (semanas jugadas)
+- Precios durante el descuento: Básico **$35/semana**, Estándar **$50/semana**, Pro **$65/semana**
+- A partir de la 6.ª jornada se cobra el precio normal del plan
 
 ### 7.6 Si una unidad deportiva tiene varios torneos
 
 - Se cobra cada torneo de forma independiente según el número de equipos que tenga
-- Ejemplo: una unidad con 3 torneos (18, 9 y 25 equipos) pagaría: Estándar + Básico + Pro
+- Ejemplo: una unidad con 3 torneos (10, 15 y 22 equipos) pagaría: Básico + Estándar + Pro
 
-### 7.7 Cobro
+### 7.7 Cobro semanal por uso (post-pago)
 
-- Cobro anticipado por temporada (no semana a semana)
-- Al inicio de temporada se cobran las 20 semanas regulares
-- Al inicio de la liguilla se cobran las 3 semanas extra
+- El pago es **semanal y sobre uso**: se cobra **después** de la semana jugada, nunca por adelantado
+- Una semana se considera usada cuando la unidad genera partidos, genera fichas y cierra fichas durante esa semana
+- El cobro de cada semana se realiza al cierre de la misma, según la actividad realmente registrada
 
-### 7.8 Costos operativos
+### 7.8 Semanas de descanso
+
+- En un período de **6 meses**, cada unidad puede tomar hasta **3 semanas de descanso sin ningún pago**
+- Una semana cuenta como descanso cuando, por fuerza mayor o condiciones climatológicas, la unidad **no juega**: no genera partidos, no genera fichas y no cierra fichas esa semana
+- Mientras no haya actividad, esa semana **no se cobra** (hasta agotar los 3 descansos del semestre)
+- A partir de la **4.ª semana de descanso** dentro del mismo período de 6 meses, se cobra el **40% del pago semanal** del plan contratado
+
+### 7.9 Cobro proporcional por fichas no cerradas
+
+- Si la semana se juega solo de forma parcial (por clima u otra causa) y no se cierran todas las fichas esperadas, el cobro es **proporcional a las fichas efectivamente cerradas**
+- Fórmula: `(fichas cerradas ÷ fichas generadas para esa semana) × pago semanal`
+- Ejemplo: si se generaron 5 partidos con sus 5 fichas y solo se juegan y cierran 4, se cobran **4/5 del pago semanal**
+
+### 7.10 Exceso del tope de equipos del plan
+
+- El sistema **no limita técnicamente** la cantidad de equipos por torneo; el cumplimiento del tope del plan se **supervisa de forma manual**, revisando los equipos inscritos al menos al momento de generar las fichas
+- Si una unidad **excede el tope de su plan** y **genera las jornadas** con esos equipos de más, esa semana se le cobra el **precio del plan inmediatamente superior**
+- El cobro del plan superior aplica a la **semana en que ocurrió el exceso**, aunque la unidad corrija la cantidad de equipos en semanas posteriores
+- Esta condición se especifica explícitamente en el **contrato** de cada unidad deportiva
+
+### 7.11 Costos operativos
 
 - Supabase Free: $0 (suficiente para la fase de construcción y el primer cliente)
 - Supabase Pro: $25 USD/mes (~$500 MXN/mes) — necesario al tener varios clientes
