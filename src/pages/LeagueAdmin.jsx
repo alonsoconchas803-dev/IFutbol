@@ -1,5 +1,5 @@
 import ScheduleGenerator from "./ScheduleGenerator";
-import FichaGenerator, { FichaDetalleModal } from "./FichaGenerator";
+import FichaGenerator from "./FichaGenerator";
 import { useState, useEffect } from "react";
 import JerseySVG, { JerseyDesignPicker } from "../components/JerseySVG";
 import PersonalizacionUnidadFields from "../components/PersonalizacionUnidadFields";
@@ -91,14 +91,6 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
   const [ligaForm, setLigaForm] = useState({ nombre: "", dia: "Lunes", turno: "Noche", temporada: "", color_marca: "#4f8f2f" });
   const [editLigaId, setEditLigaId] = useState(null);
   const [eliminarLigaTarget, setEliminarLigaTarget] = useState(null);
-
-  // Resultados (fichas cerradas)
-  const [resultados, setResultados] = useState([]);
-  const [resultadosLoading, setResultadosLoading] = useState(false);
-  const [jugadoresInfo, setJugadoresInfo] = useState({});
-  const [resultadoExpandido, setResultadoExpandido] = useState(null);
-  const [jornadaSelectedRes, setJornadaSelectedRes] = useState(null);
-  const [resultadoVistaFicha, setResultadoVistaFicha] = useState(null); // partido cuyo modal "ver ficha" está abierto
 
   const token = session?.access_token;
 
@@ -267,73 +259,6 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
       }
     }
     setLoading(false);
-  };
-
-  // ── RESULTADOS (FICHAS CERRADAS) ──────────────────────────────
-  const cargarResultados = async () => {
-    if (!ligaSeleccionada) return;
-    setResultadosLoading(true);
-    try {
-      const jornadas = await db(`/jornadas?liga_id=eq.${ligaSeleccionada.id}&select=id,numero,fecha&order=numero`, token);
-      const jornadaIds = (jornadas || []).map(j => j.id);
-      if (jornadaIds.length === 0) { setResultados([]); setResultadosLoading(false); return; }
-
-      const partidos = await db(
-        `/partidos?jornada_id=in.(${jornadaIds.join(",")})&select=id,jornada_id,equipo_local_id,equipo_visitante_id,hora,cancha_numero,jornadas(numero,fecha,liga_id),ficha_partido(*)`,
-        token
-      );
-
-      const cerradas = (partidos || []).filter(p => {
-        const f = Array.isArray(p.ficha_partido) ? p.ficha_partido[0] : p.ficha_partido;
-        return f?.cerrada;
-      });
-
-      const equipoIds = new Set();
-      cerradas.forEach(p => { equipoIds.add(p.equipo_local_id); equipoIds.add(p.equipo_visitante_id); });
-      const equipos = equipoIds.size > 0
-        ? await db(`/equipos?id=in.(${[...equipoIds].join(",")})&select=id,nombre,color_playera,color_camiseta_2,diseno_camiseta,escudo_url`, token)
-        : [];
-      const equiposMap = Object.fromEntries(equipos.map(e => [e.id, e]));
-
-      const jugIds = new Set();
-      cerradas.forEach(p => {
-        const f = Array.isArray(p.ficha_partido) ? p.ficha_partido[0] : p.ficha_partido;
-        (f?.asistencia || []).forEach(id => jugIds.add(id));
-        (f?.goleadores || []).forEach(g => g.jugador_id && jugIds.add(g.jugador_id));
-      });
-      const jugadores = jugIds.size > 0
-        ? await db(`/jugadores?id=in.(${[...jugIds].join(",")})&select=id,nombre_completo,numero_afiliado,foto_url`, token)
-        : [];
-      const jugadoresMap = Object.fromEntries(jugadores.map(j => [j.id, j]));
-
-      // Necesitamos también los dorsales del jugador en su equipo para esta liga
-      const inscripciones = jugIds.size > 0
-        ? await db(`/jugador_equipo?liga_id=eq.${ligaSeleccionada.id}&jugador_id=in.(${[...jugIds].join(",")})&select=jugador_id,equipo_id,dorsal,nombre_camiseta`, token)
-        : [];
-      const inscMap = {};
-      inscripciones.forEach(i => { inscMap[`${i.jugador_id}_${i.equipo_id}`] = i; });
-
-      setJugadoresInfo({ jug: jugadoresMap, insc: inscMap });
-      const procesados = cerradas.map(p => {
-        const ficha = Array.isArray(p.ficha_partido) ? p.ficha_partido[0] : p.ficha_partido;
-        return {
-          id: p.id,
-          local: equiposMap[p.equipo_local_id],
-          visitante: equiposMap[p.equipo_visitante_id],
-          jornada: p.jornadas?.numero,
-          fecha: p.jornadas?.fecha,
-          hora: p.hora,
-          cancha_numero: p.cancha_numero,
-          jornadas: p.jornadas, // numero, fecha, liga_id
-          ficha,
-        };
-      }).sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "") || (b.jornada || 0) - (a.jornada || 0));
-      setResultados(procesados);
-      // Selección por defecto: la jornada más alta con fichas cerradas
-      const jornadasUnicas = [...new Set(procesados.map(r => r.jornada).filter(Boolean))].sort((a, b) => b - a);
-      setJornadaSelectedRes(jornadasUnicas[0] ?? null);
-    } catch (e) { showToast(e.message, "err"); }
-    setResultadosLoading(false);
   };
 
   // ── AÑADIR JUGADORES (ADMIN) ──────────────────────────────────
@@ -762,10 +687,6 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
       setPersonalizarPortadaPreview(miUnidad.portada_url || null);
     }
   }, [seccion, miUnidad?.id]);
-
-  useEffect(() => {
-    if (seccion === "resultados" && ligaSeleccionada) cargarResultados();
-  }, [seccion, ligaSeleccionada]);
 
   // Back button del topbar cuando hay un equipo abierto en detalle
   useEffect(() => {
@@ -1456,6 +1377,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
               session={session}
               liga={ligaSeleccionada}
               miUnidad={miUnidad}
+              modo="fichas"
               headerExtra={
                 <div style={s.ligaSelector}>
                   <span style={s.ligaLabel}>Torneos:</span>
@@ -1474,205 +1396,30 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
             />
           )}
 
-          {/* ── SECCIÓN RESULTADOS (FICHAS CERRADAS) ── */}
-          {seccion === "resultados" && (() => {
-            const jornadasDisponibles = [...new Set(resultados.map(r => r.jornada).filter(Boolean))].sort((a, b) => b - a);
-            const resultadosFiltrados = jornadaSelectedRes != null
-              ? resultados.filter(r => r.jornada === jornadaSelectedRes)
-              : resultados;
-            return (
-            <div>
-              <div style={s.secHeader}>
-                <span style={s.secCount}>{resultados.length} partido{resultados.length === 1 ? "" : "s"} con ficha cerrada</span>
-                <button style={{ ...s.btnAdd, background:"#f9fafb", color:"#374151", border:"1px solid #e5e7eb" }}
-                  onClick={cargarResultados} disabled={resultadosLoading}>
-                  ↻ Actualizar
-                </button>
-              </div>
-              {resultadosLoading ? (
-                <div style={{ textAlign:"center", padding:60, color:"#6b7280" }}>Cargando…</div>
-              ) : resultados.length === 0 ? (
-                <div style={s.empty}>
-                  <div style={s.emptyIcon}>📋</div>
-                  <div style={s.emptyTxt}>Aún no hay partidos con ficha cerrada</div>
-                  <p style={{ color:"#9ca3af", fontSize:13 }}>Las fichas que el árbitro cierre aparecerán aquí con su detalle.</p>
-                </div>
-              ) : (
-                <>
-                  {/* Selector de jornadas */}
-                  {jornadasDisponibles.length > 0 && (
-                    <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:18, alignItems:"center" }}>
-                      <span style={{ fontSize:13, color:"#6b7280", fontWeight:600 }}>Jornada:</span>
-                      {jornadasDisponibles.map(j => (
-                        <button key={j}
-                          onClick={() => setJornadaSelectedRes(j)}
-                          style={{
-                            background: jornadaSelectedRes === j ? `linear-gradient(135deg, ${GREEN} 0%, #7fbf4d 100%)` : SURFACE,
-                            color: jornadaSelectedRes === j ? "#fff" : "#6b7280",
-                            border: `1px solid ${jornadaSelectedRes === j ? GREEN : BORDER}`,
-                            borderRadius: 20,
-                            padding: "6px 14px",
-                            fontSize: 13,
-                            cursor: "pointer",
-                            fontWeight: jornadaSelectedRes === j ? 800 : 600,
-                            boxShadow: jornadaSelectedRes === j ? "0 3px 10px rgba(79,143,47,0.3)" : "none"
-                          }}>
-                          J{j}
-                        </button>
-                      ))}
-                      <button
-                        onClick={() => setJornadaSelectedRes(null)}
-                        style={{
-                          background: jornadaSelectedRes === null ? `linear-gradient(135deg, ${GREEN} 0%, #7fbf4d 100%)` : SURFACE,
-                          color: jornadaSelectedRes === null ? "#fff" : "#6b7280",
-                          border: `1px solid ${jornadaSelectedRes === null ? GREEN : BORDER}`,
-                          borderRadius: 20,
-                          padding: "6px 14px",
-                          fontSize: 13,
-                          cursor: "pointer",
-                          fontWeight: jornadaSelectedRes === null ? 800 : 600,
-                          boxShadow: jornadaSelectedRes === null ? "0 3px 10px rgba(79,143,47,0.3)" : "none"
-                        }}>
-                        Todas
-                      </button>
-                    </div>
-                  )}
-                <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-                  {resultadosFiltrados.length === 0 ? (
-                    <div style={s.empty}>
-                      <div style={s.emptyIcon}>📋</div>
-                      <div style={s.emptyTxt}>No hay partidos cerrados en esta jornada</div>
-                    </div>
-                  ) : resultadosFiltrados.map(r => {
-                    const expandido = resultadoExpandido === r.id;
-                    const goleadores = r.ficha?.goleadores || [];
-                    const asistencia = r.ficha?.asistencia || [];
-                    const golesLocal = goleadores.filter(g => g.equipo === r.local?.id);
-                    const golesVisit = goleadores.filter(g => g.equipo === r.visitante?.id);
-                    const asistLocal = asistencia.map(jid => ({ jid, insc: jugadoresInfo.insc?.[`${jid}_${r.local?.id}`], jug: jugadoresInfo.jug?.[jid] })).filter(x => x.insc);
-                    const asistVisit = asistencia.map(jid => ({ jid, insc: jugadoresInfo.insc?.[`${jid}_${r.visitante?.id}`], jug: jugadoresInfo.jug?.[jid] })).filter(x => x.insc);
-                    return (
-                      <div key={r.id} style={s.resultadoCard}>
-                        <div style={s.resultadoTop} onClick={() => setResultadoExpandido(expandido ? null : r.id)}>
-                          <div style={s.resultadoMeta}>
-                            <span style={s.resultadoJornada}>J{r.jornada}</span>
-                            <span style={s.resultadoFecha}>{r.fecha || "Sin fecha"}</span>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setResultadoVistaFicha(r); }}
-                              style={{ marginLeft: "auto", background:"#f0fdf4", border:"1px solid #c3e6a3", color:"#15803d", borderRadius:8, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}
-                              title="Ver ficha completa">
-                              📝 Ver ficha
-                            </button>
-                          </div>
-                          <div style={s.resultadoMid}>
-                            <div style={{ ...s.resEq, justifyContent:"flex-end" }}>
-                              <span style={s.resEqNombre}>{r.local?.nombre || "—"}</span>
-                              <span style={{ ...s.resEqColor, background: r.local?.color_playera || "#9ca3af" }} />
-                            </div>
-                            <div style={s.resMarcador}>
-                              {r.ficha?.goles_local} - {r.ficha?.goles_visitante}
-                            </div>
-                            <div style={s.resEq}>
-                              <span style={{ ...s.resEqColor, background: r.visitante?.color_playera || "#9ca3af" }} />
-                              <span style={s.resEqNombre}>{r.visitante?.nombre || "—"}</span>
-                            </div>
-                          </div>
-                          <div style={s.resExpandIcon}>{expandido ? "▲" : "▼"}</div>
-                        </div>
-                        {expandido && (
-                          <div style={s.resultadoDetalle}>
-                            {/* Goleadores */}
-                            <div style={s.resDetSec}>
-                              <div style={s.resDetTitle}>⚽ Goleadores</div>
-                              {goleadores.length === 0 ? (
-                                <div style={s.resDetEmpty}>Sin goles registrados</div>
-                              ) : (
-                                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-                                  <div>
-                                    <div style={s.resDetSubT}>{r.local?.nombre}</div>
-                                    {golesLocal.length === 0 ? <div style={s.resDetMini}>—</div> : golesLocal.map((g, i) => (
-                                      <div key={i} style={s.resDetMini}>
-                                        <strong>#{g.dorsal || "?"}</strong> {g.nombre} <span style={{ color: GREEN, fontWeight: 800 }}>({g.goles})</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                  <div>
-                                    <div style={s.resDetSubT}>{r.visitante?.nombre}</div>
-                                    {golesVisit.length === 0 ? <div style={s.resDetMini}>—</div> : golesVisit.map((g, i) => (
-                                      <div key={i} style={s.resDetMini}>
-                                        <strong>#{g.dorsal || "?"}</strong> {g.nombre} <span style={{ color: GREEN, fontWeight: 800 }}>({g.goles})</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                            {/* Asistencia */}
-                            <div style={s.resDetSec}>
-                              <div style={s.resDetTitle}>👥 Asistencia ({asistencia.length})</div>
-                              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-                                <div>
-                                  <div style={s.resDetSubT}>{r.local?.nombre} ({asistLocal.length})</div>
-                                  {asistLocal.length === 0 ? <div style={s.resDetMini}>—</div> : asistLocal.map(({jid, insc, jug}) => (
-                                    <div key={jid} style={s.resDetMini}>
-                                      <strong>#{insc?.dorsal || "?"}</strong> {jug?.nombre_completo || "—"}
-                                    </div>
-                                  ))}
-                                </div>
-                                <div>
-                                  <div style={s.resDetSubT}>{r.visitante?.nombre} ({asistVisit.length})</div>
-                                  {asistVisit.length === 0 ? <div style={s.resDetMini}>—</div> : asistVisit.map(({jid, insc, jug}) => (
-                                    <div key={jid} style={s.resDetMini}>
-                                      <strong>#{insc?.dorsal || "?"}</strong> {jug?.nombre_completo || "—"}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                            {/* Faltas y observaciones */}
-                            {(r.ficha?.faltas_local || r.ficha?.faltas_visitante || r.ficha?.observaciones) && (
-                              <div style={s.resDetSec}>
-                                <div style={s.resDetTitle}>📝 Otros</div>
-                                <div style={s.resDetMini}>
-                                  Faltas: {r.local?.nombre} ({r.ficha.faltas_local || 0}) · {r.visitante?.nombre} ({r.ficha.faltas_visitante || 0})
-                                </div>
-                                {r.ficha.observaciones && (
-                                  <div style={{ ...s.resDetMini, marginTop: 6, fontStyle:"italic" }}>
-                                    "{r.ficha.observaciones}"
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                </>
-              )}
-            </div>
-            );
-          })()}
-
-          {/* MODAL: VER FICHA COMPLETA (solo lectura, desde sección Resultados) */}
-          {resultadoVistaFicha && (
-            <FichaDetalleModal
-              partido={{
-                id: resultadoVistaFicha.id,
-                equipos_local: resultadoVistaFicha.local,
-                equipos_visitante: resultadoVistaFicha.visitante,
-                hora: resultadoVistaFicha.hora,
-                cancha_numero: resultadoVistaFicha.cancha_numero,
-                jornadas: resultadoVistaFicha.jornadas,
-                ficha: resultadoVistaFicha.ficha,
-              }}
-              token={token}
+          {/* ── SECCIÓN RESULTADOS — generador de fichas en modo gestión ── */}
+          {seccion === "resultados" && (
+            <FichaGenerator
+              session={session}
               liga={ligaSeleccionada}
-              onClose={() => setResultadoVistaFicha(null)}
+              miUnidad={miUnidad}
+              modo="resultados"
+              headerExtra={
+                <div style={s.ligaSelector}>
+                  <span style={s.ligaLabel}>Torneos:</span>
+                  <div style={s.ligaTabs}>
+                    {ligas.map(l => (
+                      <button key={l.id}
+                        onClick={() => { setLigaSeleccionada(l); setEquipoDetalle(null); }}
+                        style={{ ...s.ligaTab, ...(ligaSeleccionada?.id === l.id ? s.ligaTabActive : {}), borderLeft: `4px solid ${l.color_marca || "#4f8f2f"}` }}>
+                        🏆 {l.nombre}
+                      </button>
+                    ))}
+                    {ligas.length === 0 && <span style={{ color: "#666", fontSize: 13 }}>No hay ligas activas.</span>}
+                  </div>
+                </div>
+              }
             />
           )}
-
         </>
       )}
 
@@ -2457,27 +2204,6 @@ const s = {
   jugadorRowCap: { background: "linear-gradient(90deg, #fffbeb 0%, #ffffff 60%)", border: "1px solid #fde68a", borderLeft: "3px solid #f59e0b" },
   btnEliminarJug: { background: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 7, padding: "4px 7px", fontSize: 12, cursor: "pointer", flexShrink: 0 },
   confirmCard: { display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", background: "#f9fafb", border: `1px solid ${BORDER}`, borderRadius: 12, marginBottom: 16 },
-  // ── Resultados ──
-  resultadoCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
-  resultadoTop: { display: "grid", gridTemplateColumns: "auto 1fr auto", alignItems: "center", gap: 14, padding: "12px 16px", cursor: "pointer" },
-  resultadoMeta: { display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, minWidth: 60 },
-  resultadoJornada: { fontSize: 12, fontWeight: 800, color: GREEN, padding: "2px 8px", background: "#f0fdf4", borderRadius: 6, border: "1px solid #c3e6a3" },
-  resultadoFecha: { fontSize: 11, color: "#9ca3af" },
-  resultadoMid: { display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 10 },
-  resEq: { display: "flex", alignItems: "center", gap: 6, minWidth: 0 },
-  resEqNombre: { fontSize: 13, fontWeight: 700, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  resEqColor: { width: 12, height: 12, borderRadius: "50%", flexShrink: 0 },
-  resMarcador: { fontSize: 18, fontWeight: 900, color: "#111827", padding: "4px 10px", background: "#f9fafb", borderRadius: 8 },
-  resExpandIcon: { color: "#9ca3af", fontSize: 11 },
-  resultadoDetalle: { borderTop: `1px solid ${BORDER}`, padding: "16px", background: "linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%)" },
-  resDetSec: { marginBottom: 16, background: "#ffffff", border: `1px solid ${BORDER}`, borderRadius: 12, padding: "12px 14px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" },
-  resDetTitle: { fontSize: 13, fontWeight: 800, color: GREEN, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.6, paddingBottom: 8, borderBottom: `1px solid #f0fdf4` },
-  resDetSubT: { fontSize: 11, fontWeight: 800, color: "#fff", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5, padding: "4px 10px", borderRadius: 6, display: "inline-block" },
-  resDetMini: { fontSize: 13, color: "#374151", padding: "5px 8px", borderRadius: 6, marginBottom: 3, display: "flex", alignItems: "center", gap: 8 },
-  resDetMiniGol: { background: "#f0fdf4", border: "1px solid #c3e6a3" },
-  resDetDorsal: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, color: "#fff", fontWeight: 800, fontSize: 11, flexShrink: 0 },
-  resDetGoles: { background: GREEN, color: "#fff", padding: "2px 8px", borderRadius: 10, fontWeight: 800, fontSize: 11, marginLeft: "auto" },
-  resDetEmpty: { fontSize: 12, color: "#9ca3af", fontStyle: "italic", textAlign: "center", padding: "8px 0" },
 };
 
 const css = `

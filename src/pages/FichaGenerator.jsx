@@ -309,7 +309,7 @@ function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, mi
 // ─────────────────────────────────────────────────────────────────
 // COMPONENTE PRINCIPAL
 // ─────────────────────────────────────────────────────────────────
-export default function FichaGenerator({ session, liga, miUnidad, headerExtra, readOnly = false }) {
+export default function FichaGenerator({ session, liga, miUnidad, headerExtra, readOnly = false, modo = "fichas" }) {
   const [jornadas,    setJornadas]   = useState([]);
   const [jornadaSel,  setJornadaSel] = useState(null);
   const [resumen,     setResumen]    = useState([]);   // partidos + ficha (siempre auto-cargados)
@@ -414,6 +414,9 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
   const jornadaActual = jornadas.find(j => j.id === jornadaSel);
   const totalCerradas = resumen.filter(p => p.ficha?.cerrada).length;
   const totalPartidos = resumen.length;
+  // "fichas" = listado compacto sin acciones ni camisetas; "resultados" = gestión
+  // con botones de registrar/modificar. El árbitro (readOnly) conserva su vista.
+  const esMini = modo === "fichas" && !readOnly;
 
   if (!liga) return (
     <div style={{ color: "var(--text-muted)", padding: 32, textAlign: "center" }}>
@@ -514,14 +517,14 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
             </div>
 
             {/* Lista de partidos */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
-              {resumen.map(p => <PartidoCard key={p.id} partido={p} onVerFicha={setFichaModalPartido} readOnly={readOnly} />)}
+            <div style={{ display: "flex", flexDirection: "column", gap: esMini ? 6 : 10, marginBottom: 18 }}>
+              {resumen.map(p => <PartidoCard key={p.id} partido={p} onVerFicha={setFichaModalPartido} readOnly={readOnly} mini={esMini} />)}
             </div>
           </>
         )}
 
-        {/* Botones de acción */}
-        {resumen.length > 0 && (
+        {/* Botones de acción — impresión de fichas en blanco (solo en "Fichas") */}
+        {modo !== "resultados" && resumen.length > 0 && (
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
             <button
               onClick={generarFichas}
@@ -548,7 +551,7 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
           </div>
         )}
 
-        {fichasData.length > 0 && (
+        {modo !== "resultados" && fichasData.length > 0 && (
           <p style={{ color: "#ca8a04", fontSize: 11, background: "#fffbeb", border: "1px solid #fde68a", padding: "6px 12px", borderRadius: 6, marginTop: 8, marginBottom: 0, display: "inline-block" }}>
             💡 En el diálogo de impresión activa "Gráficos en segundo plano" para que impriman los colores correctamente.
           </p>
@@ -556,7 +559,7 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
       </div>
 
       {/* FICHAS — visibles en pantalla y al imprimir */}
-      {fichasData.length > 0 && (
+      {modo !== "resultados" && fichasData.length > 0 && (
         <div id="ifb-fichas-root">
           {fichasData.map((f, i) => (
             <FichaImprimible
@@ -599,11 +602,23 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
 // ─────────────────────────────────────────────────────────────────
 // TARJETA DE PARTIDO (resumen breve, estilo "partido")
 // ─────────────────────────────────────────────────────────────────
-function PartidoCard({ partido, onVerFicha, readOnly = false }) {
+function PartidoCard({ partido, onVerFicha, readOnly = false, mini = false }) {
   const f = partido.ficha;
   const cerrada = !!f?.cerrada;
   const eqL = partido.equipos_local;
   const eqV = partido.equipos_visitante;
+
+  // Versión compacta del apartado "Fichas": solo horario, cancha y equipos.
+  if (mini) {
+    return (
+      <div style={hs.partidoMini}>
+        <span style={hs.miniMeta}>⏰ {fmtHora(partido.hora)} · Cancha {partido.cancha_numero ?? "—"}</span>
+        <span style={hs.miniEquipos}>
+          {eqL?.nombre || "—"} <span style={{ opacity: 0.4, fontWeight: 500 }}>vs</span> {eqV?.nombre || "—"}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div style={hs.partidoCard(cerrada)}>
@@ -1249,6 +1264,10 @@ const hs = {
     borderRadius: 12, padding: "12px 14px",
     boxShadow: cerrada ? "0 2px 8px rgba(79,143,47,0.10)" : "0 1px 3px rgba(0,0,0,0.04)",
   }),
+  // Tarjeta compacta del apartado "Fichas" (solo horario, cancha y equipos)
+  partidoMini: { display: "flex", alignItems: "center", gap: 10, padding: "7px 11px", background: "#ffffff", border: "1px solid var(--border, #e5e7eb)", borderLeft: "3px solid #d1d5db", borderRadius: 8 },
+  miniMeta: { fontSize: 11, fontWeight: 700, color: "var(--text-sub, #6b7280)", whiteSpace: "nowrap", flexShrink: 0 },
+  miniEquipos: { fontSize: 13, fontWeight: 600, color: "var(--text, #111827)", flex: 1, minWidth: 0, textAlign: "right", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   partidoTopRow: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" },
   partidoMeta: { fontSize: 11, fontWeight: 600, color: "var(--text-sub, #6b7280)" },
   partidoBadge: (cerrada) => ({
