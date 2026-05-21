@@ -93,9 +93,11 @@ function generarUnaJornada(equipos, historial, numJornada) {
   return { partidos, descansos };
 }
 
-function asignarHorarios(partidos, numCanchas, duracion, intervalo, horaInicio) {
+function asignarHorarios(partidos, numCanchas, intervalo, horaInicio) {
   const [h, m] = horaInicio.split(":").map(Number);
-  const tiempoTotal = duracion + intervalo;
+  // Una sola barra: intervalo es el tiempo total entre el inicio de un partido
+  // y el del siguiente en la misma cancha (ya incluye juego y descanso).
+  const tiempoTotal = intervalo;
   return partidos.map((p, idx) => {
     const cancha = (idx % numCanchas) + 1;
     const turno = Math.floor(idx / numCanchas);
@@ -127,8 +129,7 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
   const [config, setConfig] = useState({
     // El número de canchas se toma del registro de la unidad (cancha o miUnidad).
     numCanchas: cancha?.num_canchas || miUnidad?.num_canchas || 2,
-    duracion: 50,
-    intervalo: 10,
+    intervalo: 60,
     horaInicio: "08:00",
     fecha: "",
   });
@@ -211,7 +212,7 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
     if (!config.fecha) return showToast("Selecciona la fecha de la jornada", "err");
     const numJornada = jornadasGuardadas.length + 1;
     const { partidos, descansos } = generarUnaJornada(equipos, historial, numJornada);
-    const conHorarios = asignarHorarios(partidos, config.numCanchas, config.duracion, config.intervalo, config.horaInicio);
+    const conHorarios = asignarHorarios(partidos, config.numCanchas, config.intervalo, config.horaInicio);
     setPreview({ partidos: conHorarios, descansos, numero: numJornada });
   };
 
@@ -345,7 +346,7 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
       }
 
       const todos = [...liguillaPares, ...copaPares, ...amistosos];
-      const conHorarios = asignarHorarios(todos, config.numCanchas, config.duracion, config.intervalo, config.horaInicio);
+      const conHorarios = asignarHorarios(todos, config.numCanchas, config.intervalo, config.horaInicio);
 
       for (const p of conHorarios) {
         await db("/liguilla_partidos", token, {
@@ -458,14 +459,8 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
                   </div>
                 </div>
                 <div style={s.field}>
-                  <label style={s.label}>Duración partido: <strong>{config.duracion} min</strong></label>
-                  <input type="range" className="ifutbol-slider" min="20" max="90" step="5"
-                    value={config.duracion}
-                    onChange={e=>setConfig({...config,duracion:+e.target.value})} />
-                </div>
-                <div style={s.field}>
                   <label style={s.label}>Tiempo entre partidos: <strong>{config.intervalo} min</strong></label>
-                  <input type="range" className="ifutbol-slider" min="0" max="30" step="5"
+                  <input type="range" className="ifutbol-slider" min="30" max="120" step="5"
                     value={config.intervalo}
                     onChange={e=>setConfig({...config,intervalo:+e.target.value})} />
                 </div>
