@@ -629,7 +629,12 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
         portada_url = await uploadFile("imagenes", path, personalizarPortadaFile, token);
       }
       const payload = { ...personalizarForm, logo_url, portada_url };
-      await db(`/canchas?id=eq.${miUnidad.id}`, token, { method: "PATCH", body: JSON.stringify(payload) });
+      const filas = await db(`/canchas?id=eq.${miUnidad.id}`, token, { method: "PATCH", body: JSON.stringify(payload) });
+      // Si RLS bloquea la escritura, PostgREST responde 200 con [] (0 filas).
+      // Sin esta comprobación el guardado fallaría en silencio y mentiría con "guardado ✓".
+      if (!Array.isArray(filas) || filas.length === 0) {
+        throw new Error("No se pudo guardar la personalización. No se actualizó ningún dato.");
+      }
       showToast("Personalización guardada ✓");
       setMiUnidad({ ...miUnidad, ...payload });
       setPersonalizarLogoFile(null);
