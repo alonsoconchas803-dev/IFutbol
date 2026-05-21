@@ -602,7 +602,6 @@ function HomePage({ canchas, onVerUnidad }) {
   return (
     <div>
       <div style={{ marginBottom:28, padding:"20px 24px", background:"var(--green)", borderRadius:"var(--radius-lg)", boxShadow:"0 4px 16px rgba(79,143,47,0.3)" }}>
-        <div style={{ fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:1.5, marginBottom:6 }}>Plataforma de fútbol 7</div>
         <h1 style={{ fontSize:26, fontWeight:900, color:"white", letterSpacing:-0.5, marginBottom:6, margin:"0 0 6px" }}>Unidades deportivas</h1>
         <p style={{ color:"rgba(255,255,255,0.78)", fontSize:14, margin:0 }}>Selecciona una unidad para ver sus torneos y estadísticas</p>
       </div>
