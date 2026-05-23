@@ -24,3 +24,11 @@ dist-ssr
 *.sw?
 
 .vercel
+
+# Herramientas locales de Claude Code (no son parte del proyecto)
+.agents/
+.claude/skills/pdf/
+skills-lock.json
+
+# Documentos privados de contratos con unidades deportivas
+contratos/
