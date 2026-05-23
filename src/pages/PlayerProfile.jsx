@@ -78,6 +78,8 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
   const [eliminarTarget, setEliminarTarget] = useState(null);
   const [dorsalTarget, setDorsalTarget] = useState(null);
   const [dorsalNuevo, setDorsalNuevo] = useState("");
+  // Toggle: cuando está activo aparecen los botones 🗑️ junto a cada dorsal.
+  const [modoEliminar, setModoEliminar] = useState(false);
 
   // Formulario perfil
   const [form, setForm] = useState({
@@ -211,12 +213,13 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
     [inscripciones]
   );
 
-  // Selecciona el primer equipo como capitán al entrar a la sección
+  // Fallback: si entra a "mi-equipo" sin equipo activo, selecciona el primero inscrito
+  // (sea como capitán o jugador). El flujo normal viene del botón "Gestionar" que ya lo setea.
   useEffect(() => {
-    if (seccion === "mi-equipo" && !equipoCapActivoId && equiposComoCapitan.length > 0) {
-      setEquipoCapActivoId(equiposComoCapitan[0].equipo_id);
+    if (seccion === "mi-equipo" && !equipoCapActivoId && inscripciones.length > 0) {
+      setEquipoCapActivoId(inscripciones[0].equipo_id);
     }
-  }, [seccion, equiposComoCapitan, equipoCapActivoId]);
+  }, [seccion, inscripciones, equipoCapActivoId]);
 
   // Botón de volver en la topbar mientras el capitán gestiona su equipo
   useEffect(() => {
@@ -235,11 +238,28 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
       if (!insc) return;
       const [eq] = await db(`/equipos?id=eq.${equipoId}&select=*`, token);
       setEquipoCapData(eq);
-      const jugs = await db(
-        `/jugador_equipo?equipo_id=eq.${equipoId}&liga_id=eq.${insc.liga_id}&select=*,jugadores(nombre_completo,foto_url,posicion_preferida,numero_afiliado)&order=dorsal`,
-        token
-      );
-      setJugadoresEquipoCap(jugs || []);
+      // RPC con privacidad server-side: el caller no-capitán recibe nombre_completo
+      // y numero_afiliado en NULL para el resto del equipo (solo ve los suyos).
+      const filas = await db(`/rpc/listar_jugadores_equipo`, token, {
+        method: "POST",
+        body: JSON.stringify({ p_equipo_id: equipoId, p_liga_id: insc.liga_id }),
+      });
+      // Reestructuro para mantener la forma { ..., jugadores: { ... } } que espera la UI.
+      const jugs = (filas || []).map(r => ({
+        id: r.id,
+        jugador_id: r.jugador_id,
+        dorsal: r.dorsal,
+        nombre_camiseta: r.nombre_camiseta,
+        es_capitan: r.es_capitan,
+        activo: r.activo,
+        jugadores: {
+          nombre_completo: r.nombre_completo,
+          foto_url: r.foto_url,
+          posicion_preferida: r.posicion_preferida,
+          numero_afiliado: r.numero_afiliado,
+        },
+      }));
+      setJugadoresEquipoCap(jugs);
     } catch (e) { showToast(e.message, "err"); }
   };
 
@@ -247,7 +267,14 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
   useEffect(() => {
     if (!equipoCapActivoId) return;
     cargarEquipoCap(equipoCapActivoId);
+    setModoEliminar(false);
   }, [equipoCapActivoId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Si salgo de la pantalla de gestión, desactivo el modo eliminar para no
+  // dejarlo "encendido" la próxima vez que entre.
+  useEffect(() => {
+    if (seccion !== "mi-equipo") setModoEliminar(false);
+  }, [seccion]);
 
   const abrirEditarTarjeta = () => {
     if (!equipoCapData) return;
@@ -326,10 +353,12 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
       const errores = [];
       for (const af of afs) {
         if (idsActuales.has(af)) { errores.push(`${af}: ya está en este equipo`); continue; }
-        const [jug] = await db(
-          `/jugadores?numero_afiliado=eq.${af}&select=id,nombre_completo,foto_url,numero_afiliado,posicion_preferida,numero_preferido,nombre_camiseta_preferido`,
-          token
-        );
+        // RPC: capitanes ya no pueden hacer SELECT directo sobre /jugadores con la nueva RLS.
+        const filas = await db(`/rpc/buscar_jugador_por_afiliado`, token, {
+          method: "POST",
+          body: JSON.stringify({ p_afiliado: af }),
+        });
+        const jug = Array.isArray(filas) ? filas[0] : null;
         if (!jug) { errores.push(`${af}: no existe`); continue; }
         if (idsEnLiga.has(jug.id)) { errores.push(`${af} (${jug.nombre_completo}): ya inscrito en otro equipo de la liga`); continue; }
         const { dorsal, cambiado } = calcularDorsal(jug.numero_preferido, dorsalesOcupados);
@@ -382,6 +411,13 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
   // ── ELIMINAR JUGADOR (con limpieza de fichas no cerradas) ─────
   const eliminarJugadorCap = async () => {
     if (!eliminarTarget) return;
+    // Defensa en profundidad: el botón ya valida, pero si algo llega acá con un capitán, frenamos.
+    if (eliminarTarget.es_capitan) {
+      showToast("El capitán no puede ser eliminado. Pide al admin transferir la capitanía primero.", "err");
+      setModalCap(null);
+      setEliminarTarget(null);
+      return;
+    }
     const insc = inscripciones.find(i => i.equipo_id === equipoCapActivoId);
     if (!insc) return;
     setGuardando(true);
@@ -755,25 +791,20 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
                     </div>
                     <div>
                       <div style={s.inscripcionEquipo}>{ins.equipos?.nombre}</div>
-                      <div style={s.inscripcionLiga}>🏆 {ins.ligas?.nombre} · {ins.ligas?.dia} {ins.ligas?.turno}</div>
+                      <div style={s.inscripcionLiga}>🏆 {ins.ligas?.nombre}</div>
+                      <div style={s.inscripcionDiaTurno}>📅 {ins.ligas?.dia} · {ins.ligas?.turno}</div>
                     </div>
                   </div>
                   <div style={s.inscripcionRight}>
-                    {ins.es_capitan && (
-                      <div style={s.capitanCol}>
-                        <div style={s.capitanBadge}>👑 CAPITÁN</div>
-                        <button style={s.btnGestionarEquipo} onClick={() => { setEquipoCapActivoId(ins.equipo_id); setSeccion("mi-equipo"); }}>
-                          Gestionar →
-                        </button>
-                      </div>
-                    )}
                     <div style={s.dorsalCard}>
+                      {ins.es_capitan && <div style={s.capitanBadgeMini}>👑 CAPITÁN</div>}
                       <div style={{ ...s.dorsalNum, background: ins.equipos?.color_playera || "#3182ce" }}>{ins.dorsal}</div>
                       <div style={s.dorsalNombreCamiseta}>{ins.nombre_camiseta}</div>
-                      <div style={{ display:"flex", gap:6, marginTop:2 }}>
-                        <button style={s.btnEditarCamiseta} onClick={() => abrirEditarInsc(ins)}>✏️</button>
-                        <button style={{ ...s.btnEditarCamiseta, color:"#ef4444", borderColor:"#fca5a5" }} onClick={() => setConfirmDesinsc(ins)}>🚪</button>
-                      </div>
+                      <button
+                        style={ins.es_capitan ? s.btnGestionarEquipo : s.btnGestionarSimple}
+                        onClick={() => { setEquipoCapActivoId(ins.equipo_id); setSeccion("mi-equipo"); }}>
+                        Gestionar →
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -912,19 +943,34 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
         </div>
       )}
 
-      {/* ── SECCIÓN MI EQUIPO (CAPITÁN) ── */}
-      {seccion === "mi-equipo" && (
-        equiposComoCapitan.length === 0 ? (
-          <div style={s.empty}>
-            <div style={s.emptyIcon}>👑</div>
-            <div style={s.emptyTxt}>No eres capitán de ningún equipo</div>
-            <p style={{ color:"#9ca3af", fontSize:13, margin:0 }}>
-              El admin de tu unidad deportiva te asignará como capitán.
-            </p>
-          </div>
-        ) : (
+      {/* ── SECCIÓN MI EQUIPO ── */}
+      {seccion === "mi-equipo" && (() => {
+        if (inscripciones.length === 0) {
+          return (
+            <div style={s.empty}>
+              <div style={s.emptyIcon}>👕</div>
+              <div style={s.emptyTxt}>No estás inscrito en ningún equipo</div>
+              <p style={{ color:"#9ca3af", fontSize:13, margin:0 }}>
+                Pídele a un capitán que te inscriba con tu número de afiliado.
+              </p>
+            </div>
+          );
+        }
+        // ¿Soy capitán del equipo que estoy gestionando ahora mismo?
+        const inscActiva = inscripciones.find(i => i.equipo_id === equipoCapActivoId);
+        const esCapitanDelActivo = !!inscActiva?.es_capitan;
+        // Orden: capitán arriba, luego "yo" (para que el jugador no se ande buscando), resto por dorsal.
+        const miJugadorId = jugador?.id;
+        const jugadoresOrdenados = [...jugadoresEquipoCap].sort((a, b) => {
+          if (a.es_capitan && !b.es_capitan) return -1;
+          if (!a.es_capitan && b.es_capitan) return 1;
+          if (a.jugador_id === miJugadorId && b.jugador_id !== miJugadorId) return -1;
+          if (b.jugador_id === miJugadorId && a.jugador_id !== miJugadorId) return 1;
+          return (a.dorsal ?? 999) - (b.dorsal ?? 999);
+        });
+        return (
           <div>
-            {/* Selector de equipo si hay varios */}
+            {/* Selector de equipo: solo si soy capitán de varios (el jugador llega con uno fijo) */}
             {equiposComoCapitan.length > 1 && (
               <div style={s.capSelector}>
                 {equiposComoCapitan.map(c => (
@@ -955,33 +1001,50 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
                     </div>
                   </div>
                 </div>
-                <button style={s.btnEditarTarjeta} onClick={abrirEditarTarjeta}>
-                  🎨 Editar tarjeta del equipo
-                </button>
+                {esCapitanDelActivo && (
+                  <button style={s.btnEditarTarjeta} onClick={abrirEditarTarjeta}>
+                    🎨 Editar tarjeta del equipo
+                  </button>
+                )}
               </div>
             )}
 
             {/* Acciones de jugadores */}
             <div style={s.secHeader}>
-              <span style={s.secCount}>👥 Jugadores del equipo</span>
-              <button style={s.btnAdd}
-                onClick={() => { setAnadirAfiliados(""); setAnadirCandidatos([]); setModalCap("anadir_input"); }}
-                disabled={jugadoresEquipoCap.length >= 17}>
-                + Añadir jugadores
-              </button>
+              <span style={s.secCount}>Jugadores</span>
+              {esCapitanDelActivo && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button style={s.btnAdd}
+                    onClick={() => { setAnadirAfiliados(""); setAnadirCandidatos([]); setModalCap("anadir_input"); }}
+                    disabled={jugadoresEquipoCap.length >= 17}>
+                    + Añadir
+                  </button>
+                  <button
+                    style={modoEliminar ? s.btnDeleteActive : s.btnDelete}
+                    onClick={() => setModoEliminar(v => !v)}>
+                    {modoEliminar ? "Listo" : "Eliminar"}
+                  </button>
+                </div>
+              )}
             </div>
 
             {jugadoresEquipoCap.length === 0 ? (
               <div style={s.empty}>
                 <div style={s.emptyIcon}>🏃</div>
-                <div style={s.emptyTxt}>Aún no hay jugadores en tu equipo</div>
-                <p style={{ color:"#9ca3af", fontSize:13, margin:0 }}>
-                  Añádelos con su número de afiliado.
-                </p>
+                <div style={s.emptyTxt}>Aún no hay jugadores en este equipo</div>
+                {esCapitanDelActivo && (
+                  <p style={{ color:"#9ca3af", fontSize:13, margin:0 }}>
+                    Añádelos con su número de afiliado.
+                  </p>
+                )}
               </div>
             ) : (
               <div style={s.jugadorListCap}>
-                {jugadoresEquipoCap.map(je => (
+                {jugadoresOrdenados.map(je => {
+                  // Los datos personales (nombre real + afiliado) solo los ve el capitán y el propio jugador.
+                  // El resto del equipo solo ve foto, nombre en camiseta y dorsal.
+                  const verDatosPersonales = esCapitanDelActivo || je.jugador_id === miJugadorId;
+                  return (
                   <div key={je.id} style={{ ...s.jugadorRowCap, ...(je.es_capitan ? { borderLeft: `4px solid #f59e0b`, background: "linear-gradient(90deg, #fffbeb 0%, #ffffff 60%)" } : {}) }}>
                     <div style={s.jugadorAvatarCap}>
                       {je.jugadores?.foto_url
@@ -991,32 +1054,48 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={s.jugadorNombreCap}>
                         {je.es_capitan && <span style={{ marginRight: 5 }}>👑</span>}
-                        {je.jugadores?.nombre_completo}
+                        {verDatosPersonales ? je.jugadores?.nombre_completo : je.nombre_camiseta}
                       </div>
-                      <div style={s.jugadorMetaCap}>
-                        #{je.jugadores?.numero_afiliado} · {je.nombre_camiseta}
-                      </div>
+                      {verDatosPersonales && (
+                        <div style={s.jugadorMetaCap}>
+                          #{je.jugadores?.numero_afiliado} · {je.nombre_camiseta}
+                        </div>
+                      )}
                     </div>
-                    <button
-                      style={{ ...s.dorsalBtn, background: equipoCapData?.color_playera || "#3182ce" }}
-                      onClick={() => { setDorsalTarget(je); setDorsalNuevo(je.dorsal || ""); setModalCap("dorsal"); }}
-                      title="Cambiar dorsal">
-                      {je.dorsal || "—"}
-                    </button>
-                    {!je.es_capitan && (
-                      <button style={s.btnEliminarCap}
-                        onClick={() => { setEliminarTarget(je); setModalCap("eliminar"); }}
-                        title="Eliminar del equipo">
+                    {esCapitanDelActivo ? (
+                      <button
+                        style={{ ...s.dorsalBtn, background: equipoCapData?.color_playera || "#3182ce" }}
+                        onClick={() => { setDorsalTarget(je); setDorsalNuevo(je.dorsal || ""); setModalCap("dorsal"); }}
+                        title="Cambiar dorsal">
+                        {je.dorsal || "—"}
+                      </button>
+                    ) : (
+                      <div style={{ ...s.dorsalBtn, background: equipoCapData?.color_playera || "#3182ce", cursor: "default" }}>
+                        {je.dorsal || "—"}
+                      </div>
+                    )}
+                    {esCapitanDelActivo && modoEliminar && (
+                      <button style={{ ...s.btnEliminarCap, ...(je.es_capitan ? { opacity: 0.45, cursor: "not-allowed" } : {}) }}
+                        onClick={() => {
+                          if (je.es_capitan) {
+                            showToast("El capitán no puede eliminarse. Pide al admin transferir la capitanía primero.", "err");
+                            return;
+                          }
+                          setEliminarTarget(je);
+                          setModalCap("eliminar");
+                        }}
+                        title={je.es_capitan ? "El capitán no puede eliminarse" : "Eliminar del equipo"}>
                         🗑️
                       </button>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
-        )
-      )}
+        );
+      })()}
 
       {/* ── MODAL EDITAR TARJETA DEL EQUIPO ── */}
       {modalCap === "tarjeta" && equipoCapData && (
@@ -1323,17 +1402,21 @@ const s = {
   secHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
   secCount: { color: "#6b7280", fontSize: 13 },
   btnAdd: { background: GREEN, color: "#ffffff", border: "none", borderRadius: 10, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" },
+  // Botón "Eliminar" en reposo: contorno rojo. Cuando se activa el modo cambia al estilo "activo".
+  btnDelete: { background: "#ffffff", color: "#dc2626", border: "1.5px solid #dc2626", borderRadius: 10, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" },
+  btnDeleteActive: { background: "#dc2626", color: "#ffffff", border: "1.5px solid #dc2626", borderRadius: 10, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer", boxShadow: "0 2px 8px rgba(220,38,38,0.35)" },
   empty: { textAlign: "center", padding: "60px 20px" },
   emptyIcon: { fontSize: 48, marginBottom: 16 },
   emptyTxt: { color: "#6b7280", fontSize: 15, marginBottom: 20, fontWeight: 600 },
   inscripcionesList: { display: "flex", flexDirection: "column", gap: 12 },
   inscripcionCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "18px 22px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
   inscripcionLeft: { display: "flex", alignItems: "center", gap: 16 },
-  escudoWrap: { width: 52, height: 52, borderRadius: 12, overflow: "hidden", flexShrink: 0 },
+  escudoWrap: { width: 72, height: 72, borderRadius: 14, overflow: "hidden", flexShrink: 0 },
   escudoImg: { width: "100%", height: "100%", objectFit: "cover" },
   escudoPlaceholder: { width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, color: "#fff" },
   inscripcionEquipo: { fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 4 },
   inscripcionLiga: { fontSize: 13, color: "#6b7280" },
+  inscripcionDiaTurno: { fontSize: 12.5, color: "#6b7280", marginTop: 2 },
   inscripcionRight: { display: "flex", alignItems: "center", gap: 14 },
   capitanCol: { display: "flex", flexDirection: "column", alignItems: "stretch", gap: 6, width: 100 },
   dorsalCard: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6 },
@@ -1359,7 +1442,11 @@ const s = {
   toast: { position: "fixed", bottom: 28, right: 28, padding: "12px 24px", borderRadius: 12, fontWeight: 700, fontSize: 14, zIndex: 9999 },
   // ── Estilos del panel de capitán ──
   capitanBadge: { background: "linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)", color: "#fff", fontSize: 12, fontWeight: 800, letterSpacing: 0.8, padding: "6px 10px", borderRadius: 14, boxShadow: "0 2px 8px rgba(245,158,11,0.4)", whiteSpace: "nowrap", textAlign: "center" },
-  btnGestionarEquipo: { background: "linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)", color: "#fff", border: "none", borderRadius: 10, padding: "7px 10px", fontSize: 12, fontWeight: 800, cursor: "pointer", boxShadow: "0 2px 8px rgba(245,158,11,0.35)", whiteSpace: "nowrap", textAlign: "center" },
+  // Versión compacta del badge para ponerlo encima del dorsal en la tarjeta de torneo.
+  capitanBadgeMini: { background: "linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)", color: "#fff", fontSize: 9.5, fontWeight: 800, letterSpacing: 0.6, padding: "3px 7px", borderRadius: 10, boxShadow: "0 1px 4px rgba(245,158,11,0.35)", whiteSpace: "nowrap", textAlign: "center" },
+  btnGestionarEquipo: { background: "linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)", color: "#fff", border: "none", borderRadius: 10, padding: "7px 10px", fontSize: 12, fontWeight: 800, cursor: "pointer", boxShadow: "0 2px 8px rgba(245,158,11,0.35)", whiteSpace: "nowrap", textAlign: "center", marginTop: 2 },
+  // Botón gestionar para jugadores sin capitanía: outline en verde de marca para que se note.
+  btnGestionarSimple: { background: "#ffffff", color: GREEN, border: `1.5px solid ${GREEN}`, borderRadius: 10, padding: "7px 10px", fontSize: 12, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap", textAlign: "center", marginTop: 2 },
   capSelector: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 },
   capSelectorTab: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 20, padding: "7px 14px", color: "#6b7280", fontSize: 13, cursor: "pointer", fontWeight: 600 },
   capSelectorTabActive: { background: "#f0fdf4", borderColor: GREEN, color: GREEN },
@@ -1375,7 +1462,8 @@ const s = {
   jugadorFotoPlaceholderCap: { width: 40, height: 40, borderRadius: "50%", background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 },
   jugadorNombreCap: { fontSize: 14, fontWeight: 700, color: "#111827", marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   jugadorMetaCap: { fontSize: 11, color: "#6b7280", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  dorsalBtn: { width: 40, height: 40, borderRadius: 10, border: "none", color: "#fff", fontSize: 16, fontWeight: 900, cursor: "pointer", flexShrink: 0 },
+  // display:flex + center sirve tanto para el <button> del capitán como para el <div> del no-capitán.
+  dorsalBtn: { width: 40, height: 40, borderRadius: 10, border: "none", color: "#fff", fontSize: 16, fontWeight: 900, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 },
   btnEliminarCap: { background: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 8, padding: "8px 10px", fontSize: 14, cursor: "pointer", flexShrink: 0 },
   warningBoxCap: { background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 10, padding: "12px 14px", fontSize: 12, color: "#991b1b", lineHeight: 1.45, marginBottom: 18 },
   uploadLabelCap: { display: "inline-block", background: "#f3f4f6", border: `1px solid ${BORDER}`, borderRadius: 8, padding: "8px 14px", color: "#6b7280", fontSize: 13, cursor: "pointer" },

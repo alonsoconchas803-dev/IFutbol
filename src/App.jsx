@@ -377,7 +377,7 @@ function DashboardLayout({ session, userRole, jugadorData, displayName, onLogout
   const goTo = (key) => { setActiveSection(key); setDrawerOpen(false); };
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", minHeight:"100vh", background:"var(--bg)" }}>
+    <div style={{ display:"flex", flexDirection:"column", minHeight:"100vh", paddingTop:56, background:"var(--bg)" }}>
       <style>{css}</style>
       {toast && <div className={`ifutbol-toast ${toast.tipo==="err"?"toast-err":"toast-ok"}`}>{toast.msg}</div>}
 
@@ -2016,8 +2016,11 @@ function Avatar({ initials, size=38 }) {
 // STYLES
 // ─────────────────────────────────────────────────────────────────
 const s = {
-  root: { display:"flex",flexDirection:"column",minHeight:"100vh",background:"var(--bg)" },
-  topbar: { display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0 12px",height:56,background:"var(--green)",borderBottom:"1px solid var(--green-dark)",position:"sticky",top:0,zIndex:200,boxShadow:"0 2px 12px rgba(0,0,0,0.18)" },
+  // padding-top: 56 deja espacio para la topbar fija (su altura es 56).
+  root: { display:"flex",flexDirection:"column",minHeight:"100vh",paddingTop:56,background:"var(--bg)" },
+  // position:fixed para que la topbar quede anclada al hacer scroll. Respeta el marco de la app
+  // (max-width var(--app-max-width)) centrandose con left/right:0 y margin:auto.
+  topbar: { display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0 12px",height:56,background:"var(--green)",borderBottom:"1px solid var(--green-dark)",position:"fixed",top:0,left:0,right:0,maxWidth:"var(--app-max-width, 480px)",margin:"0 auto",zIndex:200,boxShadow:"0 2px 12px rgba(0,0,0,0.18)" },
   topLeft: { display:"flex",alignItems:"center",gap:10 },
   topRight: { display:"flex",alignItems:"center",gap:8 },
   brand: { display:"flex",alignItems:"center",gap:10,cursor:"pointer" },
