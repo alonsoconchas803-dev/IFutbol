@@ -48,7 +48,7 @@ const db = async (path, token, options = {}) => {
 
 const POSICIONES = ["Portero", "Defensa", "Mediocampista", "Delantero"];
 
-export default function PlayerProfile({ session, seccionInicial = "perfil" }) {
+export default function PlayerProfile({ session, seccionInicial = "perfil", setTopbarBack }) {
   const [jugador, setJugador] = useState(null);
   const [inscripciones, setInscripciones] = useState([]);
   const [seccion, setSeccion] = useState(seccionInicial);
@@ -217,6 +217,17 @@ export default function PlayerProfile({ session, seccionInicial = "perfil" }) {
       setEquipoCapActivoId(equiposComoCapitan[0].equipo_id);
     }
   }, [seccion, equiposComoCapitan, equipoCapActivoId]);
+
+  // Botón de volver en la topbar mientras el capitán gestiona su equipo
+  useEffect(() => {
+    if (!setTopbarBack) return;
+    if (seccion === "mi-equipo") {
+      setTopbarBack({ label: "Mis Torneos", onClick: () => { setEquipoCapActivoId(null); setSeccion("ligas"); } });
+    } else {
+      setTopbarBack(null);
+    }
+    return () => setTopbarBack(null);
+  }, [seccion, setTopbarBack]);
 
   const cargarEquipoCap = async (equipoId) => {
     try {
@@ -584,16 +595,20 @@ export default function PlayerProfile({ session, seccionInicial = "perfil" }) {
       <style>{css}</style>
       {toast && <div style={{ ...s.toast, background: toast.tipo === "err" ? "#ef4444" : "#4ade80", color: toast.tipo === "err" ? "#fff" : "#0d0d1a" }}>{toast.msg}</div>}
 
-      <div style={s.header}>
-        <div style={{ fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:1.5, marginBottom:6 }}>
-          {seccion === "perfil" ? "Jugador registrado" : seccion === "mi-equipo" ? "Capitán de equipo" : seccion === "estadisticas" ? "Tu rendimiento" : "Torneos activos"}
-        </div>
+      <div style={seccion === "ligas" ? { ...s.header, padding: "14px 24px" } : s.header}>
+        {seccion !== "perfil" && seccion !== "ligas" && (
+          <div style={{ fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:1.5, marginBottom:6 }}>
+            {seccion === "mi-equipo" ? "Capitán de equipo" : "Tu rendimiento"}
+          </div>
+        )}
         <h2 style={s.title}>
           {seccion === "perfil" ? "🏃 Mi Perfil" : seccion === "mi-equipo" ? "👑 Mi Equipo" : seccion === "estadisticas" ? "📊 Mis Estadísticas" : "🏆 Mis Torneos"}
         </h2>
-        <p style={s.sub}>
-          {seccion === "perfil" ? "Tu identidad en la plataforma" : seccion === "mi-equipo" ? "Gestiona la lista y la tarjeta de tu equipo" : seccion === "estadisticas" ? "Goles, partidos y resultados" : "Tus inscripciones activas"}
-        </p>
+        {seccion !== "ligas" && (
+          <p style={s.sub}>
+            {seccion === "perfil" ? "Tu identidad en la plataforma" : seccion === "mi-equipo" ? "Gestiona la lista y la tarjeta de tu equipo" : "Goles, partidos y resultados"}
+          </p>
+        )}
       </div>
 
       {/* ── SECCIÓN PERFIL ── */}

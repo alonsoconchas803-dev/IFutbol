@@ -370,7 +370,7 @@ function DashboardLayout({ session, userRole, jugadorData, displayName, onLogout
     }
     if (rol === "league_admin") return <LeagueAdmin session={session} userRole={userRole} seccionInicial={LEAGUE_MAP[activeSection] || "equipos"} setTopbarBack={setTopbarBack} />;
     if (rol === "referee") return <Referee session={session} setTopbarBack={setTopbarBack} seccionInicial={REFEREE_MAP[activeSection] || "partidos"} />;
-    if (rol === "player") return <PlayerProfile session={session} seccionInicial={PLAYER_MAP[activeSection] || "perfil"} />;
+    if (rol === "player") return <PlayerProfile session={session} seccionInicial={PLAYER_MAP[activeSection] || "perfil"} setTopbarBack={setTopbarBack} />;
     return null;
   };
 
