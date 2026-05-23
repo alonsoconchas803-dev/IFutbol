@@ -655,6 +655,17 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
                 : "Goles, partidos y resultados"}
           </p>
         )}
+        {seccion === "estadisticas" && (
+          <button
+            onClick={cargarEstadisticas}
+            disabled={statsLoading}
+            style={s.btnRefreshHeader}
+            title="Actualizar estadísticas"
+            aria-label="Actualizar estadísticas">
+            {/* translate compensa el offset visual del emoji 🔄 dentro de su caja */}
+            <span style={{ display: "inline-block", transform: "translate(1px, 1px)" }}>🔄</span>
+          </button>
+        )}
       </div>
 
       {/* ── SECCIÓN PERFIL ── */}
@@ -837,15 +848,6 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
             </div>
           ) : (
             <>
-              {/* Selector de torneo */}
-              <div style={{ display:"flex", justifyContent:"flex-end", marginBottom: 8 }}>
-                <button
-                  onClick={cargarEstadisticas}
-                  style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:8, padding:"6px 12px", color:"#374151", fontSize:12, fontWeight:600, cursor:"pointer" }}
-                  disabled={statsLoading}>
-                  🔄 Actualizar
-                </button>
-              </div>
               <div style={s.statsFiltros}>
                 <button
                   onClick={() => setFiltroStats("activos")}
@@ -1409,7 +1411,11 @@ const GREEN = "#4f8f2f";
 
 const s = {
   wrap: {},
-  header: { marginBottom: 24, padding: "20px 24px", background: `linear-gradient(135deg, ${GREEN} 0%, #7fbf4d 100%)`, borderRadius: 16, boxShadow: "0 4px 16px rgba(79,143,47,0.3)" },
+  header: { position: "relative", marginBottom: 24, padding: "20px 24px", background: `linear-gradient(135deg, ${GREEN} 0%, #7fbf4d 100%)`, borderRadius: 16, boxShadow: "0 4px 16px rgba(79,143,47,0.3)" },
+  // Botón redondo translúcido anclado a la esquina inferior derecha del encabezado.
+  // Wrapper centra el emoji con flex; los <span> internos hacen el microajuste para
+  // compensar el offset natural del glifo 🔄 (Segoe UI Emoji queda alto a la izquierda).
+  btnRefreshHeader: { position: "absolute", bottom: 12, right: 12, width: 44, height: 44, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.4)", background: "rgba(255,255,255,0.18)", color: "#fff", fontSize: 22, lineHeight: 1, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 },
   title: { fontSize: 26, fontWeight: 900, color: "#fff", letterSpacing: -0.8, marginBottom: 4 },
   sub: { color: "rgba(255,255,255,0.78)", fontSize: 14, margin: 0 },
   playerCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 18, marginBottom: 20, overflow: "hidden", boxShadow: "0 4px 16px rgba(79,143,47,0.12)" },
