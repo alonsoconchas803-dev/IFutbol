@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import BracketTree from "../components/BracketTree";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -115,6 +116,43 @@ function formatFecha(fecha) {
   return `${d} ${meses[parseInt(mo)-1]} ${y}`;
 }
 
+// Mapa día (texto de la liga) → índice JS (0 = domingo). El campo liga.dia se
+// almacena con tilde en "Miércoles" y "Sábado", así que aquí debe coincidir.
+const DIAS_SEMANA = {
+  "Domingo": 0, "Lunes": 1, "Martes": 2, "Miércoles": 3,
+  "Jueves": 4, "Viernes": 5, "Sábado": 6,
+};
+
+// Devuelve YYYY-MM-DD evitando desfases de huso horario (toISOString usa UTC).
+function fechaISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+
+// Próxima ocurrencia estricta del día de la liga: si hoy ya es ese día, salta a
+// la semana siguiente. La jornada del día corriente normalmente ya está armada,
+// así que el caso útil es preparar la de la próxima semana.
+function proximoDiaLiga(diaTexto, base = new Date()) {
+  const target = DIAS_SEMANA[diaTexto];
+  if (target === undefined) return "";
+  const d = new Date(base);
+  d.setHours(0, 0, 0, 0);
+  const diff = (target - d.getDay() + 7) % 7;
+  const offset = diff === 0 ? 7 : diff;
+  d.setDate(d.getDate() + offset);
+  return fechaISO(d);
+}
+
+// Suma días a una fecha YYYY-MM-DD interpretándola como local (sin UTC).
+function sumarDias(fechaStr, dias) {
+  const [y, m, d] = fechaStr.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + dias);
+  return fechaISO(dt);
+}
+
 // ─────────────────────────────────────────────────────────────────
 // COMPONENTE PRINCIPAL
 // ─────────────────────────────────────────────────────────────────
@@ -149,7 +187,9 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
       const [eqs, hist, jors, fichas, liguillaData] = await Promise.all([
         db(`/equipos?liga_id=eq.${liga.id}&select=*&order=nombre`, token),
         db(`/historial_enfrentamientos?liga_id=eq.${liga.id}&select=*`, token),
-        db(`/jornadas?liga_id=eq.${liga.id}&select=*&order=numero`, token),
+        // Embebemos partidos(hora) para poder sugerir la hora de la última jornada
+        // sin un viaje extra a la BD.
+        db(`/jornadas?liga_id=eq.${liga.id}&select=*,partidos(hora)&order=numero`, token),
         db(`/ficha_partido?select=*,partidos(jornada_id,equipo_local_id,equipo_visitante_id,jornadas(liga_id))`, token),
         db(`/liguilla_partidos?liga_id=eq.${liga.id}&select=*&order=created_at`, token),
       ]);
@@ -175,6 +215,28 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
 
       // Liguilla guardada
       if (liguillaData?.length > 0) setLiguilla(liguillaData);
+
+      // Sugerencia automática de fecha y hora para la próxima jornada:
+      // - Si ya hay jornadas guardadas: fecha = última + 7 días, hora = la del
+      //   primer partido de la última jornada (lo que el usuario suele repetir).
+      // - Si no hay jornadas: fecha = próximo día de la semana del torneo
+      //   (liga.dia), hora se deja como esté para no pisar lo que el usuario haya
+      //   tocado.
+      const lista = jors || [];
+      if (lista.length > 0) {
+        const ultima = lista[lista.length - 1];
+        const horas = (ultima.partidos || []).map(p => p.hora).filter(Boolean).sort();
+        const horaSugerida = horas[0] ? horas[0].slice(0, 5) : null;
+        const fechaSugerida = ultima.fecha ? sumarDias(ultima.fecha, 7) : "";
+        setConfig(c => ({
+          ...c,
+          fecha: fechaSugerida || c.fecha,
+          horaInicio: horaSugerida || c.horaInicio,
+        }));
+      } else if (liga?.dia) {
+        const fechaSugerida = proximoDiaLiga(liga.dia);
+        if (fechaSugerida) setConfig(c => ({ ...c, fecha: fechaSugerida }));
+      }
 
     } catch (e) { showToast(e.message, "err"); }
     setLoading(false);
@@ -258,7 +320,8 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
       }
       showToast(`Jornada ${preview.numero} guardada ✓`);
       setPreview(null);
-      setConfig(c => ({ ...c, fecha: "" }));
+      // No vaciamos fecha/hora: cargarTodo() las recalcula a partir de la jornada
+      // recién guardada (próxima fecha = +7 días, misma hora de inicio).
       cargarTodo();
     } catch (e) { showToast(e.message, "err"); }
     setGuardando(false);
@@ -379,35 +442,32 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
       <style>{css}</style>
       {toast && <div className={`ifutbol-toast ${toast.tipo==="err"?"toast-err":"toast-ok"}`}>{toast.msg}</div>}
 
+      {/*
+        Encabezado de Calendario.
+        - El nombre de la unidad pasa a la línea de "label" pequeña arriba
+          (antes ocupaba el lugar destacado del hero).
+        - El título principal es "Calendario" para que coincida con el nombre
+          del apartado en la sidebar.
+        - El nombre de la liga NO se muestra aquí: el chip activo del selector
+          de torneos (verde) ya lo deja claro, y duplicarlo es ruido.
+      */}
       <div style={s.heroCard}>
         <div style={s.heroOverlay} />
         <div style={s.heroInner}>
-          {/* Fila superior: info de la unidad (logo + nombre) */}
-          {miUnidad && (
-            <div style={s.heroUnitRow}>
-              <div style={s.heroUnitLogo}>
+          <div style={s.heroHeadRow}>
+            {miUnidad && (
+              <div style={s.heroLogoSmall}>
                 {miUnidad.logo_url
                   ? <img src={miUnidad.logo_url} alt={miUnidad.nombre} style={s.heroUnitLogoImg} />
-                  : <span style={{ fontSize:32 }}>🏟️</span>}
+                  : <span style={{ fontSize:20 }}>🏟️</span>}
               </div>
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={s.heroUnitLabel}>UNIDAD DEPORTIVA</div>
-                <div style={s.heroUnitName}>{miUnidad.nombre}</div>
-              </div>
-            </div>
-          )}
-
-          {/* Separador entre unidad y calendario */}
-          {miUnidad && <div style={s.heroDivider} />}
-
-          {/* Fila inferior: 2 columnas — izquierda título/torneo, derecha stats grandes */}
-          <div style={s.heroBottomRow}>
-            <div style={s.heroBottomLeft}>
+            )}
+            <div style={{ flex:1, minWidth:0 }}>
+              {miUnidad && <div style={s.heroUnitLabelSmall}>{miUnidad.nombre}</div>}
               <div style={s.heroTitleRow}>
                 <span style={s.heroEmoji}>📅</span>
-                <h2 style={s.heroTitle}>Calendario y Liguilla</h2>
+                <h2 style={s.heroTitle}>Calendario</h2>
               </div>
-              <div style={s.heroLiga}>🏆 {liga?.nombre || "Sin torneo"}</div>
             </div>
             <div style={s.heroBottomRight}>
               <div style={s.heroStatBox}>
@@ -561,30 +621,8 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
                 </div>
               )}
 
-              {/* EQUIPOS Y HISTORIAL */}
-              <div style={s.card}>
-                <h3 style={s.cardTitle}>👕 Equipos activos ({equipos.length})</h3>
-                <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:16 }}>
-                  {equipos.map((eq,i)=>(
-                    <div key={eq.id} style={s.equipoRow}>
-                      <div style={{ ...s.dot, background:eq.color_playera||"var(--green)" }}/>
-                      <span className="sg-eq-name">{eq.nombre}</span>
-                      <span style={{ fontSize:10.5, color:"var(--text-muted)", flexShrink:0 }}>
-                        {Object.keys(historial).filter(k=>k.includes(eq.id)).length} partidos
-                      </span>
-                    </div>
-                  ))}
-                  {equipos.length%2!==0 && (
-                    <div style={{ ...s.equipoRow, border:"1px dashed var(--border)", background:"#f9fafb" }}>
-                      <div style={{ ...s.dot, background:"#d1d5db" }}/>
-                      <span style={{ fontSize:13, color:"var(--text-muted)", fontStyle:"italic" }}>DESCANSO (rotativo)</span>
-                    </div>
-                  )}
-                </div>
-                <div style={s.infoBox}>
-                  ℹ️ Jornadas generadas: <strong>{jornadasGuardadas.length}</strong> · Enfrentamientos en historial: <strong>{Object.keys(historial).length}</strong>
-                </div>
-              </div>
+              {/* El listado de equipos activos se eliminó del calendario: ya hay
+                  contadores de equipos y jornadas en el hero, que es suficiente. */}
             </div>
 
           </div>
@@ -687,8 +725,11 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
 }
 
 // ─────────────────────────────────────────────────────────────────
-// BRACKET VIEW
+// BRACKET VIEW — modal de registro + dos árboles (liguilla y copa)
 // ─────────────────────────────────────────────────────────────────
+// El árbol visual vive en components/BracketTree.jsx para que la
+// vista pública (UnidadPage en App.jsx) lo pueda reusar en modo
+// solo-lectura.
 function BracketView({ liguilla, equipos, token, liga, onRefresh, showToast }) {
   const [modalPartido, setModalPartido] = useState(null);
   const [ganador, setGanador] = useState("");
@@ -729,41 +770,6 @@ function BracketView({ liguilla, equipos, token, liga, onRefresh, showToast }) {
     setGuardando(false);
   };
 
-  const renderPartido = (p, colorTipo) => {
-    const local = getEquipo(p.equipo_local_id);
-    const visitante = getEquipo(p.equipo_visitante_id);
-    const ganador = getEquipo(p.equipo_avanza_id);
-    return (
-      <div key={p.id} style={{ ...s.bracketPartido, borderLeft:`3px solid ${colorTipo}` }} onClick={() => !p.cerrado && handleAbrirModal(p)} className={!p.cerrado ? "bracket-clickable" : ""}>
-        <div style={s.bracketEquipo}>
-          <div style={{ ...s.dot, background:local?.color_playera||"#999", width:8, height:8 }}/>
-          <span className="sg-eq-name" style={{ fontSize:12, fontWeight:600, color:p.equipo_avanza_id===local?.id?"var(--green)":"var(--text)" }}>{local?.nombre||"—"}</span>
-          {p.goles_local !== null && p.goles_local !== undefined && <span style={s.gol}>{p.goles_local}</span>}
-        </div>
-        <div style={s.bracketEquipo}>
-          <div style={{ ...s.dot, background:visitante?.color_playera||"#999", width:8, height:8 }}/>
-          <span className="sg-eq-name" style={{ fontSize:12, fontWeight:600, color:p.equipo_avanza_id===visitante?.id?"var(--green)":"var(--text)" }}>{visitante?.nombre||"—"}</span>
-          {p.goles_visitante !== null && p.goles_visitante !== undefined && <span style={s.gol}>{p.goles_visitante}</span>}
-        </div>
-        {p.cerrado ? (
-          <div style={s.ganadorChip}>✓ {ganador?.nombre}</div>
-        ) : (
-          <div style={s.pendienteChip}>Pendiente — clic para registrar</div>
-        )}
-        {p.hora && <div style={{ fontSize:10, color:"var(--text-muted)", marginTop:4 }}>⏰ {p.hora} · C{p.cancha_numero}</div>}
-      </div>
-    );
-  };
-
-  const renderColumna = (titulo, partidos, color) => (
-    <div style={s.bracketCol}>
-      <div style={{ ...s.bracketColTitle, color }}>{titulo}</div>
-      {partidos.length === 0
-        ? <div style={s.bracketPendiente}>Se definirán al avanzar rondas</div>
-        : partidos.map(p => renderPartido(p, color))}
-    </div>
-  );
-
   const liguillaPartidos = {
     cuartos: porFaseYTipo("liguilla","cuartos"),
     semis: porFaseYTipo("liguilla","semis"),
@@ -777,45 +783,36 @@ function BracketView({ liguilla, equipos, token, liga, onRefresh, showToast }) {
     tercer: porFaseYTipo("copa","3er_lugar"),
   };
 
+  const hayBracket = liguillaPartidos.cuartos.length > 0 || copaPartidos.cuartos.length > 0;
+
   return (
     <div style={s.tabContent}>
-      {/* LIGUILLA */}
-      {liguillaPartidos.cuartos.length > 0 && (
-        <div style={s.card}>
-          <h3 style={s.cardTitle}>🏆 Liguilla</h3>
-          <div style={s.bracketRow}>
-            {renderColumna("Cuartos de final", liguillaPartidos.cuartos, "#4f8f2f")}
-            {renderColumna("Semifinales", liguillaPartidos.semis, "#3b82f6")}
-            <div style={s.bracketCol}>
-              <div style={{ ...s.bracketColTitle, color:"#f59e0b" }}>Final</div>
-              {liguillaPartidos.final.map(p => renderPartido(p, "#f59e0b"))}
-              {liguillaPartidos.tercer.length > 0 && <>
-                <div style={{ ...s.bracketColTitle, color:"#cd7f32", marginTop:16, fontSize:11 }}>3er lugar</div>
-                {liguillaPartidos.tercer.map(p => renderPartido(p, "#cd7f32"))}
-              </>}
-            </div>
-          </div>
+      {!hayBracket && (
+        <div className="empty-state">
+          <div className="empty-state-icon">🎯</div>
+          <div className="empty-state-txt">Aún no hay cruces de bracket</div>
+          <div className="empty-state-hint">Ve a la pestaña "Liguilla y Copa" para generarlos</div>
         </div>
       )}
 
+      {/* LIGUILLA */}
+      <BracketTree
+        titulo="Liguilla" emoji="🏆"
+        partidos={liguillaPartidos}
+        colors={["#4f8f2f", "#3b82f6", "#f59e0b"]}
+        getEquipo={getEquipo} onAbrir={handleAbrirModal}
+        cardStyle={s.card}
+      />
+
       {/* COPA */}
-      {copaPartidos.cuartos.length > 0 && (
-        <div style={{ ...s.card, marginTop:20 }}>
-          <h3 style={s.cardTitle}>🥈 Copa</h3>
-          <div style={s.bracketRow}>
-            {renderColumna("Cuartos de final", copaPartidos.cuartos, "#b45309")}
-            {renderColumna("Semifinales", copaPartidos.semis, "#7c3aed")}
-            <div style={s.bracketCol}>
-              <div style={{ ...s.bracketColTitle, color:"#dc2626" }}>Final</div>
-              {copaPartidos.final.map(p => renderPartido(p, "#dc2626"))}
-              {copaPartidos.tercer.length > 0 && <>
-                <div style={{ ...s.bracketColTitle, color:"#cd7f32", marginTop:16, fontSize:11 }}>3er lugar</div>
-                {copaPartidos.tercer.map(p => renderPartido(p, "#cd7f32"))}
-              </>}
-            </div>
-          </div>
-        </div>
-      )}
+      <BracketTree
+        titulo="Copa" emoji="🥈"
+        partidos={copaPartidos}
+        colors={["#b45309", "#7c3aed", "#dc2626"]}
+        getEquipo={getEquipo} onAbrir={handleAbrirModal}
+        topGap={liguillaPartidos.cuartos.length > 0}
+        cardStyle={s.card}
+      />
 
       {/* MODAL REGISTRAR RESULTADO */}
       {modalPartido && (
@@ -862,29 +859,23 @@ function BracketView({ liguilla, equipos, token, liga, onRefresh, showToast }) {
 const s = {
   wrap: { width:"100%", minWidth:0 },
   // ── HERO HEADER COMBINADO (verde gradiente como card-green) ──
-  heroCard: { position:"relative", overflow:"hidden", background:"linear-gradient(145deg, #4f8f2f 0%, #3a6b22 100%)", borderRadius:"var(--radius-lg)", padding:"16px 16px 14px", marginBottom:14, boxShadow:"var(--shadow-green)", color:"#fff" },
+  heroCard: { position:"relative", overflow:"hidden", background:"linear-gradient(145deg, #4f8f2f 0%, #3a6b22 100%)", borderRadius:"var(--radius-lg)", padding:"14px 16px", marginBottom:14, boxShadow:"var(--shadow-green)", color:"#fff" },
   heroOverlay: { position:"absolute", top:-30, right:-30, width:160, height:160, borderRadius:"50%", background:"radial-gradient(circle, rgba(127,191,77,0.45) 0%, rgba(127,191,77,0) 70%)", pointerEvents:"none" },
   heroInner: { position:"relative", zIndex:1 },
-  // Sección superior: unidad (logo + nombre más grandes y prominentes)
-  heroUnitRow: { display:"flex", alignItems:"center", gap:12, marginBottom:12 },
-  heroUnitLogo: { width:62, height:62, borderRadius:14, background:"rgba(255,255,255,0.20)", border:"2px solid rgba(255,255,255,0.42)", display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", flexShrink:0, boxShadow:"0 4px 14px rgba(0,0,0,0.22)" },
+  // Cabecera compacta: logo a la izquierda, columna central (unidad pequeña + título grande + liga),
+  // stats a la derecha. Sustituye al patrón antiguo de dos filas con nombre de unidad enorme.
+  heroHeadRow: { display:"flex", alignItems:"center", gap:12 },
+  heroLogoSmall: { width:46, height:46, borderRadius:12, background:"rgba(255,255,255,0.20)", border:"2px solid rgba(255,255,255,0.42)", display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", flexShrink:0, boxShadow:"0 3px 10px rgba(0,0,0,0.20)" },
   heroUnitLogoImg: { width:"100%", height:"100%", objectFit:"cover" },
-  heroUnitLabel: { fontSize:10, fontWeight:700, letterSpacing:1.1, color:"rgba(255,255,255,0.82)", textTransform:"uppercase", marginBottom:3 },
-  heroUnitName: { fontSize:19, fontWeight:800, color:"#fff", letterSpacing:-0.5, lineHeight:1.15, textShadow:"0 1px 2px rgba(0,0,0,0.22)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
-  // Divisor
-  heroDivider: { height:1, background:"linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.40) 50%, rgba(255,255,255,0) 100%)", margin:"4px 0 12px" },
-  // Sección inferior: 2 columnas (izq: título+torneo, der: stats grandes)
-  heroBottomRow: { display:"flex", alignItems:"stretch", gap:10 },
-  heroBottomLeft: { flex:1, minWidth:0, display:"flex", flexDirection:"column", justifyContent:"center" },
+  heroUnitLabelSmall: { fontSize:10, fontWeight:700, letterSpacing:0.6, color:"rgba(255,255,255,0.82)", textTransform:"uppercase", marginBottom:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
   heroBottomRight: { display:"flex", gap:8, flexShrink:0 },
-  heroTitleRow: { display:"flex", alignItems:"center", gap:7, marginBottom:6 },
-  heroEmoji: { fontSize:18, lineHeight:1 },
-  heroTitle: { fontSize:16, fontWeight:800, letterSpacing:-0.4, color:"#fff", margin:0, lineHeight:1.15 },
-  heroLiga: { fontSize:13, fontWeight:800, color:"#fff", lineHeight:1.3, textShadow:"0 1px 2px rgba(0,0,0,0.18)", overflow:"hidden", textOverflow:"ellipsis", display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical" },
+  heroTitleRow: { display:"flex", alignItems:"center", gap:7 },
+  heroEmoji: { fontSize:20, lineHeight:1 },
+  heroTitle: { fontSize:22, fontWeight:900, letterSpacing:-0.6, color:"#fff", margin:0, lineHeight:1.1 },
   // Stat boxes a la derecha (rellenan el espacio vacío)
-  heroStatBox: { width:62, padding:"8px 6px", borderRadius:12, background:"rgba(255,255,255,0.18)", border:"1px solid rgba(255,255,255,0.32)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", textAlign:"center", boxShadow:"inset 0 1px 0 rgba(255,255,255,0.18)", backdropFilter:"blur(2px)" },
-  heroStatNumber: { fontSize:24, fontWeight:900, color:"#fff", lineHeight:1, letterSpacing:-1, textShadow:"0 1px 2px rgba(0,0,0,0.22)" },
-  heroStatLabel: { fontSize:9, fontWeight:700, letterSpacing:0.8, color:"rgba(255,255,255,0.88)", textTransform:"uppercase", marginTop:4 },
+  heroStatBox: { width:54, padding:"6px 4px", borderRadius:10, background:"rgba(255,255,255,0.18)", border:"1px solid rgba(255,255,255,0.32)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", textAlign:"center", boxShadow:"inset 0 1px 0 rgba(255,255,255,0.18)", backdropFilter:"blur(2px)" },
+  heroStatNumber: { fontSize:20, fontWeight:900, color:"#fff", lineHeight:1, letterSpacing:-0.8, textShadow:"0 1px 2px rgba(0,0,0,0.22)" },
+  heroStatLabel: { fontSize:8.5, fontWeight:700, letterSpacing:0.6, color:"rgba(255,255,255,0.88)", textTransform:"uppercase", marginTop:3 },
   // ── RESTO ──
   tabContent: { paddingTop:4 },
   twoCol: { display:"flex", flexDirection:"column", gap:14 },
@@ -944,8 +935,6 @@ const css = `
   .num-btn { width:38px; height:38px; border-radius:9px; border:1.5px solid var(--border); background:white; color:var(--text-sub); font-size:15px; font-weight:700; cursor:pointer; transition:all 0.15s; font-family:'DM Sans',sans-serif; }
   .num-btn:hover { border-color:var(--green); color:var(--green); }
   .num-btn.active { background:var(--green); border-color:var(--green); color:white; }
-  .bracket-clickable { cursor:pointer; transition:transform 0.15s, box-shadow 0.15s; }
-  .bracket-clickable:hover { transform:translateY(-2px); box-shadow:var(--shadow-md); }
   /* Truncado de nombres largos en filas flexibles */
   .sg-eq-name { flex:1; min-width:0; font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .sg-eq-name-r { font-size:13px; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }

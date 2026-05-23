@@ -434,27 +434,31 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
           </div>
         )}
 
-        {/* ── HERO COMBINADO: unidad + título "Generador de fichas" ── */}
+        {/* ── HERO COMPACTO ──
+            - Fichas: logo de la unidad + título "Generador de fichas".
+            - Resultados: logo + nombre de unidad pequeño arriba + "Resultados" grande.
+            En ambos casos el nombre de unidad ya no domina visualmente; el
+            apartado activo (lo que hace esa pantalla) es lo que se lee grande. */}
         <div style={hs.heroCard}>
           <div style={hs.heroGlow} />
           <div style={hs.heroInner}>
-            {miUnidad && (
-              <div style={hs.heroUnitRow}>
-                <div style={hs.heroUnitLogo}>
+            <div style={hs.heroHeadRow}>
+              {miUnidad && (
+                <div style={hs.heroLogoSmall}>
                   {miUnidad.logo_url
                     ? <img src={miUnidad.logo_url} alt={miUnidad.nombre} style={hs.heroUnitLogoImg} />
-                    : <span style={{ fontSize: 36 }}>🏟️</span>}
+                    : <span style={{ fontSize: 22 }}>🏟️</span>}
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={hs.heroUnitLabel}>UNIDAD DEPORTIVA</div>
-                  <div style={hs.heroUnitName}>{miUnidad.nombre}</div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {miUnidad && (
+                  <div style={hs.heroUnitLabelSmall}>{miUnidad.nombre}</div>
+                )}
+                <div style={hs.heroTitleRow}>
+                  <span style={{ fontSize: 22, lineHeight: 1 }}>{modo === "resultados" ? "📋" : "📄"}</span>
+                  <h2 style={hs.heroTitleBig}>{modo === "resultados" ? "Resultados" : "Generador de fichas"}</h2>
                 </div>
               </div>
-            )}
-            {miUnidad && <div style={hs.heroDivider} />}
-            <div style={hs.heroTitleRow}>
-              <span style={{ fontSize: 16, lineHeight: 1 }}>📄</span>
-              <h2 style={hs.heroTitle}>Generador de fichas</h2>
             </div>
           </div>
         </div>
@@ -1235,17 +1239,18 @@ const fd = {
 // ─────────────────────────────────────────────────────────────────
 const hs = {
   // Hero combinado
-  heroCard: { position: "relative", overflow: "hidden", background: "linear-gradient(145deg, #4f8f2f 0%, #3a6b22 100%)", borderRadius: "var(--radius-lg, 20px)", padding: "16px 16px 14px", marginBottom: 16, boxShadow: "0 6px 20px rgba(79,143,47,0.28)", color: "#fff" },
+  heroCard: { position: "relative", overflow: "hidden", background: "linear-gradient(145deg, #4f8f2f 0%, #3a6b22 100%)", borderRadius: "var(--radius-lg, 20px)", padding: "14px 16px", marginBottom: 16, boxShadow: "0 6px 20px rgba(79,143,47,0.28)", color: "#fff" },
   heroGlow: { position: "absolute", top: -30, right: -30, width: 160, height: 160, borderRadius: "50%", background: "radial-gradient(circle, rgba(127,191,77,0.45) 0%, rgba(127,191,77,0) 70%)", pointerEvents: "none" },
   heroInner: { position: "relative", zIndex: 1 },
-  heroUnitRow: { display: "flex", alignItems: "center", gap: 13, marginBottom: 12 },
-  heroUnitLogo: { width: 68, height: 68, borderRadius: 15, background: "rgba(255,255,255,0.20)", border: "2px solid rgba(255,255,255,0.42)", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, boxShadow: "0 4px 14px rgba(0,0,0,0.22)" },
+  // Cabecera compacta: logo a un lado y, al lado, el título grande del apartado.
+  // El nombre de la unidad sólo aparece (pequeño, encima del título) cuando el
+  // apartado lo necesita; el peso visual lo lleva siempre el nombre del apartado.
+  heroHeadRow: { display: "flex", alignItems: "center", gap: 12 },
+  heroLogoSmall: { width: 48, height: 48, borderRadius: 12, background: "rgba(255,255,255,0.20)", border: "2px solid rgba(255,255,255,0.42)", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, boxShadow: "0 3px 10px rgba(0,0,0,0.20)" },
   heroUnitLogoImg: { width: "100%", height: "100%", objectFit: "cover" },
-  heroUnitLabel: { fontSize: 10, fontWeight: 700, letterSpacing: 1.1, color: "rgba(255,255,255,0.82)", textTransform: "uppercase", marginBottom: 3 },
-  heroUnitName: { fontSize: 20, fontWeight: 800, color: "#fff", letterSpacing: -0.5, lineHeight: 1.15, textShadow: "0 1px 2px rgba(0,0,0,0.22)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  heroDivider: { height: 1, background: "linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.40) 50%, rgba(255,255,255,0) 100%)", margin: "4px 0 12px" },
+  heroUnitLabelSmall: { fontSize: 10, fontWeight: 700, letterSpacing: 0.6, color: "rgba(255,255,255,0.82)", textTransform: "uppercase", marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   heroTitleRow: { display: "flex", alignItems: "center", gap: 7 },
-  heroTitle: { fontSize: 14, fontWeight: 800, letterSpacing: -0.3, color: "#fff", margin: 0, lineHeight: 1.15 },
+  heroTitleBig: { fontSize: 22, fontWeight: 900, letterSpacing: -0.6, color: "#fff", margin: 0, lineHeight: 1.1 },
 
   // Status bar
   statusBar: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 12, flexWrap: "wrap" },

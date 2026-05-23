@@ -806,30 +806,45 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
       <style>{css}</style>
       {toast && <div style={{ ...s.toast, background: toast.tipo === "err" ? "#ef4444" : "#4ade80", color: toast.tipo === "err" ? "#fff" : "#0d0d1a" }}>{toast.msg}</div>}
 
-      {/* ENCABEZADO — hero con gradiente verde. Se oculta en "calendario", "fichas" y "torneos": esas secciones renderizan un hero temático propio */}
-      {seccion !== "calendario" && seccion !== "fichas" && seccion !== "torneos" && (
-        <div style={s.unitHero}>
-          <div style={s.unitHeroGlow} />
-          <div style={s.unitHeroRow}>
-            <div style={s.unitHeroLogoWrap}>
-              {miUnidad?.logo_url
-                ? <img src={miUnidad.logo_url} alt={miUnidad.nombre} style={s.unitHeroLogoImg} />
-                : <span style={{ fontSize:30 }}>🏟️</span>}
-            </div>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={s.unitHeroLabel}>UNIDAD DEPORTIVA</div>
-              <h2 style={s.unitHeroName}>{miUnidad?.nombre || "Panel Admin"}</h2>
+      {/* ENCABEZADO — hero con gradiente verde compartido. Se oculta en
+          "calendario", "fichas" y "resultados": esas secciones renderizan
+          su propio hero. Aquí el texto grande es el nombre del apartado
+          (igual al de la sidebar) y la unidad va como etiqueta pequeña
+          encima — antes era al revés. */}
+      {seccion !== "calendario" && seccion !== "fichas" && seccion !== "resultados" && (() => {
+        const TITULOS = {
+          torneos:      { icon:"🏆", label:"Torneos" },
+          equipos:      { icon:"👕", label:"Equipos" },
+          jugadores:    { icon:"👥", label:"Jugadores" },
+          arbitros:     { icon:"🟡", label:"Árbitros" },
+          personalizar: { icon:"🎨", label:"Personalizar mi unidad" },
+          detalle:      { icon:"👕", label:"Detalle de equipo" },
+        };
+        const t = TITULOS[seccion] || { icon:"🏟️", label:"Panel Admin" };
+        return (
+          <div style={s.unitHero}>
+            <div style={s.unitHeroGlow} />
+            <div style={s.unitHeroRow}>
+              <div style={s.unitHeroLogoWrap}>
+                {miUnidad?.logo_url
+                  ? <img src={miUnidad.logo_url} alt={miUnidad.nombre} style={s.unitHeroLogoImg} />
+                  : <span style={{ fontSize:24 }}>🏟️</span>}
+              </div>
+              <div style={{ flex:1, minWidth:0 }}>
+                {miUnidad?.nombre && <div style={s.unitHeroLabelSmall}>{miUnidad.nombre}</div>}
+                <h2 style={s.unitHeroTitleBig}>{t.icon} {t.label}</h2>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* SELECTOR DE LIGA — oculto en "Torneos" (vista dedicada), "Personalizar"
-          (aplica a la unidad), "Calendario" y "Fichas" (se renderizan dentro de
-          sus componentes bajo el hero), y "detalle" de equipo (volver atrás para
-          verlos). Aquí solo se elige torneo activo; alta/edición vive en la
-          sección "Torneos". */}
-      {seccion !== "torneos" && seccion !== "personalizar" && seccion !== "calendario" && seccion !== "fichas" && seccion !== "detalle" && (
+          (aplica a la unidad), "Calendario", "Fichas" y "Resultados" (cada uno
+          renderiza su propio selector vía headerExtra debajo del hero), y
+          "detalle" de equipo (volver atrás para verlos). Aquí solo se elige
+          torneo activo; alta/edición vive en la sección "Torneos". */}
+      {seccion !== "torneos" && seccion !== "personalizar" && seccion !== "calendario" && seccion !== "fichas" && seccion !== "resultados" && seccion !== "detalle" && (
         <div style={s.ligaSelector}>
           <span style={s.ligaLabel}>Torneos:</span>
           <div style={s.ligaTabs}>
@@ -852,16 +867,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
       {/* ── SECCIÓN TORNEOS — alta/edición/eliminación de torneos de la unidad ── */}
       {seccion === "torneos" && (
         <div>
-          {/* Hero temático: mismo patrón que "Personalizar" pero en verde-marca */}
-          <div style={s.torneosHero}>
-            <div style={s.torneosHeroIcon}>🏆</div>
-            <div style={{ flex:1, minWidth:0 }}>
-              <h3 style={s.torneosHeroTitle}>Torneos</h3>
-              <p style={s.torneosHeroSub}>
-                Crea, edita y administra los torneos activos de {miUnidad?.nombre || "tu unidad"}.
-              </p>
-            </div>
-          </div>
+          {/* El título y el logo ya viven en el unitHero de arriba. */}
 
           {/* Acción principal */}
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, flexWrap:"wrap", gap:10 }}>
@@ -1255,17 +1261,13 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
             const confirmados = arbitros.filter(a => a.confirmado);
             return (
             <div>
-              <div style={s.arbSecHero}>
-                <div style={s.arbSecHeroLeft}>
-                  <div style={s.arbSecHeroIcon}>🟡</div>
-                  <div style={{ minWidth:0 }}>
-                    <div style={s.arbSecHeroTitle}>Árbitros de la unidad</div>
-                    <div style={s.arbSecHeroSub}>
-                      {confirmados.length} confirmados · {pendientes.length} pendientes
-                    </div>
-                  </div>
-                </div>
-                <button style={s.arbSecHeroBtn} onClick={cargarArbitros} title="Recargar">
+              {/* Contador + botón de recarga. El título y el icono del apartado
+                  ya viven en el hero unificado del LeagueAdmin. */}
+              <div style={s.arbCountRow}>
+                <span style={s.arbCountTxt}>
+                  {confirmados.length} confirmados · {pendientes.length} pendientes
+                </span>
+                <button style={s.arbReloadBtn} onClick={cargarArbitros} title="Recargar">
                   ↻ Actualizar
                 </button>
               </div>
@@ -2055,14 +2057,15 @@ const GREEN = "#4f8f2f";
 
 const s = {
   wrap: {},
-  // ── HERO DE UNIDAD (gradiente verde) ──
-  unitHero: { position:"relative", overflow:"hidden", background:"linear-gradient(135deg, #4f8f2f 0%, #3a6b22 70%, #2e5419 100%)", borderRadius:18, padding:"16px 18px", marginBottom:18, boxShadow:"0 6px 20px rgba(79,143,47,0.28)", color:"#fff" },
+  // ── HERO DE UNIDAD (gradiente verde) ── Mismo patrón que el hero de Resultados
+  // y Fichas: logo + nombre de unidad pequeño arriba + título grande del apartado.
+  unitHero: { position:"relative", overflow:"hidden", background:"linear-gradient(135deg, #4f8f2f 0%, #3a6b22 70%, #2e5419 100%)", borderRadius:18, padding:"14px 16px", marginBottom:18, boxShadow:"0 6px 20px rgba(79,143,47,0.28)", color:"#fff" },
   unitHeroGlow: { position:"absolute", top:-40, right:-40, width:160, height:160, borderRadius:"50%", background:"radial-gradient(circle, rgba(127,191,77,0.5) 0%, rgba(127,191,77,0) 70%)", pointerEvents:"none" },
-  unitHeroRow: { position:"relative", zIndex:1, display:"flex", alignItems:"center", gap:14, marginBottom:12 },
-  unitHeroLogoWrap: { width:56, height:56, borderRadius:14, background:"rgba(255,255,255,0.18)", border:"1.5px solid rgba(255,255,255,0.35)", display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", flexShrink:0, boxShadow:"0 4px 12px rgba(0,0,0,0.18)" },
+  unitHeroRow: { position:"relative", zIndex:1, display:"flex", alignItems:"center", gap:12 },
+  unitHeroLogoWrap: { width:48, height:48, borderRadius:12, background:"rgba(255,255,255,0.20)", border:"2px solid rgba(255,255,255,0.42)", display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", flexShrink:0, boxShadow:"0 3px 10px rgba(0,0,0,0.20)" },
   unitHeroLogoImg: { width:"100%", height:"100%", objectFit:"cover" },
-  unitHeroLabel: { fontSize:10.5, fontWeight:700, letterSpacing:1.2, color:"rgba(255,255,255,0.78)", textTransform:"uppercase", marginBottom:3 },
-  unitHeroName: { fontSize:20, fontWeight:800, color:"#fff", letterSpacing:-0.5, margin:0, lineHeight:1.15, textShadow:"0 1px 2px rgba(0,0,0,0.18)", overflow:"hidden", textOverflow:"ellipsis" },
+  unitHeroLabelSmall: { fontSize:10, fontWeight:700, letterSpacing:0.6, color:"rgba(255,255,255,0.82)", textTransform:"uppercase", marginBottom:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
+  unitHeroTitleBig: { fontSize:22, fontWeight:900, letterSpacing:-0.6, color:"#fff", margin:0, lineHeight:1.1, textShadow:"0 1px 2px rgba(0,0,0,0.18)", overflow:"hidden", textOverflow:"ellipsis" },
   unitHeroBtn: { position:"relative", zIndex:1, width:"100%", background:"rgba(255,255,255,0.95)", border:"none", borderRadius:"var(--radius-full,9999px)", padding:"9px 16px", color:"#3a6b22", fontSize:13, fontWeight:800, cursor:"pointer", display:"inline-flex", alignItems:"center", justifyContent:"center", gap:6, boxShadow:"0 2px 8px rgba(0,0,0,0.15)" },
   // ── SECCIÓN PERSONALIZAR ──
   persHero: { display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:"linear-gradient(135deg, #ede9fe 0%, #fdf2f8 100%)", border:"1px solid #e9d5ff", marginBottom:16 },
@@ -2099,6 +2102,10 @@ const s = {
   title: { fontSize: 26, fontWeight: 800, color: "#111827", letterSpacing: -0.8, marginBottom: 4 },
   sub: { color: "#6b7280", fontSize: 14 },
   // ── HEADER SECCIÓN ÁRBITROS (amber, color de rol árbitro) ──
+  // Fila compacta de contador + botón actualizar (el título grande ya está en el unitHero).
+  arbCountRow: { display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, padding:"8px 14px", borderRadius:10, background:"#fffbeb", border:"1px solid #fde68a", marginBottom:14, flexWrap:"wrap" },
+  arbCountTxt: { fontSize:12, fontWeight:700, color:"#92400e" },
+  arbReloadBtn: { background:"#fff", border:"1px solid #fde68a", borderRadius:"var(--radius-full,9999px)", padding:"5px 12px", color:"#d97706", fontSize:11.5, fontWeight:800, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:4, boxShadow:"0 1px 4px rgba(245,158,11,0.18)" },
   arbSecHero: { position:"relative", overflow:"hidden", background:"linear-gradient(135deg, #f59e0b 0%, #d97706 100%)", borderRadius:14, padding:"12px 16px", marginBottom:14, color:"#fff", boxShadow:"0 4px 14px rgba(245,158,11,0.28)", display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, flexWrap:"wrap" },
   arbSecHeroLeft: { display:"flex", alignItems:"center", gap:10, minWidth:0, flex:1 },
   arbSecHeroIcon: { width:38, height:38, borderRadius:10, background:"rgba(255,255,255,0.22)", border:"1px solid rgba(255,255,255,0.36)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 },

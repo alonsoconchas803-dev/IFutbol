@@ -6,6 +6,7 @@ import Referee from "./pages/Referee";
 import PlayerProfile from "./pages/PlayerProfile";
 import JerseySVG from "./components/JerseySVG";
 import IFutbolLogo from "./components/IFutbolLogo";
+import BracketTree from "./components/BracketTree";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -637,7 +638,12 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
   const [goleadores, setGoleadores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedCell, setSelectedCell] = useState(null); // [rowIdx, colIdx]
-  const [jornadaSel, setJornadaSel] = useState(null); // Jornada seleccionada en el tab "partidos"
+  // Vista activa dentro del tab "Partidos":
+  //   - número → jornada con ese número
+  //   - "liguilla" → bracket de liguilla
+  //   - "copa" → bracket de copa
+  const [vistaPartidos, setVistaPartidos] = useState(null);
+  const [liguilla, setLiguilla] = useState([]);
 
   useEffect(() => {
     db(`/ligas?cancha_id=eq.${cancha.id}&activa=eq.true&select=*&order=nombre`).then(data => {
@@ -659,11 +665,13 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
 
   const cargarDatos = async (ligaId) => {
     setLoading(true);
-    // 1. Jornadas de esta liga + equipos en paralelo
-    const [eqs, jornadas] = await Promise.all([
+    // 1. Jornadas, equipos y bracket de esta liga en paralelo
+    const [eqs, jornadas, liguillaData] = await Promise.all([
       db(`/equipos?liga_id=eq.${ligaId}&select=*&order=nombre`),
       db(`/jornadas?liga_id=eq.${ligaId}&select=id,numero,fecha&order=numero`),
+      db(`/liguilla_partidos?liga_id=eq.${ligaId}&select=*&order=created_at`),
     ]);
+    setLiguilla(liguillaData || []);
     const eqsF = eqs || [];
     // La clasificación se calcula con TODOS los equipos (incl. dados de baja)
     // para que las fichas cerradas de sus rivales sigan contando; al estado
@@ -729,7 +737,6 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
   };
 
   const seleccionarTorneo = t => { setTorneoActivo(t); setSeccion("partidos"); cargarDatos(t.id); };
-  const tabs = [["partidos","📅 Partidos"],["tabla","📊 Tabla"],["goleadores","🥇 Goleadores"],["equipos","👕 Equipos"],["ofensiva","⚔️ Mejor ofensiva"],["defensiva","🛡️ Mejor defensiva"],["fairplay","🤝 Fair play"]];
 
   // Click en tab: cambia sección y recarga datos.
   const onTabClick = (key) => {
@@ -757,13 +764,77 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
     return (pendiente?.jornada || jornadasAgrupadas[jornadasAgrupadas.length - 1]?.jornada)?.numero ?? null;
   }, [jornadasAgrupadas]);
 
-  // Sincroniza jornadaSel con jornadaActual cuando cambian los datos
-  // (siempre que el usuario no haya seleccionado manualmente una válida).
+  // Bracket agrupado por tipo y fase (sólo lectura para vista pública).
+  const liguillaPartidos = useMemo(() => ({
+    cuartos: liguilla.filter(p => p.tipo === "liguilla" && p.fase === "cuartos"),
+    semis:   liguilla.filter(p => p.tipo === "liguilla" && p.fase === "semis"),
+    final:   liguilla.filter(p => p.tipo === "liguilla" && p.fase === "final"),
+    tercer:  liguilla.filter(p => p.tipo === "liguilla" && p.fase === "3er_lugar"),
+  }), [liguilla]);
+  const copaPartidos = useMemo(() => ({
+    cuartos: liguilla.filter(p => p.tipo === "copa" && p.fase === "cuartos"),
+    semis:   liguilla.filter(p => p.tipo === "copa" && p.fase === "semis"),
+    final:   liguilla.filter(p => p.tipo === "copa" && p.fase === "final"),
+    tercer:  liguilla.filter(p => p.tipo === "copa" && p.fase === "3er_lugar"),
+  }), [liguilla]);
+  const hayBracket = useMemo(() => liguilla.length > 0, [liguilla]);
+
+  // Fases del bracket que tienen al menos un partido (en cualquier tipo).
+  // Mantienen el orden lógico cuartos → semis → final y sólo aparecen
+  // cuando se han generado, de modo que conforme avanza el torneo el
+  // selector va ganando opciones. El 3er lugar NO se expone como chip
+  // propio: comparte fecha con la final, así que sus partidos se muestran
+  // dentro del chip "Final" para no fragmentar la información.
+  const FASES_ORDEN = ["cuartos", "semis", "final"];
+  const FASES_INFO = {
+    cuartos:    { label:"Cuartos de final", emoji:"🥊" },
+    semis:      { label:"Semifinales",      emoji:"🥈" },
+    final:      { label:"Final",            emoji:"🏆" },
+  };
+  // Una fase está disponible si tiene partidos propios o, en el caso de
+  // "final", también si existen partidos de 3er lugar.
+  const fasesConPartidos = useMemo(
+    () => FASES_ORDEN.filter(f =>
+      liguilla.some(p => p.fase === f) ||
+      (f === "final" && liguilla.some(p => p.fase === "3er_lugar"))
+    ),
+    [liguilla] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  // Sincroniza vistaPartidos con la jornada actual cuando cambian los datos
+  // (siempre que el usuario no haya seleccionado manualmente una vista válida).
   useEffect(() => {
-    if (jornadaActual == null) { setJornadaSel(null); return; }
-    const existeSel = jornadasAgrupadas.some(g => g.jornada.numero === jornadaSel);
-    if (!existeSel) setJornadaSel(jornadaActual);
-  }, [jornadaActual, jornadasAgrupadas, jornadaSel]);
+    const esJornadaValida = typeof vistaPartidos === "number"
+      && jornadasAgrupadas.some(g => g.jornada.numero === vistaPartidos);
+    const esFaseValida = typeof vistaPartidos === "string"
+      && fasesConPartidos.includes(vistaPartidos);
+    if (esJornadaValida || esFaseValida) return;
+    if (jornadaActual != null) setVistaPartidos(jornadaActual);
+    else if (fasesConPartidos.length > 0) setVistaPartidos(fasesConPartidos[0]);
+    else setVistaPartidos(null);
+  }, [jornadaActual, jornadasAgrupadas, fasesConPartidos, vistaPartidos]);
+
+  // Tabs disponibles. "Eliminatoria" aparece automáticamente sólo cuando
+  // se ha creado al menos un bracket (liguilla y/o copa).
+  const tabs = useMemo(() => {
+    const arr = [["partidos", "📅 Partidos"]];
+    if (hayBracket) arr.push(["eliminatoria", "🎯 Eliminatoria"]);
+    arr.push(
+      ["tabla","📊 Tabla"],
+      ["goleadores","🥇 Goleadores"],
+      ["equipos","👕 Equipos"],
+      ["ofensiva","⚔️ Mejor ofensiva"],
+      ["defensiva","🛡️ Mejor defensiva"],
+      ["fairplay","🤝 Fair play"],
+    );
+    return arr;
+  }, [hayBracket]);
+
+  // Si la sección activa es "eliminatoria" y desaparece el bracket
+  // (porque se borraron los partidos), volvemos a "partidos".
+  useEffect(() => {
+    if (seccion === "eliminatoria" && !hayBracket) setSeccion("partidos");
+  }, [seccion, hayBracket]);
 
   // Vista: selección de torneo (cards)
   if (!torneoActivo) {
@@ -991,126 +1062,264 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
               </div>
             </>
           )}
-          {seccion==="partidos"&&(jornadasAgrupadas.length===0?<EmptyState icon="📅" txt="No hay partidos programados aún"/>:
+          {seccion==="partidos"&&((jornadasAgrupadas.length===0 && fasesConPartidos.length===0)?<EmptyState icon="📅" txt="No hay partidos programados aún"/>:
             (() => {
-              const grupoSel = jornadasAgrupadas.find(g => g.jornada.numero === jornadaSel) || jornadasAgrupadas[0];
-              // Solo se muestran partidos con AMBOS equipos asignados.
-              // Los partidos con un solo equipo cuentan como "descanso" para ese equipo.
-              // Los partidos sin equipos (hueco completo) simplemente no aparecen.
-              const partidosLlenos = grupoSel.partidos.filter(p => p.equipo_local_id && p.equipo_visitante_id);
-              const equipoIdsEnPartidos = new Set();
-              partidosLlenos.forEach(p => {
-                equipoIdsEnPartidos.add(p.equipo_local_id);
-                equipoIdsEnPartidos.add(p.equipo_visitante_id);
+              const tieneVariasOpciones = jornadasAgrupadas.length + fasesConPartidos.length > 1;
+              const getEquipo = id => equipos.find(e => e.id === id);
+              const chipStyle = (activa) => ({
+                border:`1.5px solid ${activa?"var(--green)":"var(--border)"}`,
+                background: activa?"var(--green)":"white",
+                color: activa?"#fff":"var(--text)",
+                borderRadius:99, padding:"6px 14px", fontSize:12, fontWeight:700,
+                cursor:"pointer", whiteSpace:"nowrap", flexShrink:0, minHeight:32,
+                fontFamily:"'DM Sans',sans-serif", transition:"all 0.15s",
               });
-              const descansan = equipos.filter(eq => !equipoIdsEnPartidos.has(eq.id));
+              // Tarjeta de partido común para jornadas y bracket.
+              // Acepta equipos por objeto (jornadas trae el join completo;
+              // bracket sólo trae el id y aquí lo resolvemos contra `equipos`).
+              const renderPartidoCard = ({ key, local, visitante, golesLocal, golesVisitante, mostrarGoles, hora, cancha, jugado, badge }) => {
+                const eqL = local || {};
+                const eqV = visitante || {};
+                return (
+                  <div key={key} style={{ padding:"8px 10px", background:"#f9fafb", borderRadius:9, border:"1px solid var(--border)" }}>
+                    {badge && (
+                      <div style={{ marginBottom:6, display:"flex" }}>
+                        <span style={{ fontSize:9.5, fontWeight:800, letterSpacing:0.4, textTransform:"uppercase", padding:"2px 7px", borderRadius:4, background:badge.bg, color:badge.color }}>
+                          {badge.label}
+                        </span>
+                      </div>
+                    )}
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:4 }}>
+                      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, flex:1, minWidth:0 }}>
+                        <JerseySVG
+                          diseno={eqL.diseno_camiseta||"solido"}
+                          color1={eqL.color_playera||"#999"}
+                          color2={eqL.color_camiseta_2||"#fff"}
+                          escudoUrl={eqL.escudo_url||null}
+                          size={34}
+                        />
+                        <span style={{ fontWeight:700, fontSize:11.5, textAlign:"center", lineHeight:1.15, wordBreak:"break-word" }}>{eqL.nombre||"—"}</span>
+                      </div>
+
+                      <div style={{ textAlign:"center", padding:"0 6px", flexShrink:0, minWidth:64 }}>
+                        {mostrarGoles ? (
+                          <div style={{ fontSize:20, fontWeight:900, lineHeight:1 }}>
+                            <span style={{ color:golesLocal>golesVisitante?"#16a34a":"var(--text)" }}>{golesLocal}</span>
+                            <span style={{ color:"#d1d5db", fontSize:15, margin:"0 3px" }}>-</span>
+                            <span style={{ color:golesVisitante>golesLocal?"#16a34a":"var(--text)" }}>{golesVisitante}</span>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize:11.5, color:"var(--text-muted)", fontWeight:800, letterSpacing:1 }}>VS</span>
+                        )}
+                        <div style={{ fontSize:9.5, color:"var(--text-muted)", marginTop:3, whiteSpace:"nowrap" }}>
+                          ⏰ {hora?.substring(0,5)||"—"} · C{cancha||"—"}
+                        </div>
+                        {jugado && <div style={{ fontSize:9.5, color:"var(--green)", fontWeight:700, marginTop:1 }}>✓ Jugado</div>}
+                      </div>
+
+                      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, flex:1, minWidth:0 }}>
+                        <JerseySVG
+                          diseno={eqV.diseno_camiseta||"solido"}
+                          color1={eqV.color_playera||"#999"}
+                          color2={eqV.color_camiseta_2||"#fff"}
+                          escudoUrl={eqV.escudo_url||null}
+                          size={34}
+                        />
+                        <span style={{ fontWeight:700, fontSize:11.5, textAlign:"center", lineHeight:1.15, wordBreak:"break-word" }}>{eqV.nombre||"—"}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              };
               return (
                 <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-                  {/* Selector de jornada — solo si hay más de 1 */}
-                  {jornadasAgrupadas.length > 1 && (
+                  {/* Selector: chips de jornadas y chips de fases del bracket.
+                      Las fases aparecen automáticamente conforme se generan
+                      (cuartos → semifinales → final → 3er lugar). */}
+                  {tieneVariasOpciones && (
                     <div style={{ display:"flex", gap:6, overflowX:"auto", WebkitOverflowScrolling:"touch", paddingBottom:2 }}>
-                      {jornadasAgrupadas.map(({ jornada }) => {
-                        const activa = jornada.numero === jornadaSel;
-                        return (
-                          <button key={jornada.id} onClick={() => setJornadaSel(jornada.numero)}
-                            style={{
-                              border:`1.5px solid ${activa?"var(--green)":"var(--border)"}`,
-                              background: activa?"var(--green)":"white",
-                              color: activa?"#fff":"var(--text)",
-                              borderRadius:99, padding:"6px 14px", fontSize:12, fontWeight:700,
-                              cursor:"pointer", whiteSpace:"nowrap", flexShrink:0, minHeight:32,
-                              fontFamily:"'DM Sans',sans-serif", transition:"all 0.15s",
-                            }}>
-                            J{jornada.numero}
-                          </button>
-                        );
-                      })}
+                      {jornadasAgrupadas.map(({ jornada }) => (
+                        <button key={jornada.id} onClick={() => setVistaPartidos(jornada.numero)}
+                          style={chipStyle(jornada.numero === vistaPartidos)}>
+                          J{jornada.numero}
+                        </button>
+                      ))}
+                      {fasesConPartidos.map(fase => (
+                        <button key={fase} onClick={() => setVistaPartidos(fase)}
+                          style={chipStyle(vistaPartidos === fase)}>
+                          {FASES_INFO[fase].emoji} {FASES_INFO[fase].label}
+                        </button>
+                      ))}
                     </div>
                   )}
 
-                  {/* Tarjeta de jornada seleccionada */}
-                  <div style={{ background:"white", borderRadius:"var(--radius-md)", overflow:"hidden", boxShadow:"var(--shadow-sm)", border:"1px solid var(--border)" }}>
-                    <div style={{ background:"#f9fafb", padding:"8px 14px", display:"flex", justifyContent:"space-between", alignItems:"center", borderBottom:"1px solid var(--border)" }}>
-                      <span style={{ fontWeight:700, fontSize:12.5 }}>Jornada {grupoSel.jornada.numero}</span>
-                      <span style={{ fontSize:11, color:"var(--text-muted)" }}>{grupoSel.jornada.fecha||"Fecha por definir"}</span>
-                    </div>
-                    <div style={{ padding:"8px 10px", display:"flex", flexDirection:"column", gap:6 }}>
-                      {partidosLlenos.length === 0 && descansan.length === 0 && (
-                        <div style={{ padding:"14px 10px", textAlign:"center", color:"var(--text-muted)", fontSize:12, fontStyle:"italic" }}>
-                          Sin partidos programados en esta jornada
+                  {/* Contenido según la vista activa */}
+                  {typeof vistaPartidos === "string" ? (() => {
+                    // Vista de fase del bracket: agrupar por tipo.
+                    // Orden visual fijo: liguilla → copa → amistosos al final.
+                    // En "Final" se anexan después los partidos de 3er lugar
+                    // (que se juegan el mismo día), agrupados por tipo bajo
+                    // un sub-encabezado propio.
+                    const matchFase = (p) => p.fase === vistaPartidos;
+                    const partidosFase = liguilla.filter(p => matchFase(p) && p.equipo_local_id && p.equipo_visitante_id);
+                    const tercerLugar = vistaPartidos === "final"
+                      ? liguilla.filter(p => p.fase === "3er_lugar" && p.equipo_local_id && p.equipo_visitante_id)
+                      : [];
+                    const tiposPorTipo = [
+                      { tipo:"liguilla", label:"🏆 Liguilla", badge:{ label:"Liguilla", bg:"var(--green-light)", color:"var(--green)" } },
+                      { tipo:"copa",     label:"🥈 Copa",     badge:{ label:"Copa",     bg:"#fef9c3", color:"#854d0e" } },
+                      { tipo:"amistoso", label:"🤝 Amistosos", badge:{ label:"Amistoso", bg:"#f3f4f6", color:"#6b7280" } },
+                    ];
+                    const renderListaPorTipo = (lista, prefix, badgeOverride) => tiposPorTipo.map(g => {
+                      const partidosTipo = lista.filter(p => p.tipo === g.tipo);
+                      if (partidosTipo.length === 0) return null;
+                      return (
+                        <div key={`${prefix}-${g.tipo}`} style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                          <div style={{ fontSize:11.5, fontWeight:800, color:"var(--text-sub)", letterSpacing:0.4, textTransform:"uppercase", padding:"2px 2px" }}>
+                            {g.label}
+                          </div>
+                          {partidosTipo.map(p => {
+                            // En bracket los goles viven en la misma fila
+                            // (no hay ficha_partido). Sólo se muestran si
+                            // están registrados.
+                            const tieneGoles = p.goles_local != null && p.goles_visitante != null;
+                            return renderPartidoCard({
+                              key: p.id,
+                              local: getEquipo(p.equipo_local_id),
+                              visitante: getEquipo(p.equipo_visitante_id),
+                              golesLocal: p.goles_local,
+                              golesVisitante: p.goles_visitante,
+                              mostrarGoles: tieneGoles,
+                              hora: p.hora,
+                              cancha: p.cancha_numero,
+                              jugado: !!p.cerrado,
+                              badge: badgeOverride || g.badge,
+                            });
+                          })}
                         </div>
-                      )}
-                      {partidosLlenos.map(p => {
-                        const fichaOk = p.ficha_partido?.cerrada;
-                        const f = fichaOk ? p.ficha_partido : null;
-                        return (
-                          <div key={p.id} style={{ padding:"8px 10px", background:"#f9fafb", borderRadius:9, border:"1px solid var(--border)" }}>
-                            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:4 }}>
-                              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, flex:1, minWidth:0 }}>
-                                <JerseySVG
-                                  diseno={p.equipos_local?.diseno_camiseta||"solido"}
-                                  color1={p.equipos_local?.color_playera||"#999"}
-                                  color2={p.equipos_local?.color_camiseta_2||"#fff"}
-                                  escudoUrl={p.equipos_local?.escudo_url||null}
-                                  size={34}
-                                />
-                                <span style={{ fontWeight:700, fontSize:11.5, textAlign:"center", lineHeight:1.15, wordBreak:"break-word" }}>{p.equipos_local?.nombre}</span>
-                              </div>
+                      );
+                    });
+                    return (
+                      <div style={{ background:"white", borderRadius:"var(--radius-md)", overflow:"hidden", boxShadow:"var(--shadow-sm)", border:"1px solid var(--border)" }}>
+                        <div style={{ background:"#f9fafb", padding:"8px 14px", borderBottom:"1px solid var(--border)" }}>
+                          <span style={{ fontWeight:700, fontSize:12.5 }}>
+                            {FASES_INFO[vistaPartidos].emoji} {FASES_INFO[vistaPartidos].label}
+                          </span>
+                        </div>
+                        <div style={{ padding:"8px 10px", display:"flex", flexDirection:"column", gap:10 }}>
+                          {partidosFase.length === 0 && tercerLugar.length === 0 && (
+                            <div style={{ padding:"14px 10px", textAlign:"center", color:"var(--text-muted)", fontSize:12, fontStyle:"italic" }}>
+                              Sin partidos en esta fase
+                            </div>
+                          )}
+                          {renderListaPorTipo(partidosFase, "fase")}
 
-                              <div style={{ textAlign:"center", padding:"0 6px", flexShrink:0, minWidth:64 }}>
-                                {f ? (
-                                  <div style={{ fontSize:20, fontWeight:900, lineHeight:1 }}>
-                                    <span style={{ color:f.goles_local>f.goles_visitante?"#16a34a":"var(--text)" }}>{f.goles_local}</span>
-                                    <span style={{ color:"#d1d5db", fontSize:15, margin:"0 3px" }}>-</span>
-                                    <span style={{ color:f.goles_visitante>f.goles_local?"#16a34a":"var(--text)" }}>{f.goles_visitante}</span>
-                                  </div>
-                                ) : (
-                                  <span style={{ fontSize:11.5, color:"var(--text-muted)", fontWeight:800, letterSpacing:1 }}>VS</span>
-                                )}
-                                <div style={{ fontSize:9.5, color:"var(--text-muted)", marginTop:3, whiteSpace:"nowrap" }}>
-                                  ⏰ {p.hora?.substring(0,5)||"—"} · C{p.cancha_numero||"—"}
-                                </div>
-                                {fichaOk && <div style={{ fontSize:9.5, color:"var(--green)", fontWeight:700, marginTop:1 }}>✓ Jugado</div>}
+                          {/* 3er lugar embebido en la final (mismo día). El
+                              encabezado separador deja claro qué partidos son. */}
+                          {tercerLugar.length > 0 && (
+                            <>
+                              <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:4, paddingTop:8, borderTop:"1px dashed var(--border)" }}>
+                                <span style={{ fontSize:12, fontWeight:800, color:"#92400e" }}>🥉 3er lugar</span>
                               </div>
+                              {renderListaPorTipo(tercerLugar, "tercer", { label:"3er lugar", bg:"#fff7ed", color:"#9a3412" })}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })() : (() => {
+                    const grupoSel = jornadasAgrupadas.find(g => g.jornada.numero === vistaPartidos) || jornadasAgrupadas[0];
+                    if (!grupoSel) return null;
+                    // Solo se muestran partidos con AMBOS equipos asignados.
+                    // Los partidos con un solo equipo cuentan como "descanso" para ese equipo.
+                    // Los partidos sin equipos (hueco completo) simplemente no aparecen.
+                    const partidosLlenos = grupoSel.partidos.filter(p => p.equipo_local_id && p.equipo_visitante_id);
+                    const equipoIdsEnPartidos = new Set();
+                    partidosLlenos.forEach(p => {
+                      equipoIdsEnPartidos.add(p.equipo_local_id);
+                      equipoIdsEnPartidos.add(p.equipo_visitante_id);
+                    });
+                    const descansan = equipos.filter(eq => !equipoIdsEnPartidos.has(eq.id));
+                    return (
+                      <div style={{ background:"white", borderRadius:"var(--radius-md)", overflow:"hidden", boxShadow:"var(--shadow-sm)", border:"1px solid var(--border)" }}>
+                        <div style={{ background:"#f9fafb", padding:"8px 14px", display:"flex", justifyContent:"space-between", alignItems:"center", borderBottom:"1px solid var(--border)" }}>
+                          <span style={{ fontWeight:700, fontSize:12.5 }}>Jornada {grupoSel.jornada.numero}</span>
+                          <span style={{ fontSize:11, color:"var(--text-muted)" }}>{grupoSel.jornada.fecha||"Fecha por definir"}</span>
+                        </div>
+                        <div style={{ padding:"8px 10px", display:"flex", flexDirection:"column", gap:6 }}>
+                          {partidosLlenos.length === 0 && descansan.length === 0 && (
+                            <div style={{ padding:"14px 10px", textAlign:"center", color:"var(--text-muted)", fontSize:12, fontStyle:"italic" }}>
+                              Sin partidos programados en esta jornada
+                            </div>
+                          )}
+                          {partidosLlenos.map(p => {
+                            const fichaOk = p.ficha_partido?.cerrada;
+                            const f = fichaOk ? p.ficha_partido : null;
+                            return renderPartidoCard({
+                              key: p.id,
+                              local: p.equipos_local,
+                              visitante: p.equipos_visitante,
+                              golesLocal: f?.goles_local,
+                              golesVisitante: f?.goles_visitante,
+                              mostrarGoles: !!f,
+                              hora: p.hora,
+                              cancha: p.cancha_numero,
+                              jugado: !!fichaOk,
+                            });
+                          })}
 
-                              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, flex:1, minWidth:0 }}>
-                                <JerseySVG
-                                  diseno={p.equipos_visitante?.diseno_camiseta||"solido"}
-                                  color1={p.equipos_visitante?.color_playera||"#999"}
-                                  color2={p.equipos_visitante?.color_camiseta_2||"#fff"}
-                                  escudoUrl={p.equipos_visitante?.escudo_url||null}
-                                  size={34}
-                                />
-                                <span style={{ fontWeight:700, fontSize:11.5, textAlign:"center", lineHeight:1.15, wordBreak:"break-word" }}>{p.equipos_visitante?.nombre}</span>
+                          {/* Equipos que descansan en esta jornada */}
+                          {descansan.map(eq => (
+                            <div key={`descansa-${eq.id}`} style={{ padding:"8px 10px", background:"#f9fafb", borderRadius:9, border:"1px dashed #d1d5db", display:"flex", alignItems:"center", gap:10 }}>
+                              <span style={{ fontSize:22, lineHeight:1, flexShrink:0 }}>😴</span>
+                              <JerseySVG
+                                diseno={eq.diseno_camiseta||"solido"}
+                                color1={eq.color_playera||"#999"}
+                                color2={eq.color_camiseta_2||"#fff"}
+                                escudoUrl={eq.escudo_url||null}
+                                size={30}
+                              />
+                              <div style={{ flex:1, minWidth:0 }}>
+                                <div style={{ fontSize:12.5, fontWeight:800, color:"var(--text)", lineHeight:1.15, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{eq.nombre}</div>
+                                <div style={{ fontSize:10.5, color:"var(--text-muted)", marginTop:1 }}>Descansa esta jornada</div>
                               </div>
                             </div>
-                          </div>
-                        );
-                      })}
-
-                      {/* Equipos que descansan en esta jornada */}
-                      {descansan.map(eq => (
-                        <div key={`descansa-${eq.id}`} style={{ padding:"8px 10px", background:"#f9fafb", borderRadius:9, border:"1px dashed #d1d5db", display:"flex", alignItems:"center", gap:10 }}>
-                          <span style={{ fontSize:22, lineHeight:1, flexShrink:0 }}>😴</span>
-                          <JerseySVG
-                            diseno={eq.diseno_camiseta||"solido"}
-                            color1={eq.color_playera||"#999"}
-                            color2={eq.color_camiseta_2||"#fff"}
-                            escudoUrl={eq.escudo_url||null}
-                            size={30}
-                          />
-                          <div style={{ flex:1, minWidth:0 }}>
-                            <div style={{ fontSize:12.5, fontWeight:800, color:"var(--text)", lineHeight:1.15, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{eq.nombre}</div>
-                            <div style={{ fontSize:10.5, color:"var(--text-muted)", marginTop:1 }}>Descansa esta jornada</div>
-                          </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })()
           )}
+          {seccion==="eliminatoria"&&(() => {
+            // Tab dedicado al esquema tipo árbol del bracket. Aparece sólo
+            // cuando ya hay partidos de bracket generados (ver `tabs`).
+            const getEquipo = id => equipos.find(e => e.id === id);
+            const hayLiguilla = liguillaPartidos.cuartos.length > 0;
+            const hayCopa = copaPartidos.cuartos.length > 0;
+            return (
+              <>
+                <BracketTree
+                  titulo="Liguilla" emoji="🏆"
+                  partidos={liguillaPartidos}
+                  colors={["#4f8f2f", "#3b82f6", "#f59e0b"]}
+                  getEquipo={getEquipo}
+                />
+                <BracketTree
+                  titulo="Copa" emoji="🥈"
+                  partidos={copaPartidos}
+                  colors={["#b45309", "#7c3aed", "#dc2626"]}
+                  getEquipo={getEquipo}
+                  topGap={hayLiguilla}
+                />
+                {!hayLiguilla && !hayCopa && (
+                  <EmptyState icon="🎯" txt="Aún no se generó el bracket"/>
+                )}
+              </>
+            );
+          })()}
           {seccion==="goleadores"&&(goleadores.length===0?<EmptyState icon="🥇" txt="No hay goles registrados aún"/>:
             <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
               {goleadores.map((g,i)=>(
