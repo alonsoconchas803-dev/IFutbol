@@ -63,7 +63,11 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
   // ── ESTADOS DE ESTADÍSTICAS ──────────────────────────────────
   const [statsLoading, setStatsLoading] = useState(false);
   const [partidosJugados, setPartidosJugados] = useState([]);
-  const [filtroStats, setFiltroStats] = useState("activos"); // "activos" | <liga_id> | "historico"
+  const [ambitoStats, setAmbitoStats] = useState("activas"); // "activas" | "historico"
+  const [tabStats, setTabStats] = useState("resumen"); // "resumen" | "equipos" | "ligas" | "unidades"
+  const [partidosOpen, setPartidosOpen] = useState(false);
+  // Posiciones de goleo por liga: { [liga_id]: { goles, posicion } }
+  const [posicionesGoleo, setPosicionesGoleo] = useState({});
 
   // ── ESTADOS DEL PANEL DE CAPITÁN ─────────────────────────────
   const [equipoCapActivoId, setEquipoCapActivoId] = useState(null);
@@ -557,6 +561,17 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
 
       procesados.sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
       setPartidosJugados(procesados);
+
+      // Posiciones de goleo por liga (server-side: ranking estándar, solo nuestros datos)
+      if (ligaIds.length > 0) {
+        try {
+          const filas = await db(`/rpc/posicion_goleo_ligas`, token, {
+            method: "POST",
+            body: JSON.stringify({ p_jugador_id: jugador.id, p_ligas: ligaIds }),
+          });
+          setPosicionesGoleo(Object.fromEntries((filas || []).map(f => [f.liga_id, { goles: f.goles, posicion: f.posicion }])));
+        } catch (e) { /* falla silenciosa: las cards muestran "sin posición" */ }
+      }
     } catch (e) { showToast(e.message, "err"); }
     setStatsLoading(false);
   };
@@ -569,6 +584,17 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
     }
   }, [seccion, jugador?.id, inscripciones.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Helper: agrega un partido a un acumulador de stats { pj, goles, v, e, d }.
+  const acumStats = (acc, p) => {
+    acc.pj += p.presente ? 1 : 0;
+    acc.goles += p.misGoles || 0;
+    if (p.miMarcador > p.rivalMarcador) acc.v += 1;
+    else if (p.miMarcador === p.rivalMarcador) acc.e += 1;
+    else acc.d += 1;
+    return acc;
+  };
+  const statsBase = () => ({ pj: 0, goles: 0, v: 0, e: 0, d: 0 });
+
   // Datos derivados para el selector y agregados
   const ligasInscrito = useMemo(() => {
     const map = new Map();
@@ -578,28 +604,142 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
     return [...map.values()];
   }, [inscripciones]);
 
-  const temporadasDistintas = useMemo(() => {
-    return [...new Set(partidosJugados.map(p => p.temporada).filter(Boolean))];
-  }, [partidosJugados]);
+  const hayHistorico = useMemo(
+    () => partidosJugados.some(p => !p.activa),
+    [partidosJugados]
+  );
 
+  // Universo de partidos según el ámbito (activas vs histórico completo).
   const partidosFiltrados = useMemo(() => {
-    if (filtroStats === "activos") return partidosJugados.filter(p => p.activa);
-    if (filtroStats === "historico") return partidosJugados;
-    return partidosJugados.filter(p => p.liga_id === filtroStats);
-  }, [partidosJugados, filtroStats]);
+    if (ambitoStats === "historico") return partidosJugados;
+    return partidosJugados.filter(p => p.activa);
+  }, [partidosJugados, ambitoStats]);
 
   const stats = useMemo(() => {
-    const ps = partidosFiltrados;
-    const pjPresente = ps.filter(p => p.presente).length;
-    const totalGoles = ps.reduce((s, p) => s + (p.misGoles || 0), 0);
-    const partidosConGol = ps.filter(p => p.misGoles > 0).length;
-    const promedio = pjPresente > 0 ? (totalGoles / pjPresente) : 0;
-    const equipos = [...new Set(ps.map(p => p.miEquipo?.id).filter(Boolean))].length;
-    const v = ps.filter(p => p.miMarcador > p.rivalMarcador).length;
-    const e = ps.filter(p => p.miMarcador === p.rivalMarcador).length;
-    const d = ps.filter(p => p.miMarcador < p.rivalMarcador).length;
-    return { pjPresente, totalGoles, partidosConGol, promedio, equipos, v, e, d, total: ps.length };
+    const acc = partidosFiltrados.reduce(acumStats, statsBase());
+    const promedio = acc.pj > 0 ? (acc.goles / acc.pj) : 0;
+    const equipos = new Set(partidosFiltrados.map(p => p.miEquipo?.id).filter(Boolean)).size;
+    return { ...acc, promedio, equipos, total: partidosFiltrados.length };
   }, [partidosFiltrados]);
+
+  // ── Records personales (sobre el universo activo) ──
+  const records = useMemo(() => {
+    const ps = partidosFiltrados;
+    // Mejor partido: mayor cantidad de goles del jugador (desempate: marcador favorable más amplio)
+    let mejor = null;
+    for (const p of ps) {
+      if ((p.misGoles || 0) <= 0) continue;
+      if (!mejor
+        || p.misGoles > mejor.misGoles
+        || (p.misGoles === mejor.misGoles && (p.miMarcador - p.rivalMarcador) > (mejor.miMarcador - mejor.rivalMarcador))) {
+        mejor = p;
+      }
+    }
+    const hatTricks = ps.filter(p => (p.misGoles || 0) >= 3).length;
+    // Racha sin perder (más reciente hacia atrás): partidos consecutivos donde no perdió.
+    const ordenadosDesc = [...ps].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+    let racha = 0;
+    for (const p of ordenadosDesc) {
+      if (p.miMarcador >= p.rivalMarcador) racha += 1;
+      else break;
+    }
+    // Rival al que más goles le anotó (por id de equipo rival).
+    const golesVsRival = new Map();
+    for (const p of ps) {
+      if (!p.rival?.id) continue;
+      const acum = golesVsRival.get(p.rival.id) || { rival: p.rival, goles: 0 };
+      acum.goles += p.misGoles || 0;
+      golesVsRival.set(p.rival.id, acum);
+    }
+    let rivalTop = null;
+    for (const r of golesVsRival.values()) {
+      if (!rivalTop || r.goles > rivalTop.goles) rivalTop = r;
+    }
+    return { mejor, hatTricks, racha, rivalTop };
+  }, [partidosFiltrados]);
+
+  // ── Agrupación por equipo ──
+  const statsPorEquipo = useMemo(() => {
+    const map = new Map();
+    for (const p of partidosFiltrados) {
+      if (!p.miEquipo?.id) continue;
+      const cur = map.get(p.miEquipo.id) || { equipo: p.miEquipo, ...statsBase() };
+      acumStats(cur, p);
+      map.set(p.miEquipo.id, cur);
+    }
+    const arr = [...map.values()].map(s => ({ ...s, promedio: s.pj > 0 ? s.goles / s.pj : 0 }));
+    arr.sort((a, b) => b.goles - a.goles || b.pj - a.pj);
+    return arr;
+  }, [partidosFiltrados]);
+
+  // ── Agrupación por liga (con desglose interno por equipo) ──
+  const statsPorLiga = useMemo(() => {
+    const map = new Map();
+    for (const p of partidosFiltrados) {
+      if (!p.liga_id) continue;
+      let cur = map.get(p.liga_id);
+      if (!cur) {
+        cur = {
+          liga_id: p.liga_id,
+          liga_nombre: p.liga_nombre,
+          temporada: p.temporada,
+          activa: p.activa,
+          unidad: p.unidad,
+          color: p.color_liga,
+          ...statsBase(),
+          porEquipo: new Map(),
+        };
+        map.set(p.liga_id, cur);
+      }
+      acumStats(cur, p);
+      if (p.miEquipo?.id) {
+        const eq = cur.porEquipo.get(p.miEquipo.id) || { equipo: p.miEquipo, ...statsBase() };
+        acumStats(eq, p);
+        cur.porEquipo.set(p.miEquipo.id, eq);
+      }
+    }
+    const arr = [...map.values()].map(l => ({
+      ...l,
+      promedio: l.pj > 0 ? l.goles / l.pj : 0,
+      porEquipo: [...l.porEquipo.values()].sort((a, b) => b.goles - a.goles),
+    }));
+    // Activas primero, luego por temporada descendente
+    arr.sort((a, b) => (b.activa ? 1 : 0) - (a.activa ? 1 : 0) || (b.temporada || "").localeCompare(a.temporada || ""));
+    return arr;
+  }, [partidosFiltrados]);
+
+  // ── Agrupación por unidad ──
+  const statsPorUnidad = useMemo(() => {
+    const map = new Map();
+    for (const p of partidosFiltrados) {
+      const key = p.unidad || "Sin unidad";
+      let cur = map.get(key);
+      if (!cur) cur = { unidad: key, ligas: new Set(), equipos: new Set(), ...statsBase() };
+      acumStats(cur, p);
+      cur.ligas.add(p.liga_id);
+      if (p.miEquipo?.id) cur.equipos.add(p.miEquipo.id);
+      map.set(key, cur);
+    }
+    const arr = [...map.values()].map(u => ({ ...u, promedio: u.pj > 0 ? u.goles / u.pj : 0, ligasCount: u.ligas.size, equiposCount: u.equipos.size }));
+    arr.sort((a, b) => b.goles - a.goles || b.pj - a.pj);
+    return arr;
+  }, [partidosFiltrados]);
+
+  // Máximo para escalar el bar chart (ancho relativo de las barras).
+  const maxGolesEquipo = useMemo(() => Math.max(1, ...statsPorEquipo.map(s => s.goles)), [statsPorEquipo]);
+  const maxGolesLiga = useMemo(() => Math.max(1, ...statsPorLiga.map(s => s.goles)), [statsPorLiga]);
+
+  // Mejor posición de goleo entre todas las ligas (menor número de posición; desempate por más goles).
+  // Solo cuenta ligas donde anotó al menos un gol — "ser 1° con 0 goles" no es presumible.
+  const mejorPosicion = useMemo(() => {
+    const ligaPorId = new Map(statsPorLiga.map(l => [l.liga_id, l]));
+    const candidatos = Object.entries(posicionesGoleo)
+      .filter(([liga_id, p]) => p.goles > 0 && ligaPorId.has(liga_id))
+      .map(([liga_id, p]) => ({ liga_id, ...p, liga: ligaPorId.get(liga_id) }));
+    if (candidatos.length === 0) return null;
+    candidatos.sort((a, b) => a.posicion - b.posicion || b.goles - a.goles);
+    return candidatos[0];
+  }, [posicionesGoleo, statsPorLiga]);
 
   // ── EDITAR DORSAL ─────────────────────────────────────────────
   const guardarDorsalCap = async () => {
@@ -846,66 +986,312 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
               <div style={s.emptyTxt}>Aún no estás inscrito en ningún torneo</div>
               <p style={{ color:"#9ca3af", fontSize:13, margin:0 }}>Cuando juegues partidos aparecerán tus estadísticas aquí.</p>
             </div>
+          ) : partidosFiltrados.length === 0 && ambitoStats === "activas" ? (
+            <div style={s.empty}>
+              <div style={s.emptyIcon}>⏳</div>
+              <div style={s.emptyTxt}>Aún no has jugado partidos</div>
+              <p style={{ color:"#9ca3af", fontSize:13, margin:0 }}>Tus estadísticas aparecerán cuando el árbitro cierre tu primera ficha.</p>
+              {hayHistorico && (
+                <button style={{ ...s.btnGestionarSimple, marginTop: 12 }} onClick={() => setAmbitoStats("historico")}>
+                  Ver mi histórico →
+                </button>
+              )}
+            </div>
           ) : (
             <>
-              <div style={s.statsFiltros}>
-                <button
-                  onClick={() => setFiltroStats("activos")}
-                  style={{ ...s.statsFiltro, ...(filtroStats === "activos" ? s.statsFiltroActivo : {}) }}>
-                  ⚡ Todos los activos
-                </button>
-                {ligasInscrito.map(l => (
-                  <button key={l.id}
-                    onClick={() => setFiltroStats(l.id)}
-                    style={{ ...s.statsFiltro, ...(filtroStats === l.id ? s.statsFiltroActivo : {}) }}>
-                    🏆 {l.nombre}
+              {/* Toggle ámbito */}
+              {hayHistorico && (
+                <div style={s.statsToggle}>
+                  <button onClick={() => setAmbitoStats("activas")}
+                    style={{ ...s.statsToggleBtn, ...(ambitoStats === "activas" ? s.statsToggleBtnActive : {}) }}>
+                    ⚡ Activas
+                  </button>
+                  <button onClick={() => setAmbitoStats("historico")}
+                    style={{ ...s.statsToggleBtn, ...(ambitoStats === "historico" ? s.statsToggleBtnActive : {}) }}>
+                    📜 Histórico
+                  </button>
+                </div>
+              )}
+
+              {/* Hero */}
+              <div style={s.statsHero}>
+                <div style={s.statsHeroRow}>
+                  <div style={s.statsHeroBig}>
+                    <div style={s.statsHeroBigVal}>{stats.goles}</div>
+                    <div style={s.statsHeroBigLbl}>⚽ Goles</div>
+                  </div>
+                  <div style={s.statsHeroBig}>
+                    <div style={s.statsHeroBigVal}>{stats.pj}</div>
+                    <div style={s.statsHeroBigLbl}>👟 Partidos</div>
+                  </div>
+                  <div style={s.statsHeroBig}>
+                    <div style={s.statsHeroBigVal}>{stats.promedio.toFixed(2)}</div>
+                    <div style={s.statsHeroBigLbl}>📈 G/P</div>
+                  </div>
+                </div>
+                <div style={s.statsHeroVED}>
+                  <div style={{ ...s.statsHeroVEDChip, background: "#dcfce7", color: "#16a34a" }}>{stats.v} V</div>
+                  <div style={{ ...s.statsHeroVEDChip, background: "#fef9c3", color: "#a16207" }}>{stats.e} E</div>
+                  <div style={{ ...s.statsHeroVEDChip, background: "#fee2e2", color: "#dc2626" }}>{stats.d} D</div>
+                </div>
+              </div>
+
+              {/* Tabs */}
+              <div style={s.statsTabs}>
+                {[
+                  { k: "resumen", lbl: "📊 Resumen" },
+                  { k: "equipos", lbl: "👕 Equipos" },
+                  { k: "ligas",   lbl: "🏆 Ligas"   },
+                  { k: "unidades",lbl: "📍 Unidades" },
+                ].map(t => (
+                  <button key={t.k} onClick={() => setTabStats(t.k)}
+                    style={{ ...s.statsTabBtn, ...(tabStats === t.k ? s.statsTabBtnActive : {}) }}>
+                    {t.lbl}
                   </button>
                 ))}
-                {temporadasDistintas.length > 1 && (
-                  <button
-                    onClick={() => setFiltroStats("historico")}
-                    style={{ ...s.statsFiltro, ...(filtroStats === "historico" ? s.statsFiltroActivo : {}) }}>
-                    📜 Histórico ({temporadasDistintas.length} temporadas)
-                  </button>
-                )}
               </div>
 
-              {/* Cards de stats principales */}
-              <div style={s.statsGrid}>
-                <div style={s.statBig}>
-                  <div style={s.statBigVal}>{stats.totalGoles}</div>
-                  <div style={s.statBigLbl}>⚽ Goles</div>
-                </div>
-                <div style={s.statBig}>
-                  <div style={s.statBigVal}>{stats.pjPresente}</div>
-                  <div style={s.statBigLbl}>👟 Partidos jugados</div>
-                </div>
-                <div style={s.statBig}>
-                  <div style={s.statBigVal}>{stats.promedio.toFixed(2)}</div>
-                  <div style={s.statBigLbl}>📈 Goles / partido</div>
-                </div>
-              </div>
-
-              {/* Stats secundarias */}
-              <div style={s.statsSecondary}>
-                <div style={s.statSmall}><span style={{ color:"#16a34a" }}>{stats.v}</span><span style={s.statSmallLbl}>Victorias</span></div>
-                <div style={s.statSmall}><span style={{ color:"#ca8a04" }}>{stats.e}</span><span style={s.statSmallLbl}>Empates</span></div>
-                <div style={s.statSmall}><span style={{ color:"#dc2626" }}>{stats.d}</span><span style={s.statSmallLbl}>Derrotas</span></div>
-                <div style={s.statSmall}><span style={{ color:GREEN }}>{stats.equipos}</span><span style={s.statSmallLbl}>Equipos</span></div>
-              </div>
-
-              {/* Lista de partidos */}
-              <div style={{ marginTop: 24 }}>
-                <div style={s.secHeader}>
-                  <span style={s.secCount}>📋 Detalle de partidos ({partidosFiltrados.length})</span>
-                </div>
-                {partidosFiltrados.length === 0 ? (
-                  <div style={s.empty}>
-                    <div style={s.emptyIcon}>📊</div>
-                    <div style={s.emptyTxt}>No hay partidos en esta selección</div>
+              {/* Contenido por tab */}
+              {tabStats === "resumen" && (
+                <div style={s.recordsGrid}>
+                  <div style={s.recordCard}>
+                    <div style={s.recordIcon}>🏆</div>
+                    <div style={s.recordLbl}>Mejor partido</div>
+                    {records.mejor ? (
+                      <>
+                        <div style={s.recordVal}>{records.mejor.misGoles} {records.mejor.misGoles === 1 ? "gol" : "goles"}</div>
+                        <div style={s.recordSub}>{records.mejor.miEquipo?.nombre} {records.mejor.miMarcador}-{records.mejor.rivalMarcador} {records.mejor.rival?.nombre}</div>
+                      </>
+                    ) : <div style={s.recordVal}>—</div>}
                   </div>
-                ) : (
-                  <div style={s.partidosList}>
+                  <div style={s.recordCard}>
+                    <div style={s.recordIcon}>🎯</div>
+                    <div style={s.recordLbl}>Hat-tricks</div>
+                    <div style={s.recordVal}>{records.hatTricks}</div>
+                    <div style={s.recordSub}>{records.hatTricks === 1 ? "partido con 3+ goles" : "partidos con 3+ goles"}</div>
+                  </div>
+                  <div style={s.recordCard}>
+                    <div style={s.recordIcon}>🔥</div>
+                    <div style={s.recordLbl}>Racha sin perder</div>
+                    <div style={s.recordVal}>{records.racha}</div>
+                    <div style={s.recordSub}>{records.racha === 1 ? "partido consecutivo" : "partidos consecutivos"}</div>
+                  </div>
+                  <div style={s.recordCard}>
+                    <div style={s.recordIcon}>⚔️</div>
+                    <div style={s.recordLbl}>Tu víctima favorita</div>
+                    {records.rivalTop && records.rivalTop.goles > 0 ? (
+                      <>
+                        <div style={s.recordVal}>{records.rivalTop.goles} {records.rivalTop.goles === 1 ? "gol" : "goles"}</div>
+                        <div style={s.recordSub}>vs {records.rivalTop.rival?.nombre}</div>
+                      </>
+                    ) : <div style={s.recordVal}>—</div>}
+                  </div>
+                  <div style={{ ...s.recordCard, gridColumn: "1 / -1" }}>
+                    <div style={s.recordIcon}>🥇</div>
+                    <div style={s.recordLbl}>Mejor posición de goleo</div>
+                    {mejorPosicion ? (
+                      <>
+                        <div style={s.recordVal}>{mejorPosicion.posicion}°</div>
+                        <div style={s.recordSub}>{mejorPosicion.liga?.liga_nombre} · {mejorPosicion.goles} {mejorPosicion.goles === 1 ? "gol" : "goles"}</div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={s.recordVal}>—</div>
+                        <div style={s.recordSub}>Aún no has anotado</div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {tabStats === "equipos" && (
+                <div>
+                  {statsPorEquipo.length === 0 ? (
+                    <div style={s.empty}><div style={s.emptyTxt}>Sin datos en esta selección</div></div>
+                  ) : (
+                    <>
+                      {/* Bar chart */}
+                      <div style={s.barChart}>
+                        <div style={s.barChartTitle}>Goles por equipo</div>
+                        {statsPorEquipo.map(e => (
+                          <div key={e.equipo.id} style={s.barRow}>
+                            <span style={s.barLbl}>{e.equipo.nombre}</span>
+                            <div style={s.barTrack}>
+                              <div style={{ ...s.barFill, width: `${(e.goles / maxGolesEquipo) * 100}%`, background: e.equipo.color_playera || GREEN }} />
+                            </div>
+                            <span style={s.barVal}>{e.goles}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Cards */}
+                      <div style={s.grupoCards}>
+                        {statsPorEquipo.map(e => (
+                          <div key={e.equipo.id} style={{ ...s.grupoCard, borderLeft: `4px solid ${e.equipo.color_playera || GREEN}` }}>
+                            <div style={s.grupoCardTop}>
+                              <div style={s.grupoCardLogo}>
+                                {e.equipo.escudo_url
+                                  ? <img src={e.equipo.escudo_url} alt="" style={s.grupoCardLogoImg} />
+                                  : <div style={{ ...s.grupoCardLogoPh, background: e.equipo.color_playera || "#3182ce" }}>{e.equipo.nombre?.[0]}</div>}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={s.grupoCardNombre}>{e.equipo.nombre}</div>
+                                <div style={s.grupoCardMeta}>{e.pj} PJ · {e.goles} {e.goles === 1 ? "gol" : "goles"} · {e.promedio.toFixed(2)} g/p</div>
+                              </div>
+                            </div>
+                            <div style={s.grupoCardVED}>
+                              <span style={{ ...s.vedChip, color: "#16a34a" }}>{e.v} V</span>
+                              <span style={{ ...s.vedChip, color: "#a16207" }}>{e.e} E</span>
+                              <span style={{ ...s.vedChip, color: "#dc2626" }}>{e.d} D</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {tabStats === "ligas" && (
+                <div>
+                  {statsPorLiga.length === 0 ? (
+                    <div style={s.empty}><div style={s.emptyTxt}>Sin datos en esta selección</div></div>
+                  ) : (
+                    <>
+                      <div style={s.barChart}>
+                        <div style={s.barChartTitle}>Goles por liga</div>
+                        {statsPorLiga.map(l => (
+                          <div key={l.liga_id} style={s.barRow}>
+                            <span style={s.barLbl}>{l.liga_nombre}</span>
+                            <div style={s.barTrack}>
+                              <div style={{ ...s.barFill, width: `${(l.goles / maxGolesLiga) * 100}%`, background: l.color || GREEN }} />
+                            </div>
+                            <span style={s.barVal}>{l.goles}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={s.grupoCards}>
+                        {statsPorLiga.map(l => {
+                          const c = l.color || GREEN;
+                          const pos = posicionesGoleo[l.liga_id];
+                          return (
+                          <div key={l.liga_id} style={s.ligaCard}>
+                            {/* Banner con color de la liga */}
+                            <div style={{ ...s.ligaCardBanner, background: `linear-gradient(135deg, rgba(255,255,255,0.18), rgba(0,0,0,0.18)), ${c}` }}>
+                              <div style={s.ligaCardBannerTop}>
+                                {l.activa
+                                  ? <span style={s.ligaCardBannerTag}>● ACTIVA</span>
+                                  : l.temporada && <span style={s.ligaCardBannerTag}>{l.temporada}</span>}
+                              </div>
+                              <div style={s.ligaCardBannerTitle}>{l.liga_nombre}</div>
+                              <div style={s.ligaCardBannerMeta}>📍 {l.unidad || "Sin unidad"}</div>
+                            </div>
+
+                            {/* Cuerpo */}
+                            <div style={s.ligaCardBody}>
+                              {/* Stats grandes */}
+                              <div style={s.ligaStatsRow}>
+                                <div style={s.ligaStat}>
+                                  <div style={s.ligaStatVal}>{l.pj}</div>
+                                  <div style={s.ligaStatLbl}>👟 PJ</div>
+                                </div>
+                                <div style={s.ligaStat}>
+                                  <div style={s.ligaStatVal}>{l.goles}</div>
+                                  <div style={s.ligaStatLbl}>⚽ Goles</div>
+                                </div>
+                                <div style={s.ligaStat}>
+                                  <div style={s.ligaStatVal}>{l.promedio.toFixed(2)}</div>
+                                  <div style={s.ligaStatLbl}>📈 G/P</div>
+                                </div>
+                              </div>
+
+                              {/* Posición de goleo destacada */}
+                              {pos?.goles > 0 ? (
+                                <div style={s.ligaPosCard}>
+                                  <div style={s.ligaPosLeft}>
+                                    <div style={s.ligaPosIcon}>🥇</div>
+                                    <div>
+                                      <div style={s.ligaPosLbl}>Tu posición de goleo</div>
+                                      <div style={s.ligaPosSub}>{pos.goles} {pos.goles === 1 ? "gol" : "goles"} anotados</div>
+                                    </div>
+                                  </div>
+                                  <div style={s.ligaPosVal}>{pos.posicion}°</div>
+                                </div>
+                              ) : (
+                                <div style={s.ligaPosCardEmpty}>
+                                  <span style={{ fontSize: 18 }}>🥇</span>
+                                  <span style={{ fontSize: 12.5, fontWeight: 600, color: "#92400e" }}>Sin anotar todavía en esta liga</span>
+                                </div>
+                              )}
+
+                              {/* V / E / D */}
+                              <div style={s.ligaVEDRow}>
+                                <div style={{ ...s.ligaVEDChip, background: "#dcfce7", color: "#16a34a", borderColor: "#86efac" }}>
+                                  <span style={s.ligaVEDChipNum}>{l.v}</span>
+                                  <span style={s.ligaVEDChipLbl}>Victorias</span>
+                                </div>
+                                <div style={{ ...s.ligaVEDChip, background: "#fef9c3", color: "#a16207", borderColor: "#fde68a" }}>
+                                  <span style={s.ligaVEDChipNum}>{l.e}</span>
+                                  <span style={s.ligaVEDChipLbl}>Empates</span>
+                                </div>
+                                <div style={{ ...s.ligaVEDChip, background: "#fee2e2", color: "#dc2626", borderColor: "#fca5a5" }}>
+                                  <span style={s.ligaVEDChipNum}>{l.d}</span>
+                                  <span style={s.ligaVEDChipLbl}>Derrotas</span>
+                                </div>
+                              </div>
+
+                              {/* Desglose por equipo si jugó con más de uno en esta liga */}
+                              {l.porEquipo.length > 1 && (
+                                <div style={s.subgrupo}>
+                                  <div style={s.subgrupoTitle}>Tus equipos en esta liga</div>
+                                  {l.porEquipo.map(eq => (
+                                    <div key={eq.equipo.id} style={s.subgrupoRow}>
+                                      <span style={{ ...s.subgrupoDot, background: eq.equipo.color_playera || "#3182ce" }} />
+                                      <span style={s.subgrupoNombre}>{eq.equipo.nombre}</span>
+                                      <span style={s.subgrupoMeta}>{eq.pj} PJ · {eq.goles} {eq.goles === 1 ? "gol" : "goles"}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {tabStats === "unidades" && (
+                <div>
+                  {statsPorUnidad.length === 0 ? (
+                    <div style={s.empty}><div style={s.emptyTxt}>Sin datos en esta selección</div></div>
+                  ) : (
+                    <div style={s.grupoCards}>
+                      {statsPorUnidad.map(u => (
+                        <div key={u.unidad} style={{ ...s.grupoCard, borderLeft: `4px solid ${GREEN}` }}>
+                          <div style={s.grupoCardNombre}>📍 {u.unidad}</div>
+                          <div style={s.grupoCardMeta}>{u.pj} PJ · {u.goles} {u.goles === 1 ? "gol" : "goles"} · {u.promedio.toFixed(2)} g/p</div>
+                          <div style={s.grupoCardMeta}>{u.ligasCount} {u.ligasCount === 1 ? "liga" : "ligas"} · {u.equiposCount} {u.equiposCount === 1 ? "equipo" : "equipos"}</div>
+                          <div style={s.grupoCardVED}>
+                            <span style={{ ...s.vedChip, color: "#16a34a" }}>{u.v} V</span>
+                            <span style={{ ...s.vedChip, color: "#a16207" }}>{u.e} E</span>
+                            <span style={{ ...s.vedChip, color: "#dc2626" }}>{u.d} D</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Acordeón de detalle */}
+              <div style={{ marginTop: 24 }}>
+                <button style={s.detalleToggle} onClick={() => setPartidosOpen(o => !o)}>
+                  📋 Ver mis {partidosFiltrados.length} {partidosFiltrados.length === 1 ? "partido" : "partidos"} {partidosOpen ? "▲" : "▼"}
+                </button>
+                {partidosOpen && (
+                  <div style={{ ...s.partidosList, marginTop: 12 }}>
                     {partidosFiltrados.map(p => {
                       const gano = p.miMarcador > p.rivalMarcador;
                       const empate = p.miMarcador === p.rivalMarcador;
@@ -1526,16 +1912,90 @@ const s = {
   confirmCamisetaLabel: { fontSize: 9, color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 },
   confirmCamisetaNombre: { fontSize: 12, fontWeight: 800, color: GREEN, letterSpacing: 1 },
   // ── Estadísticas ──
-  statsFiltros: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 },
-  statsFiltro: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 20, padding: "7px 14px", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" },
-  statsFiltroActivo: { background: "#f0fdf4", borderColor: GREEN, color: GREEN },
-  statsGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 14 },
-  statBig: { background: "linear-gradient(135deg, #f0fdf4 0%, #e8f5e1 100%)", border: "1px solid #c3e6a3", borderRadius: 14, padding: "18px 12px", textAlign: "center", boxShadow: "0 2px 8px rgba(79,143,47,0.08)" },
-  statBigVal: { fontSize: 28, fontWeight: 900, color: GREEN, marginBottom: 4, letterSpacing: -0.6 },
-  statBigLbl: { fontSize: 11, color: "#6b7280", fontWeight: 600 },
-  statsSecondary: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 8 },
-  statSmall: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 10, padding: "10px 6px", textAlign: "center", display: "flex", flexDirection: "column", gap: 2, fontSize: 18, fontWeight: 800 },
-  statSmallLbl: { fontSize: 10, color: "#9ca3af", fontWeight: 600, marginTop: 2 },
+  // Toggle Activas / Histórico
+  statsToggle: { display: "flex", gap: 6, padding: 4, background: "#f3f4f6", borderRadius: 12, marginBottom: 14 },
+  statsToggleBtn: { flex: 1, background: "transparent", border: "none", borderRadius: 9, padding: "8px 12px", color: "#6b7280", fontSize: 13, fontWeight: 700, cursor: "pointer" },
+  statsToggleBtnActive: { background: "#ffffff", color: GREEN, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" },
+  // Hero: cards principales agregadas
+  statsHero: { background: "linear-gradient(135deg, #f0fdf4 0%, #e8f5e1 100%)", border: "1px solid #c3e6a3", borderRadius: 16, padding: "18px 16px", marginBottom: 16, boxShadow: "0 2px 10px rgba(79,143,47,0.10)" },
+  statsHeroRow: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 12 },
+  statsHeroBig: { textAlign: "center" },
+  statsHeroBigVal: { fontSize: 30, fontWeight: 900, color: GREEN, letterSpacing: -0.8, lineHeight: 1 },
+  statsHeroBigLbl: { fontSize: 11, color: "#6b7280", fontWeight: 600, marginTop: 4 },
+  statsHeroVED: { display: "flex", gap: 6, justifyContent: "center" },
+  statsHeroVEDChip: { padding: "4px 12px", borderRadius: 14, fontSize: 12, fontWeight: 800, letterSpacing: 0.4 },
+  // Tabs
+  statsTabs: { display: "flex", gap: 4, padding: 4, background: "#f3f4f6", borderRadius: 12, marginBottom: 16, overflowX: "auto" },
+  statsTabBtn: { flex: "1 1 auto", background: "transparent", border: "none", borderRadius: 9, padding: "8px 10px", color: "#6b7280", fontSize: 12.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" },
+  // Tab activo: relleno verde sólido para que destaque sin ambigüedad.
+  statsTabBtnActive: { background: GREEN, color: "#ffffff", boxShadow: "0 2px 8px rgba(79,143,47,0.35)" },
+  // Records (tab Resumen)
+  recordsGrid: { display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 },
+  recordCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: 14, display: "flex", flexDirection: "column", gap: 4, boxShadow: "0 1px 4px rgba(0,0,0,0.04)" },
+  recordIcon: { fontSize: 22, lineHeight: 1 },
+  recordLbl: { fontSize: 11, color: "#6b7280", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 },
+  recordVal: { fontSize: 22, fontWeight: 900, color: "#111827", letterSpacing: -0.4, lineHeight: 1.1 },
+  recordSub: { fontSize: 11.5, color: "#6b7280", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  // Bar chart (CSS plano)
+  barChart: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: 14, marginBottom: 14 },
+  barChartTitle: { fontSize: 12, color: "#6b7280", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 },
+  barRow: { display: "grid", gridTemplateColumns: "minmax(80px, 35%) 1fr auto", alignItems: "center", gap: 8, marginBottom: 6 },
+  barLbl: { fontSize: 12, color: "#374151", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  barTrack: { height: 14, background: "#f3f4f6", borderRadius: 7, overflow: "hidden" },
+  barFill: { height: "100%", borderRadius: 7, transition: "width 0.4s ease" },
+  barVal: { fontSize: 12, fontWeight: 800, color: "#111827", minWidth: 24, textAlign: "right" },
+  // Cards de agrupación (equipos / ligas / unidades)
+  grupoCards: { display: "flex", flexDirection: "column", gap: 10 },
+  grupoCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: 14, display: "flex", flexDirection: "column", gap: 8, boxShadow: "0 1px 4px rgba(0,0,0,0.04)" },
+  grupoCardTop: { display: "flex", alignItems: "center", gap: 12 },
+  grupoCardLogo: { width: 44, height: 44, borderRadius: 10, overflow: "hidden", flexShrink: 0, border: `1px solid ${BORDER}` },
+  grupoCardLogoImg: { width: "100%", height: "100%", objectFit: "cover" },
+  grupoCardLogoPh: { width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 800, color: "#fff" },
+  grupoCardNombre: { fontSize: 15, fontWeight: 800, color: "#111827", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  grupoCardMeta: { fontSize: 12.5, color: "#6b7280", fontWeight: 500 },
+  grupoCardVED: { display: "flex", gap: 12, paddingTop: 6, borderTop: `1px dashed ${BORDER}` },
+  vedChip: { fontSize: 13, fontWeight: 800 },
+  tagActiva: { fontSize: 10, fontWeight: 700, background: "#dcfce7", color: "#16a34a", padding: "2px 7px", borderRadius: 6, textTransform: "uppercase", letterSpacing: 0.5 },
+  tagTemporada: { fontSize: 10, fontWeight: 700, background: "#f3f4f6", color: "#6b7280", padding: "2px 7px", borderRadius: 6, textTransform: "uppercase", letterSpacing: 0.5 },
+  // Subgrupo (desglose por equipo dentro de una liga)
+  subgrupo: { marginTop: 4, padding: "10px 12px", background: "#f9fafb", borderRadius: 10 },
+  subgrupoTitle: { fontSize: 10.5, color: "#6b7280", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 },
+  subgrupoRow: { display: "flex", alignItems: "center", gap: 8, paddingTop: 4 },
+  subgrupoDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
+  subgrupoNombre: { fontSize: 13, fontWeight: 700, color: "#111827", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  subgrupoMeta: { fontSize: 12, color: "#6b7280" },
+  // Línea de "posición de goleo" dentro de cada card de liga (legado; lo usaba el diseño anterior)
+  posGoleoLine: { fontSize: 12.5, color: "#92400e", background: "#fff7ed", border: "1px solid #fed7aa", padding: "5px 9px", borderRadius: 8, marginTop: 4, display: "inline-block" },
+  // ── Tarjeta de liga rediseñada ──
+  ligaCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 18, overflow: "hidden", boxShadow: "0 4px 16px rgba(0,0,0,0.06)" },
+  // Banner con color de la liga (gradiente sutil sobre el color base)
+  ligaCardBanner: { padding: "14px 18px 16px", color: "#ffffff" },
+  ligaCardBannerTop: { display: "flex", justifyContent: "flex-end", marginBottom: 6 },
+  ligaCardBannerTag: { fontSize: 10, fontWeight: 800, letterSpacing: 1, padding: "3px 9px", borderRadius: 10, background: "rgba(255,255,255,0.22)", border: "1px solid rgba(255,255,255,0.35)", textTransform: "uppercase" },
+  ligaCardBannerTitle: { fontSize: 22, fontWeight: 900, letterSpacing: -0.5, marginBottom: 4, textShadow: "0 1px 3px rgba(0,0,0,0.18)" },
+  ligaCardBannerMeta: { fontSize: 12.5, color: "rgba(255,255,255,0.88)", fontWeight: 600 },
+  // Cuerpo blanco
+  ligaCardBody: { padding: 16, display: "flex", flexDirection: "column", gap: 14 },
+  // Stats row: 3 columnas grandes
+  ligaStatsRow: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, padding: "8px 4px", background: "#f9fafb", borderRadius: 12 },
+  ligaStat: { textAlign: "center" },
+  ligaStatVal: { fontSize: 24, fontWeight: 900, color: GREEN, letterSpacing: -0.6, lineHeight: 1 },
+  ligaStatLbl: { fontSize: 10.5, color: "#6b7280", fontWeight: 700, marginTop: 4, textTransform: "uppercase", letterSpacing: 0.5 },
+  // Card de posición de goleo (color ámbar/oro)
+  ligaPosCard: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 14px", background: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)", border: "1.5px solid #fcd34d", borderRadius: 12, boxShadow: "0 2px 6px rgba(245,158,11,0.15)" },
+  ligaPosLeft: { display: "flex", alignItems: "center", gap: 10, minWidth: 0 },
+  ligaPosIcon: { fontSize: 26, lineHeight: 1 },
+  ligaPosLbl: { fontSize: 12.5, fontWeight: 800, color: "#92400e", textTransform: "uppercase", letterSpacing: 0.4 },
+  ligaPosSub: { fontSize: 11.5, color: "#a16207", marginTop: 2 },
+  ligaPosVal: { fontSize: 32, fontWeight: 900, color: "#b45309", letterSpacing: -1, lineHeight: 1, flexShrink: 0 },
+  ligaPosCardEmpty: { display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10 },
+  // V/E/D chips grandes
+  ligaVEDRow: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 },
+  ligaVEDChip: { display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 6px", borderRadius: 12, border: "1px solid", gap: 2 },
+  ligaVEDChipNum: { fontSize: 22, fontWeight: 900, lineHeight: 1, letterSpacing: -0.4 },
+  ligaVEDChipLbl: { fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 },
+  // Acordeón de detalle
+  detalleToggle: { width: "100%", background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 12, padding: "12px 16px", color: "#374151", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "left" },
   partidosList: { display: "flex", flexDirection: "column", gap: 10 },
   partidoCard: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 },
   partidoTop: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#6b7280", fontWeight: 600, gap: 8 },
