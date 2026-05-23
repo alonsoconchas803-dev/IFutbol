@@ -193,6 +193,8 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
       showToast("Camiseta actualizada ✓");
       setEditandoInsc(null);
       cargarInscripciones(jugador.id);
+      // Si estoy en la pantalla de gestión, refresco la lista para ver mi cambio en vivo.
+      if (equipoCapActivoId) await cargarEquipoCap(equipoCapActivoId);
     } catch (e) { showToast(e.message, "err"); }
     setGuardando(false);
   };
@@ -626,23 +628,31 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
     </div>
   );
 
+  // Derivado para encabezado + bloque mi-equipo
+  const inscActivaTop = inscripciones.find(i => i.equipo_id === equipoCapActivoId);
+  const esCapitanDelActivoTop = !!inscActivaTop?.es_capitan;
+
   return (
     <div style={s.wrap}>
       <style>{css}</style>
       {toast && <div style={{ ...s.toast, background: toast.tipo === "err" ? "#ef4444" : "#4ade80", color: toast.tipo === "err" ? "#fff" : "#0d0d1a" }}>{toast.msg}</div>}
 
       <div style={seccion === "ligas" ? { ...s.header, padding: "14px 24px" } : s.header}>
-        {seccion !== "perfil" && seccion !== "ligas" && (
+        {seccion !== "perfil" && seccion !== "ligas" && (seccion !== "mi-equipo" || esCapitanDelActivoTop) && (
           <div style={{ fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:1.5, marginBottom:6 }}>
             {seccion === "mi-equipo" ? "Capitán de equipo" : "Tu rendimiento"}
           </div>
         )}
         <h2 style={s.title}>
-          {seccion === "perfil" ? "🏃 Mi Perfil" : seccion === "mi-equipo" ? "👑 Mi Equipo" : seccion === "estadisticas" ? "📊 Mis Estadísticas" : "🏆 Mis Torneos"}
+          {seccion === "perfil" ? "🏃 Mi Perfil" : seccion === "mi-equipo" ? (esCapitanDelActivoTop ? "👑 Mi Equipo" : "Mi Equipo") : seccion === "estadisticas" ? "📊 Mis Estadísticas" : "🏆 Mis Torneos"}
         </h2>
         {seccion !== "ligas" && (
           <p style={s.sub}>
-            {seccion === "perfil" ? "Tu identidad en la plataforma" : seccion === "mi-equipo" ? "Gestiona la lista y la tarjeta de tu equipo" : "Goles, partidos y resultados"}
+            {seccion === "perfil"
+              ? "Tu identidad en la plataforma"
+              : seccion === "mi-equipo"
+                ? (esCapitanDelActivoTop ? "Gestiona la lista y la tarjeta de tu equipo" : "Tu equipo y compañeros")
+                : "Goles, partidos y resultados"}
           </p>
         )}
       </div>
@@ -987,18 +997,29 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
             {equipoCapData && (
               <div style={{ ...s.equipoCardCap, borderTop: `4px solid ${equipoCapData.color_playera || "#3182ce"}` }}>
                 <div style={s.equipoCardCapTop}>
-                  <JerseySVG
-                    diseno={equipoCapData.diseno_camiseta || "solido"}
-                    color1={equipoCapData.color_playera || "#3182ce"}
-                    color2={equipoCapData.color_camiseta_2 || "#ffffff"}
-                    escudoUrl={equipoCapData.escudo_url || null}
-                    size={72}
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  {/* Logo del equipo a la izquierda */}
+                  <div style={s.equipoCardLogo}>
+                    {equipoCapData.escudo_url
+                      ? <img src={equipoCapData.escudo_url} alt="escudo" style={s.equipoCardLogoImg} />
+                      : <div style={{ ...s.equipoCardLogoPlaceholder, background: equipoCapData.color_playera || "#3182ce" }}>
+                          {(equipoCapData.nombre || "?")[0]}
+                        </div>}
+                  </div>
+                  <div style={{ minWidth: 0, flexShrink: 1 }}>
                     <div style={s.equipoCardCapNombre}>{equipoCapData.nombre}</div>
                     <div style={s.equipoCardCapMeta}>
                       {jugadoresEquipoCap.length} / 17 jugadores
                     </div>
+                  </div>
+                  {/* Camiseta a la derecha (sin escudo dentro para no duplicar) */}
+                  <div style={{ marginLeft: "auto", flexShrink: 0 }}>
+                    <JerseySVG
+                      diseno={equipoCapData.diseno_camiseta || "solido"}
+                      color1={equipoCapData.color_playera || "#3182ce"}
+                      color2={equipoCapData.color_camiseta_2 || "#ffffff"}
+                      escudoUrl={null}
+                      size={56}
+                    />
                   </div>
                 </div>
                 {esCapitanDelActivo && (
@@ -1012,6 +1033,11 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
             {/* Acciones de jugadores */}
             <div style={s.secHeader}>
               <span style={s.secCount}>Jugadores</span>
+              {!esCapitanDelActivo && inscActiva && (
+                <button style={s.btnDelete} onClick={() => setConfirmDesinsc(inscActiva)}>
+                  Salir
+                </button>
+              )}
               {esCapitanDelActivo && (
                 <div style={{ display: "flex", gap: 8 }}>
                   <button style={s.btnAdd}
@@ -1022,7 +1048,7 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
                   <button
                     style={modoEliminar ? s.btnDeleteActive : s.btnDelete}
                     onClick={() => setModoEliminar(v => !v)}>
-                    {modoEliminar ? "Listo" : "Eliminar"}
+                    {modoEliminar ? "Listo" : "Sacar"}
                   </button>
                 </div>
               )}
@@ -1045,7 +1071,7 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
                   // El resto del equipo solo ve foto, nombre en camiseta y dorsal.
                   const verDatosPersonales = esCapitanDelActivo || je.jugador_id === miJugadorId;
                   return (
-                  <div key={je.id} style={{ ...s.jugadorRowCap, ...(je.es_capitan ? { borderLeft: `4px solid #f59e0b`, background: "linear-gradient(90deg, #fffbeb 0%, #ffffff 60%)" } : {}) }}>
+                  <div key={je.id} style={{ ...s.jugadorRowCap, ...(je.es_capitan ? { borderLeft: `4px solid #f59e0b`, background: "linear-gradient(90deg, #fffbeb 0%, #ffffff 60%)" } : { borderLeft: `4px solid ${equipoCapData?.color_playera || "#3182ce"}` }) }}>
                     <div style={s.jugadorAvatarCap}>
                       {je.jugadores?.foto_url
                         ? <img src={je.jugadores.foto_url} alt="foto" style={s.jugadorFotoCap} />
@@ -1062,6 +1088,14 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
                         </div>
                       )}
                     </div>
+                    {/* Botón ✏️ solo en mi propia fila, para editar mi dorsal/camiseta */}
+                    {je.jugador_id === miJugadorId && inscActiva && (
+                      <button style={s.btnEditarMiFila}
+                        onClick={() => abrirEditarInsc(inscActiva)}
+                        title="Editar mi dorsal y nombre">
+                        ✏️
+                      </button>
+                    )}
                     {esCapitanDelActivo ? (
                       <button
                         style={{ ...s.dorsalBtn, background: equipoCapData?.color_playera || "#3182ce" }}
@@ -1348,6 +1382,9 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
               <p style={{ color:"#6b7280", fontSize:14, margin:0 }}>
                 Saldrás del equipo <strong>{confirmDesinsc.equipos?.nombre}</strong> en la liga <strong>{confirmDesinsc.ligas?.nombre}</strong>.
               </p>
+              <p style={{ color:"#1d4ed8", background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:8, padding:"8px 10px", fontSize:12.5, marginTop:10, marginBottom:0 }}>
+                ℹ️ Tus partidos jugados y estadísticas quedarán en tu historial.
+              </p>
               <p style={{ color:"#ef4444", fontSize:12, marginTop:8 }}>
                 Esta acción no se puede revertir.
               </p>
@@ -1402,9 +1439,10 @@ const s = {
   secHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
   secCount: { color: "#6b7280", fontSize: 13 },
   btnAdd: { background: GREEN, color: "#ffffff", border: "none", borderRadius: 10, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" },
-  // Botón "Eliminar" en reposo: contorno rojo. Cuando se activa el modo cambia al estilo "activo".
-  btnDelete: { background: "#ffffff", color: "#dc2626", border: "1.5px solid #dc2626", borderRadius: 10, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" },
-  btnDeleteActive: { background: "#dc2626", color: "#ffffff", border: "1.5px solid #dc2626", borderRadius: 10, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer", boxShadow: "0 2px 8px rgba(220,38,38,0.35)" },
+  // Botones rojos sólidos para acciones destructivas (Salir/Sacar). El modo "activo"
+  // del Sacar usa un rojo más oscuro para distinguir que estás en modo selección.
+  btnDelete: { background: "#dc2626", color: "#ffffff", border: "none", borderRadius: 10, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer", boxShadow: "0 2px 8px rgba(220,38,38,0.30)" },
+  btnDeleteActive: { background: "#991b1b", color: "#ffffff", border: "none", borderRadius: 10, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer", boxShadow: "0 2px 10px rgba(153,27,27,0.45)" },
   empty: { textAlign: "center", padding: "60px 20px" },
   emptyIcon: { fontSize: 48, marginBottom: 16 },
   emptyTxt: { color: "#6b7280", fontSize: 15, marginBottom: 20, fontWeight: 600 },
@@ -1451,8 +1489,12 @@ const s = {
   capSelectorTab: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 20, padding: "7px 14px", color: "#6b7280", fontSize: 13, cursor: "pointer", fontWeight: 600 },
   capSelectorTabActive: { background: "#f0fdf4", borderColor: GREEN, color: GREEN },
   equipoCardCap: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: 18, marginBottom: 18, boxShadow: "0 2px 8px rgba(0,0,0,0.05)" },
-  equipoCardCapTop: { display: "flex", alignItems: "center", gap: 16, marginBottom: 14 },
-  equipoCardCapNombre: { fontSize: 18, fontWeight: 800, color: "#111827", marginBottom: 4 },
+  equipoCardCapTop: { display: "flex", alignItems: "center", gap: 12, marginBottom: 14 },
+  // Logo del equipo: cuadrado redondeado a la izquierda de la tarjeta de gestión.
+  equipoCardLogo: { width: 84, height: 84, borderRadius: 14, overflow: "hidden", flexShrink: 0, border: `1px solid ${BORDER}`, background: SURFACE },
+  equipoCardLogoImg: { width: "100%", height: "100%", objectFit: "cover" },
+  equipoCardLogoPlaceholder: { width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, fontWeight: 800, color: "#fff" },
+  equipoCardCapNombre: { fontSize: 22, fontWeight: 800, color: "#111827", marginBottom: 4 },
   equipoCardCapMeta: { fontSize: 13, color: "#6b7280" },
   btnEditarTarjeta: { width: "100%", background: "#f9fafb", border: `1px solid ${BORDER}`, borderRadius: 10, padding: "10px 16px", color: "#374151", fontSize: 13, fontWeight: 700, cursor: "pointer" },
   jugadorListCap: { display: "flex", flexDirection: "column", gap: 10 },
@@ -1464,6 +1506,8 @@ const s = {
   jugadorMetaCap: { fontSize: 11, color: "#6b7280", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   // display:flex + center sirve tanto para el <button> del capitán como para el <div> del no-capitán.
   dorsalBtn: { width: 40, height: 40, borderRadius: 10, border: "none", color: "#fff", fontSize: 16, fontWeight: 900, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 },
+  // ✏️ que aparece solo en la fila del propio jugador para editar dorsal/camiseta.
+  btnEditarMiFila: { background: "#eff6ff", color: "#2563eb", border: "1px solid #93c5fd", borderRadius: 8, padding: "8px 10px", fontSize: 14, cursor: "pointer", flexShrink: 0 },
   btnEliminarCap: { background: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 8, padding: "8px 10px", fontSize: 14, cursor: "pointer", flexShrink: 0 },
   warningBoxCap: { background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 10, padding: "12px 14px", fontSize: 12, color: "#991b1b", lineHeight: 1.45, marginBottom: 18 },
   uploadLabelCap: { display: "inline-block", background: "#f3f4f6", border: `1px solid ${BORDER}`, borderRadius: 8, padding: "8px 14px", color: "#6b7280", fontSize: 13, cursor: "pointer" },
