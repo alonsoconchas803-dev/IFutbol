@@ -690,8 +690,11 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
     const parts = (allParts||[]).map(p=>({...p, jornada: jornadasMap[p.jornada_id]||null}));
     setCalendario(parts);
 
-    // PostgREST devuelve ficha_partido como objeto {} (relación 1-a-1), no array
-    const fichas = parts.filter(p=>p.ficha_partido?.cerrada);
+    // PostgREST devuelve ficha_partido como objeto {} (relación 1-a-1), no array.
+    // Los partidos marcados con cuenta_estadisticas=false (amistosos creados
+    // a mano por el admin) NO impactan tabla ni goleadores, aunque sí se
+    // muestran en el calendario y conservan su resultado en la ficha.
+    const fichas = parts.filter(p => p.ficha_partido?.cerrada && p.cuenta_estadisticas !== false);
 
     // Clasificación usando IDs directos (no búsqueda por nombre)
     const tabla = {};
@@ -1077,15 +1080,20 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
               // Tarjeta de partido común para jornadas y bracket.
               // Acepta equipos por objeto (jornadas trae el join completo;
               // bracket sólo trae el id y aquí lo resolvemos contra `equipos`).
-              const renderPartidoCard = ({ key, local, visitante, golesLocal, golesVisitante, mostrarGoles, hora, cancha, jugado, badge }) => {
+              // Badge "Amistoso" se aplica automáticamente cuando el partido manual
+              // no cuenta para estadísticas — mismo estilo gris que el amistoso
+              // de liguilla para mantener consistencia visual.
+              const BADGE_AMISTOSO = { label:"Amistoso", bg:"#f3f4f6", color:"#6b7280" };
+              const renderPartidoCard = ({ key, local, visitante, golesLocal, golesVisitante, mostrarGoles, hora, cancha, jugado, badge, esAmistoso }) => {
                 const eqL = local || {};
                 const eqV = visitante || {};
+                const badgeFinal = badge || (esAmistoso ? BADGE_AMISTOSO : null);
                 return (
                   <div key={key} style={{ padding:"8px 10px", background:"#f9fafb", borderRadius:9, border:"1px solid var(--border)" }}>
-                    {badge && (
+                    {badgeFinal && (
                       <div style={{ marginBottom:6, display:"flex" }}>
-                        <span style={{ fontSize:9.5, fontWeight:800, letterSpacing:0.4, textTransform:"uppercase", padding:"2px 7px", borderRadius:4, background:badge.bg, color:badge.color }}>
-                          {badge.label}
+                        <span style={{ fontSize:9.5, fontWeight:800, letterSpacing:0.4, textTransform:"uppercase", padding:"2px 7px", borderRadius:4, background:badgeFinal.bg, color:badgeFinal.color }}>
+                          {badgeFinal.label}
                         </span>
                       </div>
                     )}
@@ -1265,6 +1273,7 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
                               hora: p.hora,
                               cancha: p.cancha_numero,
                               jugado: !!fichaOk,
+                              esAmistoso: p.cuenta_estadisticas === false,
                             });
                           })}
 

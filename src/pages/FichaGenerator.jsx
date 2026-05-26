@@ -40,6 +40,7 @@ const PRINT_CSS = `
   @page { size: letter portrait; margin: 7mm; }
 
   @media print {
+    html, body { margin: 0 !important; padding: 0 !important; }
     body * { visibility: hidden !important; }
     #ifb-fichas-root, #ifb-fichas-root * {
       visibility: visible !important;
@@ -53,6 +54,9 @@ const PRINT_CSS = `
     }
     .ifb-ficha-pagina {
       page-break-after: always;
+      page-break-inside: avoid;
+      break-inside: avoid;
+      overflow: hidden !important;
       box-shadow: none !important;
       border: none !important;
       border-radius: 0 !important;
@@ -175,7 +179,13 @@ function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, mi
     <div className="ifb-ficha-pagina" style={{
       fontFamily: "Arial, sans-serif",
       pageBreakAfter: isLast ? "avoid" : "always",
-      minHeight: "262mm",
+      // Carta vertical con @page margin: 7mm deja 265.4mm imprimibles.
+      // Usamos altura fija (no minHeight) un poco menor para tener holgura
+      // ante variaciones de renderizado del PDF, y overflow:hidden como
+      // cinturón de seguridad para que la ficha jamás se parta entre páginas.
+      height: "258mm",
+      overflow: "hidden",
+      boxSizing: "border-box",
       display: "flex",
       flexDirection: "column",
     }}>
@@ -317,6 +327,8 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
   const [loading,     setLoading]    = useState(false);
   const [cargandoResumen, setCargandoResumen] = useState(false);
   const [fichaModalPartido, setFichaModalPartido] = useState(null);
+  const [equipos,     setEquipos]    = useState([]);   // para el modal de partido manual
+  const [nuevoPartidoOpen, setNuevoPartidoOpen] = useState(false);
   const [toast,       setToast]      = useState(null);
   const token = session?.access_token;
 
@@ -335,6 +347,41 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
     const data = await db(`/jornadas?liga_id=eq.${liga.id}&order=numero`, token);
     setJornadas(data || []);
     if (data?.length > 0) setJornadaSel(data[0].id);
+  };
+
+  // Equipos activos de la liga — necesarios para los selectores del modal
+  // "Añadir partido extra". Solo se cargan cuando el admin opera en modo
+  // resultados; en el modo de impresión no hacen falta.
+  const cargarEquipos = async () => {
+    if (readOnly || modo !== "resultados") return;
+    const data = await db(
+      `/equipos?liga_id=eq.${liga.id}&activo=eq.true&select=id,nombre,color_playera,color_camiseta_2,diseno_camiseta,escudo_url&order=nombre`,
+      token
+    );
+    setEquipos(data || []);
+  };
+
+  // Elimina un partido manual cuya ficha aún no se haya cerrado.
+  // Los partidos del generador (manual=false) o con ficha cerrada no llegan
+  // aquí — el botón solo aparece para los manuales sin cerrar.
+  const eliminarPartido = async (partido) => {
+    if (!partido?.manual) return;
+    if (partido?.ficha?.cerrada) {
+      return showToast("No se puede eliminar un partido con ficha cerrada", "err");
+    }
+    const ok = window.confirm(
+      `¿Eliminar el partido ${partido.equipos_local?.nombre} vs ${partido.equipos_visitante?.nombre}?`
+    );
+    if (!ok) return;
+    try {
+      // Si tenía borrador de ficha, lo borramos primero para no dejar huérfanos.
+      if (partido.ficha?.id) {
+        await db(`/ficha_partido?id=eq.${partido.ficha.id}`, token, { method: "DELETE" });
+      }
+      await db(`/partidos?id=eq.${partido.id}`, token, { method: "DELETE" });
+      showToast("Partido eliminado ✓");
+      cargarResumenJornada();
+    } catch (e) { showToast(e.message, "err"); }
   };
 
   // Carga partidos de la jornada seleccionada con su ficha_partido (si existe)
@@ -362,7 +409,13 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
     setCargandoResumen(false);
   };
 
-  useEffect(() => { if (liga?.id) cargarJornadas(); }, [liga?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (liga?.id) {
+      cargarJornadas();
+      cargarEquipos();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liga?.id]);
 
   // Al seleccionar una jornada: cargar automáticamente partidos + fichas guardadas
   useEffect(() => {
@@ -522,8 +575,32 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
 
             {/* Lista de partidos */}
             <div style={{ display: "flex", flexDirection: "column", gap: esMini ? 6 : 10, marginBottom: 18 }}>
-              {resumen.map(p => <PartidoCard key={p.id} partido={p} onVerFicha={setFichaModalPartido} readOnly={readOnly} mini={esMini} />)}
+              {resumen.map(p => (
+                <PartidoCard
+                  key={p.id}
+                  partido={p}
+                  onVerFicha={setFichaModalPartido}
+                  onEliminar={modo === "resultados" && !readOnly ? eliminarPartido : null}
+                  readOnly={readOnly}
+                  mini={esMini}
+                />
+              ))}
             </div>
+
+            {/* Botón para crear un partido extra dentro de la misma jornada —
+                cubre el caso en que dos equipos faltan y los presentes juegan
+                entre sí. Solo visible en modo "Resultados". */}
+            {modo === "resultados" && !readOnly && (
+              <button
+                onClick={() => setNuevoPartidoOpen(true)}
+                style={{
+                  background: "#fff", color: "#4f8f2f", border: "2px dashed #86c46a",
+                  borderRadius: 12, padding: "12px 16px", fontSize: 13, fontWeight: 800,
+                  cursor: "pointer", width: "100%", marginBottom: 18, minHeight: 48,
+                }}>
+                ＋ Añadir partido extra a esta jornada
+              </button>
+            )}
           </>
         )}
 
@@ -579,6 +656,18 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
         </div>
       )}
 
+      {/* MODAL: crear partido manual dentro de la jornada seleccionada */}
+      {nuevoPartidoOpen && (
+        <NuevoPartidoModal
+          token={token}
+          jornada={jornadaActual}
+          equipos={equipos}
+          showToast={showToast}
+          onClose={() => setNuevoPartidoOpen(false)}
+          onCreado={() => { setNuevoPartidoOpen(false); cargarResumenJornada(); }}
+        />
+      )}
+
       {/* MODAL DE FICHA — admin de unidad edita; árbitro (readOnly) solo consulta */}
       {fichaModalPartido && (
         readOnly ? (
@@ -606,11 +695,14 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
 // ─────────────────────────────────────────────────────────────────
 // TARJETA DE PARTIDO (resumen breve, estilo "partido")
 // ─────────────────────────────────────────────────────────────────
-function PartidoCard({ partido, onVerFicha, readOnly = false, mini = false }) {
+function PartidoCard({ partido, onVerFicha, onEliminar = null, readOnly = false, mini = false }) {
   const f = partido.ficha;
   const cerrada = !!f?.cerrada;
   const eqL = partido.equipos_local;
   const eqV = partido.equipos_visitante;
+  const esManual = partido.manual === true;
+  const esAmistoso = partido.cuenta_estadisticas === false;
+  const puedeEliminar = !!onEliminar && esManual && !cerrada;
 
   // Versión compacta del apartado "Fichas": solo horario, cancha y equipos.
   if (mini) {
@@ -630,7 +722,19 @@ function PartidoCard({ partido, onVerFicha, readOnly = false, mini = false }) {
         <div style={hs.partidoMeta}>
           ⏰ {fmtHora(partido.hora)} · Cancha {partido.cancha_numero ?? "—"}
         </div>
-        <span style={hs.partidoBadge(cerrada)}>{cerrada ? "✓ Cerrada" : "⏳ Pendiente"}</span>
+        <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+          {esAmistoso && (
+            <span style={{ fontSize:9.5, fontWeight:800, letterSpacing:0.4, textTransform:"uppercase", padding:"3px 8px", borderRadius:9999, background:"#f3f4f6", color:"#6b7280", border:"1px solid #e5e7eb" }}>
+              Amistoso
+            </span>
+          )}
+          {esManual && (
+            <span style={{ fontSize:9.5, fontWeight:800, letterSpacing:0.4, textTransform:"uppercase", padding:"3px 8px", borderRadius:9999, background:"#eef2ff", color:"#4338ca", border:"1px solid #c7d2fe" }}>
+              Extra
+            </span>
+          )}
+          <span style={hs.partidoBadge(cerrada)}>{cerrada ? "✓ Cerrada" : "⏳ Pendiente"}</span>
+        </div>
       </div>
 
       <div style={hs.marcadorRow}>
@@ -681,9 +785,19 @@ function PartidoCard({ partido, onVerFicha, readOnly = false, mini = false }) {
             ? { label: "✏️ Continuar ficha", bg: "#1d4ed8" }
             : { label: "📝 Registrar ficha", bg: "#4f8f2f" };
         return (
-          <button style={{ ...hs.btnVerFicha, background: accion.bg }} onClick={() => onVerFicha(partido)}>
-            {accion.label}
-          </button>
+          <div style={{ display:"flex", gap:8, alignItems:"stretch" }}>
+            <button style={{ ...hs.btnVerFicha, background: accion.bg, flex: 1 }} onClick={() => onVerFicha(partido)}>
+              {accion.label}
+            </button>
+            {puedeEliminar && (
+              <button
+                onClick={() => onEliminar(partido)}
+                title="Eliminar partido manual"
+                style={{ background:"#fff", color:"#dc2626", border:"1px solid #fecaca", borderRadius: 10, padding: "0 14px", fontSize: 16, fontWeight: 700, cursor:"pointer", flexShrink: 0 }}>
+                🗑
+              </button>
+            )}
+          </div>
         );
       })()}
     </div>
@@ -886,6 +1000,11 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
   const [faltasLocal, setFaltasLocal]       = useState(f?.faltas_local ?? 0);
   const [faltasVisit, setFaltasVisit]       = useState(f?.faltas_visitante ?? 0);
   const [observaciones, setObservaciones]   = useState(f?.observaciones || "");
+  // El flag "cuenta para estadísticas" vive en la tabla partidos (no en la
+  // ficha). Solo se puede cambiar mientras la ficha no esté cerrada — al
+  // cerrarla queda fijo para que la tabla no cambie retroactivamente.
+  const [cuentaEst, setCuentaEst] = useState(partido?.cuenta_estadisticas !== false);
+  const flagEditable = !!partido?.manual && !esCerrada;
 
   const [jugadoresLocal, setJugadoresLocal] = useState([]);
   const [jugadoresVisit, setJugadoresVisit] = useState([]);
@@ -984,6 +1103,15 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
           body: JSON.stringify({ ...payload, partido_id: partido.id }),
         });
       }
+      // Persistir el flag cuenta_estadisticas solo si es editable (partido
+      // manual + ficha no cerrada) y cambió. PostgREST hará no-op si el valor
+      // ya coincide, pero igual evitamos el round-trip cuando no toca.
+      if (flagEditable && cuentaEst !== (partido.cuenta_estadisticas !== false)) {
+        await db(`/partidos?id=eq.${partido.id}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ cuenta_estadisticas: cuentaEst }),
+        });
+      }
       showToast && showToast(
         esCerrada ? "Ficha corregida ✓" : cerrar ? "Ficha cerrada y guardada ✓" : "Borrador guardado ✓"
       );
@@ -1042,6 +1170,35 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
         {esCerrada && (
           <div style={fe.warningBox}>
             ⚠️ Estás corrigiendo una ficha ya cerrada. Los cambios se registrarán en el log de auditoría.
+          </div>
+        )}
+
+        {/* Switch del flag "cuenta para estadísticas" — solo aparece en partidos
+            manuales (extra/amistoso) y mientras la ficha no esté cerrada. Al
+            cerrarla queda fijo: si era amistoso seguirá fuera de la tabla, y
+            viceversa. */}
+        {flagEditable && (
+          <button type="button" onClick={() => setCuentaEst(v => !v)} style={np.switchRow(cuentaEst)}>
+            <div style={{ flex: 1, textAlign: "left" }}>
+              <div style={{ fontSize: 12.5, fontWeight: 800, color: "#111827" }}>
+                Cuenta para tabla y estadísticas
+              </div>
+              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                {cuentaEst
+                  ? "Al cerrar la ficha sumará puntos a la tabla."
+                  : "Se guardará como amistoso (no afecta la tabla)."}
+              </div>
+            </div>
+            <span style={np.switchTrack(cuentaEst)}>
+              <span style={np.switchThumb(cuentaEst)} />
+            </span>
+          </button>
+        )}
+
+        {/* Aviso para amistosos ya cerrados: no se puede cambiar el flag */}
+        {!flagEditable && partido?.manual && esCerrada && partido?.cuenta_estadisticas === false && (
+          <div style={{ ...fe.warningBox, background: "#f3f4f6", borderColor: "#e5e7eb", color: "#6b7280" }}>
+            🤝 Este partido se cerró como amistoso: su resultado no impacta la tabla.
           </div>
         )}
 
@@ -1170,6 +1327,150 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────
+// MODAL: NUEVO PARTIDO MANUAL DENTRO DE UNA JORNADA EXISTENTE
+// ─────────────────────────────────────────────────────────────────
+// Cubre el caso "dos equipos faltaron y los presentes juegan entre sí".
+// El partido se inserta en la jornada actualmente seleccionada, con
+// manual=true (habilita borrarlo después si no se ha cerrado ficha) y
+// cuenta_estadisticas controlado por el switch. El flujo de ficha es
+// idéntico al de los partidos del generador.
+function NuevoPartidoModal({ token, jornada, equipos, showToast, onClose, onCreado }) {
+  const [localId, setLocalId]       = useState("");
+  const [visitanteId, setVisitanteId] = useState("");
+  const [hora, setHora]             = useState("");
+  const [cancha, setCancha]         = useState("");
+  const [cuentaEst, setCuentaEst]   = useState(true);
+  const [guardando, setGuardando]   = useState(false);
+  const [error, setError]           = useState(null);
+
+  const guardar = async () => {
+    setError(null);
+    if (!localId || !visitanteId)   return setError("Selecciona ambos equipos");
+    if (localId === visitanteId)    return setError("El equipo local y el visitante deben ser distintos");
+    if (!hora)                      return setError("Indica la hora del partido");
+    setGuardando(true);
+    try {
+      await db(`/partidos`, token, {
+        method: "POST",
+        body: JSON.stringify({
+          jornada_id: jornada.id,
+          equipo_local_id: localId,
+          equipo_visitante_id: visitanteId,
+          hora,
+          cancha_numero: cancha ? Number(cancha) : null,
+          cuenta_estadisticas: cuentaEst,
+          manual: true,
+        }),
+      });
+      showToast(cuentaEst ? "Partido extra agregado ✓" : "Amistoso agregado ✓");
+      onCreado();
+    } catch (e) {
+      setError(e.message || "Error al guardar");
+      setGuardando(false);
+    }
+  };
+
+  // Si el equipo local ya está elegido, el visitante no puede ser el mismo.
+  const opcionesVisitante = equipos.filter(e => e.id !== localId);
+
+  return (
+    <div style={fd.overlay} onClick={onClose}>
+      <div style={fd.modal} onClick={e => e.stopPropagation()}>
+        <div style={fd.header}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ ...fd.headerLabel, color: "#4f8f2f" }}>Añadir partido extra</div>
+            <div style={fd.headerMeta}>
+              Jornada {jornada?.numero ?? "—"} · {fmtFecha(jornada?.fecha)}
+            </div>
+          </div>
+          <button style={fd.closeBtn} onClick={onClose} aria-label="Cerrar">✕</button>
+        </div>
+
+        <div style={np.field}>
+          <label style={np.label}>Equipo local</label>
+          <select style={np.select} value={localId} onChange={e => setLocalId(e.target.value)}>
+            <option value="">— Selecciona —</option>
+            {equipos.map(eq => <option key={eq.id} value={eq.id}>{eq.nombre}</option>)}
+          </select>
+        </div>
+
+        <div style={np.field}>
+          <label style={np.label}>Equipo visitante</label>
+          <select style={np.select} value={visitanteId} onChange={e => setVisitanteId(e.target.value)}>
+            <option value="">— Selecciona —</option>
+            {opcionesVisitante.map(eq => <option key={eq.id} value={eq.id}>{eq.nombre}</option>)}
+          </select>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={np.field}>
+            <label style={np.label}>Hora</label>
+            <input type="time" style={np.select} value={hora} onChange={e => setHora(e.target.value)} />
+          </div>
+          <div style={np.field}>
+            <label style={np.label}>Cancha</label>
+            <input type="number" min="1" placeholder="1" style={np.select} value={cancha} onChange={e => setCancha(e.target.value)} />
+          </div>
+        </div>
+
+        {/* Switch: si el admin lo apaga, el partido aparece como Amistoso y
+            no impacta tabla ni goleadores. Por defecto cuenta. */}
+        <button
+          type="button"
+          onClick={() => setCuentaEst(v => !v)}
+          style={np.switchRow(cuentaEst)}>
+          <div style={{ flex: 1, textAlign: "left" }}>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: "#111827" }}>
+              Cuenta para tabla y estadísticas
+            </div>
+            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+              {cuentaEst
+                ? "Suma puntos, goleadores y faltas como un partido más."
+                : "Solo se ve en el calendario como amistoso."}
+            </div>
+          </div>
+          <span style={np.switchTrack(cuentaEst)}>
+            <span style={np.switchThumb(cuentaEst)} />
+          </span>
+        </button>
+
+        {error && <div style={fe.errorBox}>⚠️ {error}</div>}
+
+        <div style={fe.acciones}>
+          <button style={fe.btnCancel} onClick={onClose} disabled={guardando}>Cancelar</button>
+          <button style={fe.btnGuardar} onClick={guardar} disabled={guardando}>
+            {guardando ? "Guardando..." : "Crear partido"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Estilos del modal de nuevo partido
+const np = {
+  field: { marginBottom: 12 },
+  label: { display: "block", fontSize: 11, fontWeight: 800, color: "#374151", marginBottom: 5, letterSpacing: 0.3, textTransform: "uppercase" },
+  select: { width: "100%", padding: "10px 12px", fontSize: 13, border: "1px solid #e5e7eb", borderRadius: 9, background: "#fff", color: "#111827", outline: "none", boxSizing: "border-box", minHeight: 42 },
+  switchRow: (on) => ({
+    width: "100%", display: "flex", alignItems: "center", gap: 10,
+    padding: "10px 12px", background: on ? "#f0fdf4" : "#f9fafb",
+    border: `1px solid ${on ? "#bbf7d0" : "#e5e7eb"}`, borderRadius: 10,
+    cursor: "pointer", marginBottom: 12,
+  }),
+  switchTrack: (on) => ({
+    width: 38, height: 22, borderRadius: 9999,
+    background: on ? "#4f8f2f" : "#d1d5db",
+    position: "relative", flexShrink: 0, transition: "background 0.18s",
+  }),
+  switchThumb: (on) => ({
+    position: "absolute", top: 2, left: on ? 18 : 2,
+    width: 18, height: 18, borderRadius: "50%", background: "#fff",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.25)", transition: "left 0.18s",
+  }),
+};
 
 // Estilos del editor (complemento de fd)
 const fe = {
