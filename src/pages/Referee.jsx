@@ -1,6 +1,14 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import FichaGenerator from "./FichaGenerator";
+import PanelSanciones from "../components/PanelSanciones";
+import {
+  cargarSancionesDelPartido,
+  cargarBloqueosActivos,
+  insertarSancion,
+  eliminarSancionDB,
+  textoSancionParaObservaciones,
+} from "../lib/sanciones";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -57,6 +65,17 @@ export default function Referee({ session, setTopbarBack, seccionInicial }) {
   const [observaciones, setObservaciones]       = useState("");
   const [cerrada, setCerrada]                   = useState(false);
   const [modalCerrar, setModalCerrar]           = useState(false);
+
+  // ── Sanciones de la ficha actual ─────────────────────────────
+  // sanciones: arreglo editable. Cada item:
+  //   { id?, jugador_id, equipo_id, equipo_nombre, nombre, partidos, motivo, _nueva?: true }
+  // _nueva indica que aún no se persistió (se inserta al guardar/cerrar).
+  const [sanciones, setSanciones]                 = useState([]);
+  // sancionesActivas: { [jugador_id]: partidos_pendientes } — para BLOQUEAR
+  // captura de estadísticas de jugadores sancionados en otras fichas.
+  const [sancionesActivas, setSancionesActivas]   = useState({});
+  // Rol del usuario en esta vista (admin de unidad / super pueden revertir).
+  const [puedeRevertir, setPuedeRevertir]         = useState(false);
 
   // ── Mis Unidades ───────────────────────────────────────────────
   const [unidadExpandida, setUnidadExpandida]       = useState(null);
@@ -251,7 +270,30 @@ export default function Referee({ session, setTopbarBack, seccionInicial }) {
         setObservaciones(""); setCerrada(false);
       }
       await cargarJugadores(partido);
+      await cargarDatosSanciones(partido);
     } catch (e) { showToast(e.message, "err"); }
+  };
+
+  // Carga sanciones de la ficha actual + mapa de bloqueos activos de TODOS
+  // los jugadores de ambos equipos (para deshabilitar gol/asistencia y
+  // marcar la fila como sancionada).
+  const cargarDatosSanciones = async (partido) => {
+    try {
+      const [sancsAQui, bloqueos] = await Promise.all([
+        cargarSancionesDelPartido(token, partido.id),
+        cargarBloqueosActivos(token, [partido.equipos_local?.id, partido.equipos_visitante?.id].filter(Boolean), partido.id),
+      ]);
+      setSanciones((sancsAQui || []).map(s => ({
+        id: s.id,
+        jugador_id: s.jugador_id,
+        equipo_id: s.equipo_id,
+        equipo_nombre: s.equipo_id === partido.equipos_local?.id ? partido.equipos_local?.nombre : partido.equipos_visitante?.nombre,
+        nombre: s.jugadores?.nombre_completo || "—",
+        partidos: s.partidos_totales,
+        motivo: s.motivo,
+      })));
+      setSancionesActivas(bloqueos || {});
+    } catch (_) { /* silencioso: si falla, sigue sin bloqueos */ }
   };
 
   // ── CARGAR JUGADORES DE AMBOS EQUIPOS ────────────────────────
@@ -296,13 +338,33 @@ export default function Referee({ session, setTopbarBack, seccionInicial }) {
     else { setPartidosLiga([]); setJornadaActiva(null); }
   }, [ligaActiva?.id]);
 
-  // ── ASISTENCIA / GOLES (igual que antes) ──────────────────────
+  // Carga el rol al montar para saber si puede revertir sanciones.
+  useEffect(() => {
+    if (!userId) return;
+    (async () => {
+      try {
+        const roles = await db(`/user_roles?user_id=eq.${userId}&select=rol`, token);
+        const r = roles?.[0]?.rol;
+        setPuedeRevertir(r === "super_admin" || r === "league_admin");
+      } catch (_) { /* silencioso */ }
+    })();
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── ASISTENCIA / GOLES ────────────────────────────────────────
+  const estaSancionado = (jugadorId) => (sancionesActivas[jugadorId] || 0) > 0;
+
   const toggleAsistencia = (jugadorId) => {
+    if (estaSancionado(jugadorId)) {
+      return showToast(`Jugador sancionado (${sancionesActivas[jugadorId]} partidos restantes)`, "err");
+    }
     setAsistencia(prev => prev.includes(jugadorId) ? prev.filter(id => id !== jugadorId) : [...prev, jugadorId]);
   };
   const estaPresente = (jugadorId) => asistencia.includes(jugadorId);
 
   const agregarGoleador = (jugador, equipo, equipoNombre) => {
+    if (estaSancionado(jugador.jugador_id)) {
+      return showToast(`Jugador sancionado (${sancionesActivas[jugador.jugador_id]} partidos restantes)`, "err");
+    }
     // Si un jugador anota, lógicamente jugó: lo marcamos presente automáticamente.
     // Usamos updater de setAsistencia para evitar pisar otros toggles del mismo render.
     setAsistencia(prev => prev.includes(jugador.jugador_id) ? prev : [...prev, jugador.jugador_id]);
@@ -342,6 +404,52 @@ export default function Referee({ session, setTopbarBack, seccionInicial }) {
     return g ? g.goles : 0;
   };
 
+  // ── SANCIONES ────────────────────────────────────────────────
+  // Agrega sanción al estado local + anexa texto a observaciones.
+  const handleAddSancion = (s) => {
+    setSanciones(prev => [...prev, s]);
+    setObservaciones(prev => {
+      const linea = textoSancionParaObservaciones(s);
+      return prev?.trim() ? `${prev.trim()}\n${linea}` : linea;
+    });
+  };
+
+  // Quita sanción. Si era nueva (no persistida) solo limpia estado;
+  // si era existente, también borra en BD inmediatamente.
+  const handleRemoveSancion = async (id, esNueva) => {
+    if (!esNueva && id) {
+      try { await eliminarSancionDB(token, id); }
+      catch (e) { return showToast(e.message, "err"); }
+      showToast("Sanción eliminada ✓");
+    }
+    setSanciones(prev => prev.filter(s => (s.id || null) !== (id || null) || (esNueva && s._nueva && s.id === undefined)));
+    // Refresco mapa de bloqueos por si era una sanción que afectaba al jugador en otra ficha
+    if (partidoActivo) {
+      try {
+        const eqIds = [partidoActivo.equipos_local?.id, partidoActivo.equipos_visitante?.id].filter(Boolean);
+        const bloqueos = await cargarBloqueosActivos(token, eqIds, partidoActivo.id);
+        setSancionesActivas(bloqueos || {});
+      } catch (_) {}
+    }
+  };
+
+  // Persiste las sanciones nuevas. Se llama desde guardarFicha.
+  const persistirSancionesNuevas = async (ligaIdActual) => {
+    const nuevas = sanciones.filter(s => s._nueva);
+    if (nuevas.length === 0) return;
+    for (const s of nuevas) {
+      await insertarSancion(token, {
+        jugador_id: s.jugador_id,
+        equipo_id: s.equipo_id,
+        liga_id: ligaIdActual,
+        partido_origen_id: partidoActivo.id,
+        partidos_pendientes: s.partidos,
+        partidos_totales: s.partidos,
+        motivo: s.motivo,
+      });
+    }
+  };
+
   // ── GUARDAR FICHA ────────────────────────────────────────────
   const guardarFicha = async (cerrarFicha = false) => {
     if (!partidoActivo) return;
@@ -358,6 +466,13 @@ export default function Referee({ session, setTopbarBack, seccionInicial }) {
         observaciones,
         cerrada: cerrarFicha,
       };
+      // Persistimos sanciones ANTES de cerrar la ficha: el trigger de
+      // decremento debe ver primero las sanciones existentes (que sí cuentan
+      // este partido como descontable) y luego ya filtra por partido_origen_id
+      // las recién insertadas (no se auto-descuentan).
+      const ligaIdActual = partidoActivo.jornadas?.ligas?.id || ligaActiva?.id;
+      await persistirSancionesNuevas(ligaIdActual);
+
       if (ficha) {
         await db(`/ficha_partido?id=eq.${ficha.id}`, token, { method: "PATCH", body: JSON.stringify(payload) });
       } else {
@@ -482,6 +597,11 @@ export default function Referee({ session, setTopbarBack, seccionInicial }) {
               guardando={guardando}
               onGuardarBorrador={() => guardarFicha(false)}
               onAbrirCerrar={() => setModalCerrar(true)}
+              sanciones={sanciones}
+              sancionesActivas={sancionesActivas}
+              onAddSancion={handleAddSancion}
+              onRemoveSancion={handleRemoveSancion}
+              puedeRevertir={puedeRevertir}
             />
           )}
         </>
@@ -802,7 +922,11 @@ function FichaPartido({
   faltasLocal, setFaltasLocal, faltasVisitante, setFaltasVisitante,
   observaciones, setObservaciones,
   guardando, onGuardarBorrador, onAbrirCerrar,
+  sanciones, sancionesActivas, onAddSancion, onRemoveSancion, puedeRevertir,
 }) {
+  // Devuelve los partidos de sanción restantes del jugador, o 0 si no está
+  // sancionado. Usado para aplicar el subrayado y bloquear interacciones.
+  const sancionDe = (jid) => sancionesActivas?.[jid] || 0;
   return (
     <div>
       {cerrada && (
@@ -868,27 +992,44 @@ function FichaPartido({
                 : jugadores.map(j => {
                   const presente = estaPresente(j.jugador_id);
                   const goles = golesDeJugador(j.jugador_id, equipo.id);
+                  const sancPend = sancionDe(j.jugador_id);
+                  const sancionado = sancPend > 0;
                   return (
                     <div key={j.id} style={{
                       ...s.jugadorRow,
-                      background: goles > 0 ? "rgba(22,163,74,0.15)" : presente ? "rgba(22,163,74,0.05)" : "transparent",
+                      background: sancionado ? "rgba(127,29,29,0.06)"
+                        : goles > 0 ? "rgba(22,163,74,0.15)"
+                        : presente ? "rgba(22,163,74,0.05)" : "transparent",
+                      opacity: sancionado ? 0.6 : 1,
                     }}>
                       <span style={{ ...s.dorsalMin, background: equipo.color_playera || GREEN }}>{j.dorsal || "—"}</span>
                       <div style={s.jugadorInfo}>
                         <span style={s.jugadorCamiseta}>{j.nombre_camiseta || j.jugadores?.nombre_completo?.split(" ")[0]?.toUpperCase()}</span>
-                        <span style={s.jugadorNombre}>{j.jugadores?.nombre_completo}</span>
+                        <span style={{ ...s.jugadorNombre, textDecoration: sancionado ? "underline" : "none", textDecorationColor: "#dc2626" }}>
+                          {j.jugadores?.nombre_completo}
+                        </span>
                         {j.jugadores?.numero_afiliado && <span style={s.jugadorAfiliado}>#{j.jugadores.numero_afiliado}</span>}
+                        {sancionado && (
+                          <span style={{ fontSize: 10, fontWeight: 800, color: "#7f1d1d", background: "#fee2e2", padding: "2px 7px", borderRadius: 999, marginLeft: 6 }}>
+                            🟥 {sancPend} {sancPend === 1 ? "partido" : "partidos"}
+                          </span>
+                        )}
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                        <span
-                          style={{ ...s.checkBox, background: presente ? "#16a34a" : "transparent", borderColor: presente ? "#16a34a" : "#6b7280", cursor: cerrada ? "default" : "pointer" }}
-                          onClick={() => !cerrada && toggleAsistencia(j.jugador_id)}
-                        >{presente ? "✓" : ""}</span>
-                        {!cerrada ? (
+                        {/* El check de asistencia se oculta cuando el jugador
+                            tiene goles: el gol implica asistencia y mostrar
+                            ambos controles ocupa demasiado espacio en la fila. */}
+                        {goles === 0 && !sancionado && (
+                          <span
+                            style={{ ...s.checkBox, background: presente ? "#16a34a" : "transparent", borderColor: presente ? "#16a34a" : "#6b7280", cursor: cerrada ? "default" : "pointer" }}
+                            onClick={() => !cerrada && toggleAsistencia(j.jugador_id)}
+                          >{presente ? "✓" : ""}</span>
+                        )}
+                        {!cerrada && !sancionado ? (
                           <div style={s.golBtns}>
                             {goles > 0 && <button style={s.golBtnMinus} onClick={() => quitarGoleador(j.jugador_id, equipo.id)}>−</button>}
-                            <button style={s.golBtnPlus} onClick={() => agregarGoleador(j, equipo.id, equipo.nombre)}>⚽</button>
                             {goles > 0 && <span style={s.golCount}>{goles}</span>}
+                            <button style={s.golBtnPlus} onClick={() => agregarGoleador(j, equipo.id, equipo.nombre)}>⚽</button>
                           </div>
                         ) : (
                           goles > 0 && <span style={s.golCountCerrada}>{goles}⚽</span>
@@ -933,6 +1074,21 @@ function FichaPartido({
           onChange={e => !cerrada && setObservaciones(e.target.value)}
           rows={4}
           disabled={cerrada}
+        />
+      </div>
+
+      {/* SANCIONES */}
+      <div style={s.seccion}>
+        <PanelSanciones
+          sanciones={sanciones}
+          jugadoresLocal={jugadoresLocal}
+          jugadoresVisitante={jugadoresVisitante}
+          equipoLocal={partidoActivo.equipos_local}
+          equipoVisitante={partidoActivo.equipos_visitante}
+          onAdd={onAddSancion}
+          onRemove={onRemoveSancion}
+          cerrada={cerrada}
+          puedeRevertir={puedeRevertir}
         />
       </div>
 

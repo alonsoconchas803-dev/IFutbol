@@ -59,6 +59,8 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
   const [jugadores, setJugadores] = useState([]);
   const [equipoDetalle, setEquipoDetalle] = useState(null);
   const [jugadoresEquipo, setJugadoresEquipo] = useState([]);
+  // Mapa jugador_id → partidos pendientes (subrayar y bloquear eliminación).
+  const [sancionesEquipo, setSancionesEquipo] = useState({});
   const [modal, setModal] = useState(null);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
@@ -140,6 +142,16 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
         token
       );
       setJugadoresEquipo(data || []);
+      // Carga sanciones activas del equipo para subrayar y bloquear eliminación.
+      try {
+        const sancs = await db(
+          `/sanciones?equipo_id=eq.${equipoId}&partidos_pendientes=gt.0&select=jugador_id,partidos_pendientes`,
+          token
+        );
+        const m = {};
+        for (const s of (sancs || [])) m[s.jugador_id] = (m[s.jugador_id] || 0) + s.partidos_pendientes;
+        setSancionesEquipo(m);
+      } catch (_) { setSancionesEquipo({}); }
     } catch (e) { showToast(e.message, "err"); }
   };
 
@@ -342,6 +354,19 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
   // ── ELIMINAR JUGADOR (ADMIN) ──────────────────────────────────
   const eliminarJugadorAdmin = async () => {
     if (!eliminarJugTarget || !equipoDetalle || !ligaSeleccionada) return;
+    // Bloqueo si el jugador tiene sanción activa en este equipo.
+    try {
+      const sancs = await db(
+        `/sanciones?jugador_id=eq.${eliminarJugTarget.jugador_id}&equipo_id=eq.${equipoDetalle.id}&partidos_pendientes=gt.0&select=partidos_pendientes`,
+        token
+      );
+      const pendientes = (sancs || []).reduce((acc, s) => acc + s.partidos_pendientes, 0);
+      if (pendientes > 0) {
+        showToast(`No se puede eliminar: jugador con sanción activa (${pendientes} partidos)`, "err");
+        setEliminarJugTarget(null);
+        return;
+      }
+    } catch (_) { /* si falla la consulta, permitir continuar */ }
     setLoading(true);
     try {
       const jugadorId = eliminarJugTarget.jugador_id;
@@ -1146,8 +1171,15 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                 </div>
               ) : (
                 <div style={s.jugadorList}>
-                  {jugadoresOrdenados.map(je => (
-                    <div key={je.id} style={{ ...s.jugadorRow, ...(je.es_capitan ? s.jugadorRowCap : {}) }}>
+                  {jugadoresOrdenados.map(je => {
+                    const sancPend = sancionesEquipo[je.jugador_id] || 0;
+                    const sancionado = sancPend > 0;
+                    return (
+                    <div key={je.id} style={{
+                      ...s.jugadorRow,
+                      ...(je.es_capitan ? s.jugadorRowCap : {}),
+                      ...(sancionado ? { background: "rgba(127,29,29,0.05)", opacity: 0.75 } : {}),
+                    }}>
                       <div style={s.jugadorAvatar}>
                         {je.jugadores?.foto_url
                           ? <img src={je.jugadores.foto_url} alt="foto" style={s.jugadorFoto} />
@@ -1156,10 +1188,17 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                       <div style={s.jugadorInfo}>
                         <div style={s.jugadorNombre}>
                           {je.es_capitan && <span style={{ marginRight: 5 }}>👑</span>}
-                          <span style={s.jugadorNombreTxt}>{je.jugadores?.nombre_completo}</span>
+                          <span style={{ ...s.jugadorNombreTxt, textDecoration: sancionado ? "underline" : "none", textDecorationColor: "#dc2626" }}>
+                            {je.jugadores?.nombre_completo}
+                          </span>
                         </div>
                         <div style={s.jugadorMetaLinea}>{je.jugadores?.posicion_preferida || "—"}</div>
                         <div style={s.jugadorMetaLinea}>#{je.jugadores?.numero_afiliado}</div>
+                        {sancionado && (
+                          <div style={{ fontSize: 10.5, fontWeight: 700, color: "#7f1d1d", marginTop: 3 }}>
+                            🟥 Sancionado · {sancPend} {sancPend === 1 ? "partido" : "partidos"} restantes
+                          </div>
+                        )}
                         {je.es_capitan && (
                           <button
                             onClick={() => quitarCapitan(je.id, je.jugadores?.nombre_completo)}
@@ -1179,13 +1218,21 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                         <span style={s.camisetaNombre}>{je.nombre_camiseta || je.jugadores?.nombre_completo?.split(" ")[0]}</span>
                         <span style={s.camisetaLabel}>camiseta</span>
                       </div>
-                      <button style={s.btnEliminarJug}
-                        onClick={() => { setEliminarJugTarget(je); setModalJugadores("eliminar"); }}
-                        title="Eliminar del equipo">
+                      <button style={{ ...s.btnEliminarJug, ...(sancionado ? { opacity: 0.45, cursor: "not-allowed" } : {}) }}
+                        onClick={() => {
+                          if (sancionado) {
+                            showToast(`Jugador con sanción activa (${sancPend} partidos restantes)`, "err");
+                            return;
+                          }
+                          setEliminarJugTarget(je);
+                          setModalJugadores("eliminar");
+                        }}
+                        title={sancionado ? `Sancionado: ${sancPend} partidos restantes` : "Eliminar del equipo"}>
                         🗑️
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

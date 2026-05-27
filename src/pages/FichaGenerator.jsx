@@ -1,6 +1,14 @@
 import { useState, useEffect } from "react";
 import JerseySVG from "../components/JerseySVG";
 import IFutbolLogo from "../components/IFutbolLogo";
+import PanelSanciones from "../components/PanelSanciones";
+import {
+  cargarSancionesDelPartido,
+  cargarBloqueosActivos,
+  insertarSancion,
+  eliminarSancionDB,
+  textoSancionParaObservaciones,
+} from "../lib/sanciones";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -1013,6 +1021,11 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
   const [error, setError]                   = useState(null);
   const [confirmarCierre, setConfirmarCierre] = useState(false);
 
+  // Sanciones de la ficha actual y mapa de bloqueos activos.
+  const [sanciones, setSanciones]                 = useState([]);
+  const [sancionesActivas, setSancionesActivas]   = useState({});
+  const [puedeRevertir, setPuedeRevertir]         = useState(false);
+
   useEffect(() => {
     let cancelado = false;
     (async () => {
@@ -1020,15 +1033,39 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
         const ligaId = liga?.id || partido.jornadas?.liga_id;
         const equipoIds = [eqL?.id, eqV?.id].filter(Boolean);
         if (equipoIds.length === 0) { setCargando(false); return; }
-        const data = await db(
-          `/jugador_equipo?equipo_id=in.(${equipoIds.join(",")})&liga_id=eq.${ligaId}` +
-          `&select=equipo_id,jugador_id,dorsal,nombre_camiseta,jugadores(nombre_completo,numero_afiliado)` +
-          `&order=equipo_id,dorsal`,
-          token
-        );
+        const [data, sancsAqui, bloqueos, userInfo] = await Promise.all([
+          db(
+            `/jugador_equipo?equipo_id=in.(${equipoIds.join(",")})&liga_id=eq.${ligaId}` +
+            `&select=equipo_id,jugador_id,dorsal,nombre_camiseta,jugadores(nombre_completo,numero_afiliado)` +
+            `&order=equipo_id,dorsal`,
+            token
+          ),
+          cargarSancionesDelPartido(token, partido.id),
+          cargarBloqueosActivos(token, equipoIds, partido.id),
+          // Para decidir si puede revertir sanciones (admin/super).
+          fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}` } })
+            .then(r => r.ok ? r.json() : null).catch(() => null),
+        ]);
         if (cancelado) return;
         setJugadoresLocal((data || []).filter(j => j.equipo_id === eqL?.id));
         setJugadoresVisit((data || []).filter(j => j.equipo_id === eqV?.id));
+        setSanciones((sancsAqui || []).map(s => ({
+          id: s.id,
+          jugador_id: s.jugador_id,
+          equipo_id: s.equipo_id,
+          equipo_nombre: s.equipo_id === eqL?.id ? eqL?.nombre : eqV?.nombre,
+          nombre: s.jugadores?.nombre_completo || "—",
+          partidos: s.partidos_totales,
+          motivo: s.motivo,
+        })));
+        setSancionesActivas(bloqueos || {});
+        if (userInfo?.id) {
+          try {
+            const roles = await db(`/user_roles?user_id=eq.${userInfo.id}&select=rol`, token);
+            const r = roles?.[0]?.rol;
+            if (!cancelado) setPuedeRevertir(r === "super_admin" || r === "league_admin");
+          } catch (_) {}
+        }
       } finally {
         if (!cancelado) setCargando(false);
       }
@@ -1038,7 +1075,12 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
 
   // ── Helpers ───────────────────────────────────────────────────
   const estaPresente = (jid) => asistencia.includes(jid);
+  const estaSancionado = (jid) => (sancionesActivas[jid] || 0) > 0;
   const toggleAsistencia = (jid) => {
+    if (estaSancionado(jid)) {
+      showToast && showToast(`Jugador sancionado (${sancionesActivas[jid]} partidos restantes)`, "err");
+      return;
+    }
     setAsistencia(prev => prev.includes(jid) ? prev.filter(x => x !== jid) : [...prev, jid]);
   };
 
@@ -1048,6 +1090,10 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
   };
 
   const agregarGoleador = (jugInfo, equipoId, equipoNombre) => {
+    if (estaSancionado(jugInfo.jugador_id)) {
+      showToast && showToast(`Jugador sancionado (${sancionesActivas[jugInfo.jugador_id]} partidos restantes)`, "err");
+      return;
+    }
     // Si un jugador anota, lógicamente jugó: lo marcamos presente.
     setAsistencia(prev => prev.includes(jugInfo.jugador_id) ? prev : [...prev, jugInfo.jugador_id]);
     const idx = goleadores.findIndex(g => g.jugador_id === jugInfo.jugador_id && g.equipo === equipoId);
@@ -1078,6 +1124,28 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
     else setGolesVisitante(v => Math.max(0, v - 1));
   };
 
+  // ── Sanciones ─────────────────────────────────────────────────
+  const handleAddSancion = (s) => {
+    setSanciones(prev => [...prev, s]);
+    setObservaciones(prev => {
+      const linea = textoSancionParaObservaciones(s);
+      return prev?.trim() ? `${prev.trim()}\n${linea}` : linea;
+    });
+  };
+  const handleRemoveSancion = async (id, esNueva) => {
+    if (!esNueva && id) {
+      try { await eliminarSancionDB(token, id); }
+      catch (e) { showToast && showToast(e.message, "err"); return; }
+      showToast && showToast("Sanción eliminada ✓");
+    }
+    setSanciones(prev => prev.filter(s => (s.id || null) !== (id || null) || (esNueva && s._nueva && s.id === undefined)));
+    try {
+      const equipoIds = [eqL?.id, eqV?.id].filter(Boolean);
+      const bloqueos = await cargarBloqueosActivos(token, equipoIds, partido.id);
+      setSancionesActivas(bloqueos || {});
+    } catch (_) {}
+  };
+
   // cerrar=true cierra la ficha (cuenta para la tabla); cerrar=false la deja
   // como borrador. Al corregir una ficha ya cerrada se llama con cerrar=true
   // para que conserve su estado.
@@ -1095,6 +1163,22 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
         observaciones,
         cerrada: cerrar,
       };
+      // Persistimos sanciones ANTES de cerrar la ficha: el trigger filtra por
+      // partido_origen_id las recién creadas para que no se auto-descuenten.
+      const ligaIdActual = liga?.id || partido.jornadas?.liga_id;
+      const nuevas = sanciones.filter(s => s._nueva);
+      for (const s of nuevas) {
+        await insertarSancion(token, {
+          jugador_id: s.jugador_id,
+          equipo_id: s.equipo_id,
+          liga_id: ligaIdActual,
+          partido_origen_id: partido.id,
+          partidos_pendientes: s.partidos,
+          partidos_totales: s.partidos,
+          motivo: s.motivo,
+        });
+      }
+
       if (existe) {
         await db(`/ficha_partido?id=eq.${f.id}`, token, { method: "PATCH", body: JSON.stringify(payload) });
       } else {
@@ -1130,21 +1214,41 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
         {jugadores.map(j => {
           const presente = estaPresente(j.jugador_id);
           const goles = golesDeJugador(j.jugador_id, equipoId);
+          const sancPend = sancionesActivas[j.jugador_id] || 0;
+          const sancionado = sancPend > 0;
           return (
-            <div key={j.jugador_id} style={{ ...fd.jugRow, background: goles > 0 ? "rgba(22,163,74,0.12)" : presente ? "rgba(22,163,74,0.04)" : "transparent" }}>
+            <div key={j.jugador_id} style={{
+              ...fd.jugRow,
+              background: sancionado ? "rgba(127,29,29,0.06)"
+                : goles > 0 ? "rgba(22,163,74,0.12)"
+                : presente ? "rgba(22,163,74,0.04)" : "transparent",
+              opacity: sancionado ? 0.6 : 1,
+            }}>
               <span style={{ ...fd.jugDorsal, background: color }}>{j.dorsal || "—"}</span>
-              <span style={fd.jugNombre}>{j.jugadores?.nombre_completo || "—"}</span>
-              <span
-                style={{ ...fe.checkBox, background: presente ? "#16a34a" : "transparent", borderColor: presente ? "#16a34a" : "#9ca3af", cursor: "pointer" }}
-                onClick={() => toggleAsistencia(j.jugador_id)}
-                title={presente ? "Quitar asistencia" : "Marcar presente"}>
-                {presente ? "✓" : ""}
+              <span style={{ ...fd.jugNombre, textDecoration: sancionado ? "underline" : "none", textDecorationColor: "#dc2626" }}>
+                {j.jugadores?.nombre_completo || "—"}
               </span>
-              <div style={fe.golBtns}>
-                {goles > 0 && <button style={fe.golMinus} onClick={() => quitarGoleador(j.jugador_id, equipoId)}>−</button>}
-                <button style={fe.golPlus} onClick={() => agregarGoleador(j, equipoId, equipoNombre)} title="Agregar gol">⚽</button>
-                {goles > 0 && <span style={fe.golCount}>{goles}</span>}
-              </div>
+              {sancionado && (
+                <span style={{ fontSize: 9.5, fontWeight: 800, color: "#7f1d1d", background: "#fee2e2", padding: "2px 6px", borderRadius: 999, marginRight: 4 }}>
+                  🟥 {sancPend}
+                </span>
+              )}
+              {/* Asistencia: oculta con gol > 0 (gol implica asistencia) o si está sancionado. */}
+              {goles === 0 && !sancionado && (
+                <span
+                  style={{ ...fe.checkBox, background: presente ? "#16a34a" : "transparent", borderColor: presente ? "#16a34a" : "#9ca3af", cursor: "pointer" }}
+                  onClick={() => toggleAsistencia(j.jugador_id)}
+                  title={presente ? "Quitar asistencia" : "Marcar presente"}>
+                  {presente ? "✓" : ""}
+                </span>
+              )}
+              {!sancionado && (
+                <div style={fe.golBtns}>
+                  {goles > 0 && <button style={fe.golMinus} onClick={() => quitarGoleador(j.jugador_id, equipoId)}>−</button>}
+                  {goles > 0 && <span style={fe.golCount}>{goles}</span>}
+                  <button style={fe.golPlus} onClick={() => agregarGoleador(j, equipoId, equipoNombre)} title="Agregar gol">⚽</button>
+                </div>
+              )}
             </div>
           );
         })}
@@ -1281,6 +1385,19 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
             placeholder="Tarjetas, incidencias, notas..."
           />
         </div>
+
+        {/* Sanciones disciplinarias */}
+        <PanelSanciones
+          sanciones={sanciones}
+          jugadoresLocal={jugadoresLocal}
+          jugadoresVisitante={jugadoresVisit}
+          equipoLocal={eqL}
+          equipoVisitante={eqV}
+          onAdd={handleAddSancion}
+          onRemove={handleRemoveSancion}
+          cerrada={esCerrada}
+          puedeRevertir={puedeRevertir}
+        />
 
         {error && (
           <div style={fe.errorBox}>⚠️ {error}</div>
@@ -1515,7 +1632,9 @@ const fd = {
   eqNombreCol: { fontSize: 12, fontWeight: 800, color: "#111827", textAlign: "center", maxWidth: "100%", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word", lineHeight: 1.2 },
   marcadorBig: { fontSize: 28, fontWeight: 900, letterSpacing: -1, lineHeight: 1, flexShrink: 0, padding: "0 6px" },
   sectionLabel: { fontSize: 11, fontWeight: 800, color: "#4f8f2f", letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 8 },
-  equiposGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 },
+  // Equipos del editor en una sola columna (apilados): así la fila por jugador
+  // tiene espacio horizontal para nombre + check + botones de gol sin amontonarse.
+  equiposGrid: { display: "flex", flexDirection: "column", gap: 14, marginBottom: 14 },
   equipoCabecera: { display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", borderRadius: 6, background: "#f9fafb", marginBottom: 6 },
   equipoCabeceraNombre: { fontSize: 11, fontWeight: 800, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   equipoCol: { display: "flex", flexDirection: "column", gap: 4 },

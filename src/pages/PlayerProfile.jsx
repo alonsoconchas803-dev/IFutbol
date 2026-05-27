@@ -73,6 +73,8 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
   const [equipoCapActivoId, setEquipoCapActivoId] = useState(null);
   const [equipoCapData, setEquipoCapData] = useState(null);
   const [jugadoresEquipoCap, setJugadoresEquipoCap] = useState([]);
+  // Mapa jugador_id → partidos pendientes (para subrayar y bloquear eliminación)
+  const [sancionesEquipoCap, setSancionesEquipoCap] = useState({});
   const [modalCap, setModalCap] = useState(null); // "tarjeta" | "anadir_input" | "anadir_confirm" | "eliminar" | "dorsal"
   const [tarjetaForm, setTarjetaForm] = useState({ color_playera: "#3182ce", color_camiseta_2: "#ffffff", diseno_camiseta: "solido", escudo_url: "" });
   const [tarjetaEscudoFile, setTarjetaEscudoFile] = useState(null);
@@ -266,6 +268,17 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
         },
       }));
       setJugadoresEquipoCap(jugs);
+      // Carga sanciones activas de los jugadores del equipo para subrayar
+      // visualmente y para que el botón eliminar quede deshabilitado.
+      try {
+        const sancs = await db(
+          `/sanciones?equipo_id=eq.${equipoId}&partidos_pendientes=gt.0&select=jugador_id,partidos_pendientes`,
+          token
+        );
+        const m = {};
+        for (const s of (sancs || [])) m[s.jugador_id] = (m[s.jugador_id] || 0) + s.partidos_pendientes;
+        setSancionesEquipoCap(m);
+      } catch (_) { setSancionesEquipoCap({}); }
     } catch (e) { showToast(e.message, "err"); }
   };
 
@@ -424,6 +437,21 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
       setEliminarTarget(null);
       return;
     }
+    // Bloqueo si el jugador tiene una sanción activa: no se le puede sacar
+    // del equipo hasta que cumpla los partidos pendientes.
+    try {
+      const sancs = await db(
+        `/sanciones?jugador_id=eq.${eliminarTarget.jugador_id}&equipo_id=eq.${equipoCapActivoId}&partidos_pendientes=gt.0&select=partidos_pendientes`,
+        token
+      );
+      const pendientes = (sancs || []).reduce((acc, s) => acc + s.partidos_pendientes, 0);
+      if (pendientes > 0) {
+        showToast(`No se puede eliminar: jugador con sanción activa (${pendientes} partidos)`, "err");
+        setModalCap(null);
+        setEliminarTarget(null);
+        return;
+      }
+    } catch (_) { /* si falla la consulta, permitir continuar */ }
     const insc = inscripciones.find(i => i.equipo_id === equipoCapActivoId);
     if (!insc) return;
     setGuardando(true);
@@ -1458,21 +1486,32 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
                   // Los datos personales (nombre real + afiliado) solo los ve el capitán y el propio jugador.
                   // El resto del equipo solo ve foto, nombre en camiseta y dorsal.
                   const verDatosPersonales = esCapitanDelActivo || je.jugador_id === miJugadorId;
+                  const sancPend = sancionesEquipoCap[je.jugador_id] || 0;
+                  const sancionado = sancPend > 0;
                   return (
-                  <div key={je.id} style={{ ...s.jugadorRowCap, ...(je.es_capitan ? { borderLeft: `4px solid #f59e0b`, background: "linear-gradient(90deg, #fffbeb 0%, #ffffff 60%)" } : { borderLeft: `4px solid ${equipoCapData?.color_playera || "#3182ce"}` }) }}>
+                  <div key={je.id} style={{
+                    ...s.jugadorRowCap,
+                    ...(je.es_capitan ? { borderLeft: `4px solid #f59e0b`, background: "linear-gradient(90deg, #fffbeb 0%, #ffffff 60%)" } : { borderLeft: `4px solid ${equipoCapData?.color_playera || "#3182ce"}` }),
+                    ...(sancionado ? { background: "linear-gradient(90deg, rgba(127,29,29,0.06) 0%, #ffffff 60%)", opacity: 0.7 } : {}),
+                  }}>
                     <div style={s.jugadorAvatarCap}>
                       {je.jugadores?.foto_url
                         ? <img src={je.jugadores.foto_url} alt="foto" style={s.jugadorFotoCap} />
                         : <div style={s.jugadorFotoPlaceholderCap}>🏃</div>}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={s.jugadorNombreCap}>
+                      <div style={{ ...s.jugadorNombreCap, textDecoration: sancionado ? "underline" : "none", textDecorationColor: "#dc2626" }}>
                         {je.es_capitan && <span style={{ marginRight: 5 }}>👑</span>}
                         {verDatosPersonales ? je.jugadores?.nombre_completo : je.nombre_camiseta}
                       </div>
                       {verDatosPersonales && (
                         <div style={s.jugadorMetaCap}>
                           #{je.jugadores?.numero_afiliado} · {je.nombre_camiseta}
+                        </div>
+                      )}
+                      {sancionado && (
+                        <div style={{ fontSize: 10.5, fontWeight: 700, color: "#7f1d1d", marginTop: 3 }}>
+                          🟥 Sancionado · {sancPend} {sancPend === 1 ? "partido" : "partidos"}
                         </div>
                       )}
                     </div>
@@ -1497,16 +1536,20 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
                       </div>
                     )}
                     {esCapitanDelActivo && modoEliminar && (
-                      <button style={{ ...s.btnEliminarCap, ...(je.es_capitan ? { opacity: 0.45, cursor: "not-allowed" } : {}) }}
+                      <button style={{ ...s.btnEliminarCap, ...((je.es_capitan || sancionado) ? { opacity: 0.45, cursor: "not-allowed" } : {}) }}
                         onClick={() => {
                           if (je.es_capitan) {
                             showToast("El capitán no puede eliminarse. Pide al admin transferir la capitanía primero.", "err");
                             return;
                           }
+                          if (sancionado) {
+                            showToast(`Jugador con sanción activa (${sancPend} partidos restantes)`, "err");
+                            return;
+                          }
                           setEliminarTarget(je);
                           setModalCap("eliminar");
                         }}
-                        title={je.es_capitan ? "El capitán no puede eliminarse" : "Eliminar del equipo"}>
+                        title={je.es_capitan ? "El capitán no puede eliminarse" : sancionado ? `Sancionado: ${sancPend} partidos restantes` : "Eliminar del equipo"}>
                         🗑️
                       </button>
                     )}
