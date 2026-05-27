@@ -396,7 +396,7 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
         `,equipos_local:equipos!partidos_equipo_local_id_fkey(id,nombre,color_playera,color_camiseta_2,diseno_camiseta,escudo_url)` +
         `,equipos_visitante:equipos!partidos_equipo_visitante_id_fkey(id,nombre,color_playera,color_camiseta_2,diseno_camiseta,escudo_url)` +
         `,ficha_partido(id,goles_local,goles_visitante,goleadores,asistencia,faltas_local,faltas_visitante,observaciones,cerrada)` +
-        `&order=cancha_numero,hora`,
+        `&order=hora,cancha_numero`,
         token
       );
       // PostgREST puede devolver ficha_partido como objeto o array según relación.
