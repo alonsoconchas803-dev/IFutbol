@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import JerseySVG from "../components/JerseySVG";
 import IFutbolLogo from "../components/IFutbolLogo";
+import { generarUnaJornada, parKey } from "../lib/roundRobin";
 import PanelSanciones from "../components/PanelSanciones";
 import {
   cargarSancionesDelPartido,
@@ -568,6 +569,157 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
     setAplicandoSwap(false);
   };
 
+  // Aplica el intercambio y luego regenera los enfrentamientos de cada
+  // jornada futura afectada (manteniendo cancha/hora/id de cada partido).
+  // Bloquea si alguna jornada futura afectada tiene ficha cerrada — esos
+  // resultados son definitivos y no se pueden tocar.
+  const aplicarIntercambioYRegenerar = async () => {
+    const cfm = intercambioCfm;
+    if (!cfm) return;
+    const futurasAfectadas = [...new Set(cfm.repeticiones.filter(r => r.tipo === "futura").map(r => r.jornadaNumero))];
+    if (futurasAfectadas.length === 0) {
+      // No hay nada futuro que regenerar — equivale al intercambio normal.
+      return aplicarIntercambio();
+    }
+    setAplicandoSwap(true);
+    try {
+      // 1) Cargar TODAS las jornadas de la liga con partidos + fichas. Lo
+      //    necesitamos para reconstruir el historial efectivo después del
+      //    intercambio y para detectar fichas cerradas que bloquean.
+      const todasJornadas = await db(
+        `/jornadas?liga_id=eq.${liga.id}` +
+        `&select=id,numero,partidos(id,cancha_numero,hora,equipo_local_id,equipo_visitante_id,ficha_partido(id,goles_local,goles_visitante,goleadores,asistencia,faltas_local,faltas_visitante,observaciones,cerrada))` +
+        `&order=numero`,
+        token,
+      );
+
+      // 2) Verificar que las jornadas futuras afectadas no tengan ficha cerrada.
+      const jornadasARegenerar = (todasJornadas || []).filter(j => futurasAfectadas.includes(j.numero));
+      for (const j of jornadasARegenerar) {
+        const cerrada = (j.partidos || []).some(p => {
+          const f = Array.isArray(p.ficha_partido) ? p.ficha_partido[0] : p.ficha_partido;
+          return f?.cerrada;
+        });
+        if (cerrada) {
+          setAplicandoSwap(false);
+          return showToast(`No se puede regenerar la jornada ${j.numero}: tiene fichas cerradas. Aplica solo el intercambio.`, "err");
+        }
+      }
+
+      // 3) Aplicar el intercambio en la jornada actual.
+      const { partidoA, partidoB, ladoA, ladoB, eqA, eqB } = cfm;
+      const colA = ladoA === "local" ? "equipo_local_id" : "equipo_visitante_id";
+      const colB = ladoB === "local" ? "equipo_local_id" : "equipo_visitante_id";
+      await Promise.all([
+        db(`/partidos?id=eq.${partidoA.id}`, token, { method: "PATCH", body: JSON.stringify({ [colA]: eqB.id }) }),
+        db(`/partidos?id=eq.${partidoB.id}`, token, { method: "PATCH", body: JSON.stringify({ [colB]: eqA.id }) }),
+      ]);
+      for (const r of cfm.reseteos) {
+        await db(`/ficha_partido?id=eq.${r.ficha.id}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({
+            goles_local: 0, goles_visitante: 0,
+            goleadores: [], asistencia: [],
+            faltas_local: 0, faltas_visitante: 0,
+            observaciones: "",
+          }),
+        });
+      }
+
+      // 4) Actualizar el snapshot local de las jornadas con el intercambio
+      //    aplicado (para que el historial efectivo lo refleje).
+      const jornadasActualizadas = (todasJornadas || []).map(j => ({
+        ...j,
+        partidos: (j.partidos || []).map(p => {
+          if (p.id === partidoA.id) return { ...p, [colA]: eqB.id };
+          if (p.id === partidoB.id) return { ...p, [colB]: eqA.id };
+          return p;
+        }),
+      }));
+
+      // 5) Equipos activos de la liga — necesarios para el round-robin.
+      const equiposActivos = await db(
+        `/equipos?liga_id=eq.${liga.id}&activo=eq.true&select=id,nombre&order=nombre`, token);
+
+      // 6) Regenerar cada jornada futura afectada en orden ascendente.
+      const numerosOrdenados = [...futurasAfectadas].sort((a, b) => a - b);
+      let totalReseteadas = 0;
+      for (const numJor of numerosOrdenados) {
+        const jornada = jornadasActualizadas.find(j => j.numero === numJor);
+        if (!jornada) continue;
+
+        // Historial efectivo = enfrentamientos de TODAS las jornadas excepto
+        // los partidos que estamos por reasignar (los de esta jornada).
+        const partidosJor = jornada.partidos || [];
+        const idsEsta = new Set(partidosJor.map(p => p.id));
+        const historial = {};
+        for (const j of jornadasActualizadas) {
+          for (const p of (j.partidos || [])) {
+            if (idsEsta.has(p.id)) continue;
+            if (!p.equipo_local_id || !p.equipo_visitante_id) continue;
+            historial[parKey(p.equipo_local_id, p.equipo_visitante_id)] = true;
+          }
+        }
+
+        const { partidos: nuevosPares } = generarUnaJornada(equiposActivos || [], historial, numJor);
+
+        // Ordenar partidos existentes igual que en el flujo de generación
+        // (hora ascendente, luego cancha) para asignar el primer par al
+        // primer slot, y así sucesivamente. Los pares "sobrantes" si hay
+        // menos partidos que pares se descartan (caso improbable: el
+        // round-robin produce ≈ #equipos/2 pares y la jornada original
+        // tenía esa misma cantidad menos los descansos).
+        const slotsOrdenados = [...partidosJor].sort((a, b) =>
+          (a.hora || "").localeCompare(b.hora || "") || (a.cancha_numero || 0) - (b.cancha_numero || 0)
+        );
+
+        // Patch en paralelo de cada slot con su nuevo par. Si hay más slots
+        // que pares (algún equipo descansa), los slots extra quedan en NULL.
+        const patchOps = [];
+        for (let i = 0; i < slotsOrdenados.length; i++) {
+          const slot = slotsOrdenados[i];
+          const par = nuevosPares[i];
+          const nuevoLocal = par?.local?.id || null;
+          const nuevoVisit = par?.visitante?.id || null;
+          if (slot.equipo_local_id === nuevoLocal && slot.equipo_visitante_id === nuevoVisit) continue;
+          patchOps.push(db(`/partidos?id=eq.${slot.id}`, token, {
+            method: "PATCH",
+            body: JSON.stringify({ equipo_local_id: nuevoLocal, equipo_visitante_id: nuevoVisit }),
+          }));
+          // Resetear ficha si tenía datos (cambiaron participantes).
+          const ficha = Array.isArray(slot.ficha_partido) ? slot.ficha_partido[0] : slot.ficha_partido;
+          if (ficha && fichaTieneDatos(ficha)) {
+            totalReseteadas++;
+            patchOps.push(db(`/ficha_partido?id=eq.${ficha.id}`, token, {
+              method: "PATCH",
+              body: JSON.stringify({
+                goles_local: 0, goles_visitante: 0,
+                goleadores: [], asistencia: [],
+                faltas_local: 0, faltas_visitante: 0,
+                observaciones: "",
+              }),
+            }));
+          }
+        }
+        await Promise.all(patchOps);
+
+        // Actualizar snapshot para que la siguiente jornada use estos nuevos
+        // pares como parte del historial efectivo.
+        for (let i = 0; i < slotsOrdenados.length; i++) {
+          const slot = slotsOrdenados[i];
+          const par = nuevosPares[i];
+          slot.equipo_local_id = par?.local?.id || null;
+          slot.equipo_visitante_id = par?.visitante?.id || null;
+        }
+      }
+
+      showToast(`Intercambio aplicado · ${numerosOrdenados.length} jornada(s) regenerada(s)${totalReseteadas ? ` · ${totalReseteadas} ficha(s) reseteada(s)` : ""}`);
+      setIntercambioCfm(null);
+      await cargarResumenJornada();
+    } catch (e) { showToast(e.message, "err"); }
+    setAplicandoSwap(false);
+  };
+
   // Carga partidos de la jornada seleccionada con su ficha_partido (si existe)
   const cargarResumenJornada = async () => {
     setCargandoResumen(true);
@@ -888,6 +1040,7 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
           aplicando={aplicandoSwap}
           onCancel={() => setIntercambioCfm(null)}
           onConfirm={aplicarIntercambio}
+          onConfirmYRegenerar={aplicarIntercambioYRegenerar}
         />
       )}
 
@@ -1710,8 +1863,10 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
 // Resume el cambio en lenguaje claro: qué equipo se mueve a qué horario,
 // si hay enfrentamientos repetidos contra otras jornadas y si alguna ficha
 // existente perderá sus datos por el reseteo.
-function ModalConfirmIntercambio({ cfm, aplicando, onCancel, onConfirm }) {
+function ModalConfirmIntercambio({ cfm, aplicando, onCancel, onConfirm, onConfirmYRegenerar }) {
   const { partidoA, partidoB, eqA, eqB, otroA, otroB, repeticiones, reseteos } = cfm;
+  const futuras = repeticiones.filter(r => r.tipo === "futura");
+  const jornadasFuturasAfectadas = [...new Set(futuras.map(r => r.jornadaNumero))].sort((a, b) => a - b);
   return (
     <div style={mci.overlay} onClick={onCancel}>
       <div style={mci.box} onClick={e => e.stopPropagation()}>
@@ -1746,7 +1901,6 @@ function ModalConfirmIntercambio({ cfm, aplicando, onCancel, onConfirm }) {
 
         {(() => {
           const pasadas = repeticiones.filter(r => r.tipo === "pasada");
-          const futuras = repeticiones.filter(r => r.tipo === "futura");
           return (
             <>
               {pasadas.length > 0 && (
@@ -1761,7 +1915,7 @@ function ModalConfirmIntercambio({ cfm, aplicando, onCancel, onConfirm }) {
                 <div style={mci.alerta}>
                   ⚠️ <strong>Choca con jornada futura:</strong> {futuras.length === 1
                     ? `este enfrentamiento ya está planificado para la jornada ${futuras[0].jornadaNumero}, quedaría duplicado.`
-                    : `${futuras.length} de los nuevos enfrentamientos ya están planificados en jornadas posteriores (${futuras.map(r => r.jornadaNumero).join(", ")}), quedarían duplicados.`
+                    : `${futuras.length} de los nuevos enfrentamientos ya están planificados en jornadas posteriores (${jornadasFuturasAfectadas.join(", ")}), quedarían duplicados.`
                   }
                 </div>
               )}
@@ -1783,6 +1937,22 @@ function ModalConfirmIntercambio({ cfm, aplicando, onCancel, onConfirm }) {
             {aplicando ? "Aplicando..." : "Sí, intercambiar"}
           </button>
         </div>
+
+        {/* Cuando hay choque con jornadas futuras, ofrecer un atajo: aplicar
+            el intercambio Y regenerar los enfrentamientos de esas jornadas
+            para evitar la duplicación, manteniendo hora/cancha de cada slot. */}
+        {futuras.length > 0 && onConfirmYRegenerar && (
+          <div style={mci.regenBox}>
+            <div style={mci.regenLabel}>💡 Alternativa</div>
+            <div style={mci.regenTxt}>
+              Aplicar el intercambio y reorganizar automáticamente la{jornadasFuturasAfectadas.length === 1 ? "" : "s"} jornada{jornadasFuturasAfectadas.length === 1 ? "" : "s"} {jornadasFuturasAfectadas.join(", ")} para que no quede duplicado.
+              Se conservan los horarios y canchas; los enfrentamientos se recalculan con el algoritmo del generador.
+            </div>
+            <button style={mci.btnRegen} onClick={onConfirmYRegenerar} disabled={aplicando}>
+              {aplicando ? "Reorganizando..." : `🔧 Intercambiar y regenerar jornada${jornadasFuturasAfectadas.length === 1 ? "" : "s"} ${jornadasFuturasAfectadas.join(", ")}`}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1805,6 +1975,10 @@ const mci = {
   acciones: { display: "flex", gap: 10, marginTop: 14 },
   btnCancel: { flex: 1, background: "transparent", border: "1px solid #d1d5db", color: "#6b7280", padding: "11px", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" },
   btnOk: { flex: 2, background: "#4f8f2f", border: "none", color: "#fff", padding: "11px", borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: "pointer" },
+  regenBox: { marginTop: 14, padding: 12, background: "#f0fdf4", border: "1px solid #86c46a", borderRadius: 10 },
+  regenLabel: { fontSize: 10.5, fontWeight: 800, color: "#166534", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 6 },
+  regenTxt: { fontSize: 12, color: "#14532d", marginBottom: 10, lineHeight: 1.5 },
+  btnRegen: { width: "100%", background: "#fff", color: "#166534", border: "2px solid #4f8f2f", padding: "10px 12px", borderRadius: 10, fontSize: 12.5, fontWeight: 800, cursor: "pointer" },
 };
 
 // ─────────────────────────────────────────────────────────────────

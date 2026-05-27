@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import BracketTree from "../components/BracketTree";
+import { generarUnaJornada } from "../lib/roundRobin";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -22,77 +23,8 @@ const db = async (path, token, options = {}) => {
   return res.status === 204 ? null : res.json();
 };
 
-// ─────────────────────────────────────────────────────────────────
-// ALGORITMO: Generar UNA jornada respetando historial
-// ─────────────────────────────────────────────────────────────────
-function generarUnaJornada(equipos, historial, numJornada) {
-  // historial: { "id_a-id_b": true } pares que ya jugaron
-  const n = equipos.length;
-  const esNon = n % 2 !== 0;
-  const lista = [...equipos];
-  if (esNon) lista.push({ id: "BYE", nombre: "DESCANSO" });
-
-  const total = lista.length;
-  const umbral75 = Math.floor(n * 0.75);
-
-  // Contar cuántos rivales ha tenido cada equipo
-  const conteoRivales = {};
-  equipos.forEach(e => { conteoRivales[e.id] = 0; });
-  Object.keys(historial).forEach(par => {
-    const [a, b] = par.split("-");
-    if (conteoRivales[a] !== undefined) conteoRivales[a]++;
-    if (conteoRivales[b] !== undefined) conteoRivales[b]++;
-  });
-
-  // Round-robin: rotación basada en número de jornada
-  const indices = lista.map((_, i) => i);
-  const fijo = indices[0];
-  const rotables = indices.slice(1);
-  const rot = (numJornada - 1) % rotables.length;
-  const rotados = [...rotables.slice(rot), ...rotables.slice(0, rot)];
-  const orden = [fijo, ...rotados];
-
-  const partidos = [];
-  const usados = new Set();
-  const descansos = [];
-
-  for (let i = 0; i < total / 2; i++) {
-    const a = lista[orden[i]];
-    const b = lista[orden[total - 1 - i]];
-
-    if (a.id === "BYE") { descansos.push(b); usados.add(b.id); continue; }
-    if (b.id === "BYE") { descansos.push(a); usados.add(a.id); continue; }
-
-    const parKey = [a.id, b.id].sort().join("-");
-    const yaJugaron = historial[parKey];
-
-    if (yaJugaron) {
-      // Solo repetir si ambos ya superaron el 75%
-      if (conteoRivales[a.id] < umbral75 || conteoRivales[b.id] < umbral75) {
-        // Buscar alternativa para uno de ellos
-        const alternativa = lista.find(e =>
-          e.id !== "BYE" && !usados.has(e.id) && e.id !== a.id && e.id !== b.id &&
-          !historial[[a.id, e.id].sort().join("-")]
-        );
-        if (alternativa) {
-          partidos.push({ local: a, visitante: alternativa });
-          usados.add(a.id); usados.add(alternativa.id);
-          continue;
-        }
-      }
-    }
-
-    partidos.push({ local: a, visitante: b });
-    usados.add(a.id); usados.add(b.id);
-  }
-
-  // Agregar equipos no emparejados como descanso
-  lista.forEach(e => {
-    if (e.id !== "BYE" && !usados.has(e.id)) descansos.push(e);
-  });
-
-  return { partidos, descansos };
-}
+// El algoritmo de round-robin vive en src/lib/roundRobin.js (compartido con
+// FichaGenerator para la regeneración de jornadas futuras tras intercambios).
 
 // Reparte cancha + hora a los partidos. Admite "compra de horario":
 // turnoComprado es un mapa { equipoId: turno (1-indexed) } con preferencias fijas.
