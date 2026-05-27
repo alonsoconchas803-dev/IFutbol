@@ -244,12 +244,12 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
   const cargarTodo = async () => {
     setLoading(true);
     try {
-      const [eqs, hist, jors, fichas, liguillaData] = await Promise.all([
+      const [eqs, jors, fichas, liguillaData] = await Promise.all([
         db(`/equipos?liga_id=eq.${liga.id}&select=*&order=nombre`, token),
-        db(`/historial_enfrentamientos?liga_id=eq.${liga.id}&select=*`, token),
-        // Embebemos partidos(hora) para poder sugerir la hora de la última jornada
-        // sin un viaje extra a la BD.
-        db(`/jornadas?liga_id=eq.${liga.id}&select=*,partidos(hora)&order=numero`, token),
+        // Embebemos los partidos completos: necesitamos los equipos para
+        // reconstruir el historial efectivo (fichas cerradas + abiertas), y la
+        // hora para sugerir el horario de la próxima jornada.
+        db(`/jornadas?liga_id=eq.${liga.id}&select=*,partidos(hora,equipo_local_id,equipo_visitante_id)&order=numero`, token),
         db(`/ficha_partido?select=*,partidos(jornada_id,equipo_local_id,equipo_visitante_id,jornadas(liga_id))`, token),
         db(`/liguilla_partidos?liga_id=eq.${liga.id}&select=*&order=created_at`, token),
       ]);
@@ -263,11 +263,20 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
       );
       setJornadasGuardadas(jors || []);
 
-      // Reconstruir historial
+      // Historial efectivo: derivado de los PARTIDOS actuales (no de la tabla
+      // historial_enfrentamientos, que se quedaba congelada con la versión
+      // inicial). Cuenta tanto fichas cerradas como abiertas: si el admin
+      // reorganiza una jornada (intercambia equipos entre slots), el cambio
+      // se refleja inmediatamente aquí y la próxima jornada no repite el
+      // nuevo enfrentamiento. Las fichas cerradas siguen siendo la fuente
+      // definitiva; las abiertas son planeación que también evitamos repetir.
       const h = {};
-      (hist || []).forEach(r => {
-        const key = [r.equipo_a_id, r.equipo_b_id].sort().join("-");
-        h[key] = true;
+      (jors || []).forEach(j => {
+        (j.partidos || []).forEach(p => {
+          if (!p.equipo_local_id || !p.equipo_visitante_id) return;
+          const key = [p.equipo_local_id, p.equipo_visitante_id].sort().join("-");
+          h[key] = true;
+        });
       });
       setHistorial(h);
 

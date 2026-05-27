@@ -338,6 +338,17 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
   const [equipos,     setEquipos]    = useState([]);   // para el modal de partido manual
   const [nuevoPartidoOpen, setNuevoPartidoOpen] = useState(false);
   const [toast,       setToast]      = useState(null);
+
+  // ── Modo intercambio (admin reorganiza horarios de la jornada) ─────
+  // Tap-to-swap: el admin toca un equipo, luego otro de un partido distinto,
+  // y se intercambian de slot. Los lados (local/visitante) se preservan
+  // donde estaba cada equipo. Si los nuevos enfrentamientos ya se jugaron en
+  // otra jornada, el modal de confirmación lo avisa y pide ratificar.
+  const [modoIntercambio, setModoIntercambio]   = useState(false);
+  const [intercambioSel,  setIntercambioSel]    = useState(null); // { partidoId, lado }
+  const [intercambioCfm,  setIntercambioCfm]    = useState(null); // payload del modal de confirmación
+  const [aplicandoSwap,   setAplicandoSwap]     = useState(false);
+
   const token = session?.access_token;
 
   const showToast = (msg, tipo = "ok") => { setToast({ msg, tipo }); setTimeout(() => setToast(null), 3000); };
@@ -390,6 +401,157 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
       showToast("Partido eliminado ✓");
       cargarResumenJornada();
     } catch (e) { showToast(e.message, "err"); }
+  };
+
+  // ── Intercambio: handlers ──────────────────────────────────────
+  const salirModoIntercambio = () => {
+    setModoIntercambio(false);
+    setIntercambioSel(null);
+  };
+
+  // Heurística para detectar si una ficha tiene "datos" que perderíamos al
+  // resetearla por el intercambio. Goles/asistencia/faltas/goleadores/observaciones.
+  const fichaTieneDatos = (f) => {
+    if (!f) return false;
+    if (f.goles_local || f.goles_visitante) return true;
+    if (f.faltas_local || f.faltas_visitante) return true;
+    if (Array.isArray(f.goleadores) && f.goleadores.length > 0) return true;
+    if (Array.isArray(f.asistencia) && f.asistencia.length > 0) return true;
+    if (f.observaciones && f.observaciones.trim()) return true;
+    return false;
+  };
+
+  const seleccionarEquipoIntercambio = (partido, lado) => {
+    // Toggle: tocar el mismo equipo deselecciona.
+    if (intercambioSel?.partidoId === partido.id && intercambioSel?.lado === lado) {
+      setIntercambioSel(null);
+      return;
+    }
+    // Si la ficha del partido tocado está cerrada, bloquear.
+    if (partido.ficha?.cerrada) {
+      return showToast("No se puede intercambiar un partido con ficha cerrada", "err");
+    }
+    // Primer click: marcar selección.
+    if (!intercambioSel) {
+      setIntercambioSel({ partidoId: partido.id, lado });
+      return;
+    }
+    // Segundo click: validar y abrir modal de confirmación.
+    if (intercambioSel.partidoId === partido.id) {
+      // Mismo partido — invertir local/visitante no cambia el enfrentamiento;
+      // por simplicidad lo rechazamos. El admin puede hacerlo desde "Modificar
+      // ficha" si lo necesita.
+      return showToast("Elige equipos de partidos distintos", "err");
+    }
+    const partidoA = resumen.find(p => p.id === intercambioSel.partidoId);
+    const partidoB = partido;
+    if (!partidoA || !partidoB) return;
+    if (partidoA.ficha?.cerrada || partidoB.ficha?.cerrada) {
+      return showToast("No se puede intercambiar un partido con ficha cerrada", "err");
+    }
+    const eqA = intercambioSel.lado === "local" ? partidoA.equipos_local : partidoA.equipos_visitante;
+    const eqB = lado === "local" ? partidoB.equipos_local : partidoB.equipos_visitante;
+    if (!eqA || !eqB) return showToast("Slot vacío: no se puede intercambiar", "err");
+    if (eqA.id === eqB.id) {
+      setIntercambioSel(null);
+      return showToast("Es el mismo equipo", "err");
+    }
+    // Tras el swap, los lados se preservan:
+    //   partidoA[ladoA] pasa de eqA → eqB
+    //   partidoB[ladoB] pasa de eqB → eqA
+    // El "otro lado" de cada partido queda igual. Nuevos enfrentamientos:
+    const otroA = intercambioSel.lado === "local" ? partidoA.equipos_visitante : partidoA.equipos_local;
+    const otroB = lado === "local" ? partidoB.equipos_visitante : partidoB.equipos_local;
+
+    // Detectar repeticiones consultando partidos de OTRAS jornadas que ya
+    // tengan a esos pares enfrentándose. Excluimos los 2 partidos en juego.
+    detectarRepeticiones([
+      otroA && eqB ? { local: otroA.id, visitante: eqB.id } : null,
+      otroB && eqA ? { local: otroB.id, visitante: eqA.id } : null,
+    ].filter(Boolean), [partidoA.id, partidoB.id]).then(repeticiones => {
+      // Detectar si las fichas tienen datos que se resetearán.
+      const reseteos = [];
+      if (fichaTieneDatos(partidoA.ficha)) reseteos.push({ partido: partidoA, ficha: partidoA.ficha });
+      if (fichaTieneDatos(partidoB.ficha)) reseteos.push({ partido: partidoB, ficha: partidoB.ficha });
+
+      setIntercambioCfm({
+        partidoA, partidoB,
+        ladoA: intercambioSel.lado, ladoB: lado,
+        eqA, eqB, otroA, otroB,
+        repeticiones, // [{eq1, eq2, jornadaNumero}]
+        reseteos,     // [{partido, ficha}]
+      });
+      setIntercambioSel(null);
+    });
+  };
+
+  // Consulta a BD: para cada par {local, visitante} buscado, devuelve si ya
+  // existe un partido con ese enfrentamiento (en cualquier orden) en otra
+  // jornada de la liga. Excluye los 2 partidos involucrados en el swap.
+  const detectarRepeticiones = async (pares, excluirIds) => {
+    if (!pares.length) return [];
+    const repeticiones = [];
+    for (const { local, visitante } of pares) {
+      try {
+        // Buscamos cualquier partido de la liga con estos dos equipos en
+        // cualquier orden. PostgREST: filtramos por jornadas.liga_id vía embed.
+        const rows = await db(
+          `/partidos?or=(and(equipo_local_id.eq.${local},equipo_visitante_id.eq.${visitante}),and(equipo_local_id.eq.${visitante},equipo_visitante_id.eq.${local}))&select=id,jornadas(numero,liga_id)`,
+          token,
+        );
+        const otros = (rows || []).filter(r =>
+          r.jornadas?.liga_id === liga.id && !excluirIds.includes(r.id)
+        );
+        if (otros.length > 0) {
+          repeticiones.push({ local, visitante, jornadaNumero: otros[0].jornadas?.numero });
+        }
+      } catch (_) { /* silencioso */ }
+    }
+    return repeticiones;
+  };
+
+  // Persistencia: actualiza los 2 partidos con los equipos intercambiados y,
+  // si las fichas tenían datos, las resetea a estado vacío (manteniendo el id).
+  const aplicarIntercambio = async () => {
+    const cfm = intercambioCfm;
+    if (!cfm) return;
+    setAplicandoSwap(true);
+    try {
+      const { partidoA, partidoB, ladoA, ladoB, eqA, eqB } = cfm;
+      const colA = ladoA === "local" ? "equipo_local_id" : "equipo_visitante_id";
+      const colB = ladoB === "local" ? "equipo_local_id" : "equipo_visitante_id";
+      // Patch los dos partidos en paralelo: en A ocupa el lugar el equipo B,
+      // y en B el equipo A.
+      await Promise.all([
+        db(`/partidos?id=eq.${partidoA.id}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ [colA]: eqB.id }),
+        }),
+        db(`/partidos?id=eq.${partidoB.id}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ [colB]: eqA.id }),
+        }),
+      ]);
+      // Reset de fichas con datos. Mantenemos el id y partido_id pero limpiamos
+      // todo lo demás: los nuevos participantes deben empezar la captura en blanco.
+      for (const r of cfm.reseteos) {
+        await db(`/ficha_partido?id=eq.${r.ficha.id}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({
+            goles_local: 0, goles_visitante: 0,
+            goleadores: [], asistencia: [],
+            faltas_local: 0, faltas_visitante: 0,
+            observaciones: "",
+          }),
+        });
+      }
+      showToast(cfm.repeticiones.length
+        ? `Intercambio aplicado · ${cfm.repeticiones.length} enfrentamiento(s) repetido(s)`
+        : "Intercambio aplicado ✓");
+      setIntercambioCfm(null);
+      await cargarResumenJornada();
+    } catch (e) { showToast(e.message, "err"); }
+    setAplicandoSwap(false);
   };
 
   // Carga partidos de la jornada seleccionada con su ficha_partido (si existe)
@@ -581,6 +743,44 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
               </span>
             </div>
 
+            {/* Botón Reorganizar jornada (admin) */}
+            {modo === "resultados" && !readOnly && (
+              <div style={{ marginBottom: 10 }}>
+                {!modoIntercambio ? (
+                  <button
+                    onClick={() => setModoIntercambio(true)}
+                    style={{
+                      width: "100%", background: "#fff", color: "#4f8f2f",
+                      border: "2px dashed #86c46a", borderRadius: 12,
+                      padding: "10px 16px", fontSize: 13, fontWeight: 800,
+                      cursor: "pointer", minHeight: 44,
+                    }}>
+                    🔄 Reorganizar jornada (intercambiar horarios)
+                  </button>
+                ) : (
+                  <div style={{
+                    background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 12,
+                    padding: "10px 14px", fontSize: 12, color: "#78350f", display: "flex",
+                    gap: 10, alignItems: "center", flexWrap: "wrap",
+                  }}>
+                    <span style={{ flex: 1, minWidth: 0, fontWeight: 700 }}>
+                      {intercambioSel
+                        ? "Ahora toca el equipo que quieres que ocupe su lugar"
+                        : "Toca el primer equipo a mover. Luego el equipo con el que se intercambia."}
+                    </span>
+                    <button
+                      onClick={salirModoIntercambio}
+                      style={{
+                        background: "#fff", border: "1px solid #d97706", color: "#78350f",
+                        borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                      }}>
+                      Cancelar
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Lista de partidos */}
             <div style={{ display: "flex", flexDirection: "column", gap: esMini ? 6 : 10, marginBottom: 18 }}>
               {resumen.map(p => (
@@ -591,6 +791,9 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
                   onEliminar={modo === "resultados" && !readOnly ? eliminarPartido : null}
                   readOnly={readOnly}
                   mini={esMini}
+                  modoIntercambio={modoIntercambio}
+                  intercambioSel={intercambioSel}
+                  onIntercambioClick={seleccionarEquipoIntercambio}
                 />
               ))}
             </div>
@@ -664,6 +867,16 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
         </div>
       )}
 
+      {/* MODAL: confirmar intercambio (avisa repeticiones y reseteos de ficha) */}
+      {intercambioCfm && (
+        <ModalConfirmIntercambio
+          cfm={intercambioCfm}
+          aplicando={aplicandoSwap}
+          onCancel={() => setIntercambioCfm(null)}
+          onConfirm={aplicarIntercambio}
+        />
+      )}
+
       {/* MODAL: crear partido manual dentro de la jornada seleccionada */}
       {nuevoPartidoOpen && (
         <NuevoPartidoModal
@@ -703,7 +916,10 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
 // ─────────────────────────────────────────────────────────────────
 // TARJETA DE PARTIDO (resumen breve, estilo "partido")
 // ─────────────────────────────────────────────────────────────────
-function PartidoCard({ partido, onVerFicha, onEliminar = null, readOnly = false, mini = false }) {
+function PartidoCard({
+  partido, onVerFicha, onEliminar = null, readOnly = false, mini = false,
+  modoIntercambio = false, intercambioSel = null, onIntercambioClick = null,
+}) {
   const f = partido.ficha;
   const cerrada = !!f?.cerrada;
   const eqL = partido.equipos_local;
@@ -711,6 +927,26 @@ function PartidoCard({ partido, onVerFicha, onEliminar = null, readOnly = false,
   const esManual = partido.manual === true;
   const esAmistoso = partido.cuenta_estadisticas === false;
   const puedeEliminar = !!onEliminar && esManual && !cerrada;
+
+  // Highlight visual cuando un equipo está seleccionado en modo intercambio.
+  const seleccionado = (lado) =>
+    modoIntercambio && intercambioSel?.partidoId === partido.id && intercambioSel?.lado === lado;
+  const colSwapStyle = (lado) => {
+    if (!modoIntercambio) return null;
+    if (cerrada) return { opacity: 0.55, cursor: "not-allowed" };
+    if (seleccionado(lado)) {
+      return {
+        background: "#dcfce7", border: "2px solid #4f8f2f", borderRadius: 10,
+        padding: "4px 6px", cursor: "pointer", boxShadow: "0 0 0 3px rgba(79,143,47,0.18)",
+      };
+    }
+    return { border: "2px dashed #cbd5e1", borderRadius: 10, padding: "4px 6px", cursor: "pointer" };
+  };
+  const handleEquipoClick = (lado) => {
+    if (!modoIntercambio || !onIntercambioClick) return;
+    if (cerrada) return; // bloqueado: la ficha es definitiva
+    onIntercambioClick(partido, lado);
+  };
 
   // Versión compacta del apartado "Fichas": solo horario, cancha y equipos.
   if (mini) {
@@ -746,7 +982,9 @@ function PartidoCard({ partido, onVerFicha, onEliminar = null, readOnly = false,
       </div>
 
       <div style={hs.marcadorRow}>
-        <div style={hs.equipoCol}>
+        <div style={{ ...hs.equipoCol, ...(colSwapStyle("local") || {}) }}
+             onClick={() => handleEquipoClick("local")}
+             title={modoIntercambio && !cerrada ? "Tocar para intercambiar" : ""}>
           <JerseySVG
             diseno={eqL?.diseno_camiseta || "solido"}
             color1={eqL?.color_playera || "#3182ce"}
@@ -763,7 +1001,9 @@ function PartidoCard({ partido, onVerFicha, onEliminar = null, readOnly = false,
             <span style={hs.vsTxt}>VS</span>
           )}
         </div>
-        <div style={hs.equipoCol}>
+        <div style={{ ...hs.equipoCol, ...(colSwapStyle("visitante") || {}) }}
+             onClick={() => handleEquipoClick("visitante")}
+             title={modoIntercambio && !cerrada ? "Tocar para intercambiar" : ""}>
           <JerseySVG
             diseno={eqV?.diseno_camiseta || "solido"}
             color1={eqV?.color_playera || "#3182ce"}
@@ -776,6 +1016,9 @@ function PartidoCard({ partido, onVerFicha, onEliminar = null, readOnly = false,
       </div>
 
       {(() => {
+        // En modo intercambio, ocultamos los botones de acción para evitar
+        // que el admin abra la ficha por accidente al tocar el partido.
+        if (modoIntercambio) return null;
         // El árbitro (readOnly) solo consulta fichas ya cerradas desde aquí;
         // las pendientes las llena en su panel "Mis Partidos".
         if (readOnly) {
@@ -1444,6 +1687,92 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────
+// MODAL: NUEVO PARTIDO MANUAL DENTRO DE UNA JORNADA EXISTENTE
+// ─────────────────────────────────────────────────────────────────
+// MODAL: CONFIRMAR INTERCAMBIO DE EQUIPOS ENTRE SLOTS
+// ─────────────────────────────────────────────────────────────────
+// Resume el cambio en lenguaje claro: qué equipo se mueve a qué horario,
+// si hay enfrentamientos repetidos contra otras jornadas y si alguna ficha
+// existente perderá sus datos por el reseteo.
+function ModalConfirmIntercambio({ cfm, aplicando, onCancel, onConfirm }) {
+  const { partidoA, partidoB, eqA, eqB, otroA, otroB, repeticiones, reseteos } = cfm;
+  return (
+    <div style={mci.overlay} onClick={onCancel}>
+      <div style={mci.box} onClick={e => e.stopPropagation()}>
+        <h3 style={mci.title}>🔄 Confirmar intercambio</h3>
+
+        <div style={mci.cambioCol}>
+          <div style={mci.cambioRow}>
+            <span style={mci.equipoTag}>{eqA?.nombre}</span>
+            <span style={mci.flecha}>→</span>
+            <span style={mci.horarioTag}>
+              ⏰ {fmtHora(partidoB.hora)} · Cancha {partidoB.cancha_numero ?? "—"}
+            </span>
+          </div>
+          <div style={mci.cambioRow}>
+            <span style={mci.equipoTag}>{eqB?.nombre}</span>
+            <span style={mci.flecha}>→</span>
+            <span style={mci.horarioTag}>
+              ⏰ {fmtHora(partidoA.hora)} · Cancha {partidoA.cancha_numero ?? "—"}
+            </span>
+          </div>
+        </div>
+
+        <div style={mci.nuevosBox}>
+          <div style={mci.nuevosLabel}>Nuevos enfrentamientos:</div>
+          <div style={mci.nuevosLinea}>
+            ⏰ {fmtHora(partidoA.hora)} — <strong>{cfm.ladoA === "local" ? eqB?.nombre : otroA?.nombre}</strong> vs <strong>{cfm.ladoA === "local" ? otroA?.nombre : eqB?.nombre}</strong>
+          </div>
+          <div style={mci.nuevosLinea}>
+            ⏰ {fmtHora(partidoB.hora)} — <strong>{cfm.ladoB === "local" ? eqA?.nombre : otroB?.nombre}</strong> vs <strong>{cfm.ladoB === "local" ? otroB?.nombre : eqA?.nombre}</strong>
+          </div>
+        </div>
+
+        {repeticiones.length > 0 && (
+          <div style={mci.alerta}>
+            ⚠️ <strong>Atención:</strong> Este intercambio crea {repeticiones.length === 1 ? "un enfrentamiento que ya se jugó" : `${repeticiones.length} enfrentamientos que ya se jugaron`} en otra jornada. ¿Continuar de todos modos?
+          </div>
+        )}
+
+        {reseteos.length > 0 && (
+          <div style={mci.aviso}>
+            ℹ️ {reseteos.length === 1
+              ? "La ficha del partido afectado tiene datos que se borrarán (goles, asistencia, observaciones)."
+              : `${reseteos.length} fichas tienen datos que se borrarán al cambiar los participantes.`}
+          </div>
+        )}
+
+        <div style={mci.acciones}>
+          <button style={mci.btnCancel} onClick={onCancel} disabled={aplicando}>Cancelar</button>
+          <button style={mci.btnOk} onClick={onConfirm} disabled={aplicando}>
+            {aplicando ? "Aplicando..." : "Sí, intercambiar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const mci = {
+  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 },
+  box: { background: "#fff", borderRadius: 14, padding: 20, width: "100%", maxWidth: 460, boxShadow: "0 20px 50px rgba(0,0,0,0.3)" },
+  title: { fontSize: 17, fontWeight: 800, color: "#111827", margin: "0 0 14px" },
+  cambioCol: { display: "flex", flexDirection: "column", gap: 8, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, marginBottom: 12 },
+  cambioRow: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 13 },
+  equipoTag: { background: "#dcfce7", color: "#166534", padding: "4px 10px", borderRadius: 6, fontWeight: 700, fontSize: 12 },
+  horarioTag: { background: "#eef2ff", color: "#4338ca", padding: "4px 10px", borderRadius: 6, fontWeight: 700, fontSize: 12 },
+  flecha: { color: "#9ca3af", fontWeight: 700 },
+  nuevosBox: { background: "#fff", border: "1px dashed #cbd5e1", borderRadius: 10, padding: 12, marginBottom: 12 },
+  nuevosLabel: { fontSize: 11, fontWeight: 800, color: "#475569", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 6 },
+  nuevosLinea: { fontSize: 12.5, color: "#1f2937", padding: "4px 0", lineHeight: 1.4 },
+  alerta: { background: "#fef2f2", border: "1px solid #fecaca", color: "#7f1d1d", padding: "10px 12px", borderRadius: 10, fontSize: 12, marginBottom: 10, lineHeight: 1.5 },
+  aviso: { background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1e40af", padding: "10px 12px", borderRadius: 10, fontSize: 12, marginBottom: 10, lineHeight: 1.5 },
+  acciones: { display: "flex", gap: 10, marginTop: 14 },
+  btnCancel: { flex: 1, background: "transparent", border: "1px solid #d1d5db", color: "#6b7280", padding: "11px", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" },
+  btnOk: { flex: 2, background: "#4f8f2f", border: "none", color: "#fff", padding: "11px", borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: "pointer" },
+};
 
 // ─────────────────────────────────────────────────────────────────
 // MODAL: NUEVO PARTIDO MANUAL DENTRO DE UNA JORNADA EXISTENTE
