@@ -94,15 +94,71 @@ function generarUnaJornada(equipos, historial, numJornada) {
   return { partidos, descansos };
 }
 
-function asignarHorarios(partidos, numCanchas, intervalo, horaInicio) {
+// Reparte cancha + hora a los partidos. Admite "compra de horario":
+// turnoComprado es un mapa { equipoId: turno (1-indexed) } con preferencias fijas.
+// Regla cuando AMBOS equipos compraron turno: se honra al LOCAL — como el
+// round-robin alterna ida/vuelta, en la vuelta el otro equipo será local y se
+// usará su turno automáticamente, sin necesidad de guardar estado extra.
+function asignarHorarios(partidos, numCanchas, intervalo, horaInicio, turnoComprado = {}) {
   const [h, m] = horaInicio.split(":").map(Number);
-  // Una sola barra: intervalo es el tiempo total entre el inicio de un partido
-  // y el del siguiente en la misma cancha (ya incluye juego y descanso).
   const tiempoTotal = intervalo;
-  return partidos.map((p, idx) => {
-    const cancha = (idx % numCanchas) + 1;
-    const turno = Math.floor(idx / numCanchas);
-    const mins = h * 60 + m + turno * tiempoTotal;
+
+  const entradas = partidos.map((p, idx) => {
+    const tl = p.local?.id ? (turnoComprado[p.local.id] || null) : null;
+    const tv = p.visitante?.id ? (turnoComprado[p.visitante.id] || null) : null;
+    return { p, idx, preferido: tl || tv || null };
+  });
+
+  const turnoMaxPref = Math.max(0, ...entradas.map(e => e.preferido || 0));
+  const turnosBase = Math.max(1, Math.ceil(partidos.length / numCanchas));
+  const numTurnos = Math.max(turnosBase, turnoMaxPref);
+
+  // Grilla: turno → Set de canchas libres. Trabajo con Sets para tomar la cancha
+  // menor disponible y borrar al asignar sin tener que mantener índices.
+  const grilla = {};
+  for (let t = 1; t <= numTurnos; t++) {
+    grilla[t] = new Set();
+    for (let c = 1; c <= numCanchas; c++) grilla[t].add(c);
+  }
+
+  const buscarCercano = (t) => {
+    if (grilla[t]?.size > 0) return t;
+    for (let d = 1; d <= numTurnos; d++) {
+      if (grilla[t + d]?.size > 0) return t + d;
+      if (t - d >= 1 && grilla[t - d]?.size > 0) return t - d;
+    }
+    return null;
+  };
+  const primerLibre = () => {
+    for (let t = 1; t <= numTurnos; t++) {
+      if (grilla[t].size > 0) return t;
+    }
+    return null;
+  };
+
+  // Primero las preferencias (turno asc), luego los partidos sin preferencia.
+  const conPref = entradas.filter(e => e.preferido !== null)
+                          .sort((a, b) => a.preferido - b.preferido);
+  const sinPref = entradas.filter(e => e.preferido === null);
+  const asignados = new Array(partidos.length);
+
+  const colocar = (entrada, turno) => {
+    const cancha = Math.min(...grilla[turno]);
+    grilla[turno].delete(cancha);
+    asignados[entrada.idx] = { p: entrada.p, turno, cancha };
+  };
+
+  for (const e of conPref) {
+    const t = buscarCercano(e.preferido) || primerLibre();
+    if (t) colocar(e, t);
+  }
+  for (const e of sinPref) {
+    const t = primerLibre();
+    if (t) colocar(e, t);
+  }
+
+  return asignados.map(({ p, turno, cancha }) => {
+    const mins = h * 60 + m + (turno - 1) * tiempoTotal;
     const hh = Math.floor(mins / 60) % 24;
     const mm = mins % 60;
     return { ...p, cancha, hora: `${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}` };
@@ -174,6 +230,10 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [toast, setToast] = useState(null);
+  // Edición local del mapa equipoId → turno_comprado. Se hidrata desde equipos
+  // y queda "sucia" hasta que el admin confirma con Guardar compras.
+  const [compras, setCompras] = useState({});
+  const [guardandoCompras, setGuardandoCompras] = useState(false);
   const token = session?.access_token;
 
   const showToast = (msg, tipo = "ok") => {
@@ -196,7 +256,11 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
       // Solo los equipos activos entran al emparejamiento de jornadas nuevas.
       // Los dados de baja se excluyen aquí, pero siguen contando en la
       // clasificación (ver calcularClasificacion) para no alterar a sus rivales.
-      setEquipos((eqs || []).filter(e => e.activo !== false));
+      const equiposActivos = (eqs || []).filter(e => e.activo !== false);
+      setEquipos(equiposActivos);
+      setCompras(
+        Object.fromEntries(equiposActivos.map(e => [e.id, e.turno_comprado || 0]))
+      );
       setJornadasGuardadas(jors || []);
 
       // Reconstruir historial
@@ -274,7 +338,10 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
     if (!config.fecha) return showToast("Selecciona la fecha de la jornada", "err");
     const numJornada = jornadasGuardadas.length + 1;
     const { partidos, descansos } = generarUnaJornada(equipos, historial, numJornada);
-    const conHorarios = asignarHorarios(partidos, config.numCanchas, config.intervalo, config.horaInicio);
+    const turnoComprado = Object.fromEntries(
+      equipos.filter(e => e.turno_comprado).map(e => [e.id, e.turno_comprado])
+    );
+    const conHorarios = asignarHorarios(partidos, config.numCanchas, config.intervalo, config.horaInicio, turnoComprado);
     setPreview({ partidos: conHorarios, descansos, numero: numJornada });
   };
 
@@ -432,6 +499,59 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
       cargarTodo();
     } catch (e) { showToast(e.message, "err"); }
     setGuardando(false);
+  };
+
+  // ── COMPRA DE HORARIO ──
+  // Número de turnos disponibles esta jornada (ceil de equipos/canchas). Es el
+  // tope superior para el select y para el chequeo de capacidad por turno.
+  const numTurnosDisponibles = Math.max(
+    1, Math.ceil(equipos.length / (config.numCanchas || 1))
+  );
+
+  // Hora estimada del turno N a partir de la configuración actual. Es solo
+  // referencia visual: la hora real depende del horaInicio de cada jornada.
+  const horaEstimadaTurno = (turno) => {
+    const [h, m] = (config.horaInicio || "08:00").split(":").map(Number);
+    const mins = h * 60 + m + (turno - 1) * config.intervalo;
+    const hh = Math.floor(mins / 60) % 24;
+    const mm = mins % 60;
+    return `${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}`;
+  };
+
+  // Cuenta cuántos equipos están asignados a cada turno según el estado local.
+  // Permite bloquear sobreventa: numCanchas equipos máximo por turno.
+  const conteoPorTurno = (turno) => {
+    let n = 0;
+    for (const id in compras) if (compras[id] === turno) n++;
+    return n;
+  };
+
+  const cambiarCompra = (equipoId, turno) => {
+    if (turno > 0 && conteoPorTurno(turno) >= config.numCanchas
+        && compras[equipoId] !== turno) {
+      return showToast(`Turno ${turno} agotado (${config.numCanchas} cupos)`, "err");
+    }
+    setCompras(c => ({ ...c, [equipoId]: turno }));
+  };
+
+  const guardarCompras = async () => {
+    setGuardandoCompras(true);
+    try {
+      // Solo PATCH los equipos cuyo turno cambió frente a la versión cargada.
+      const cambios = equipos.filter(e => (e.turno_comprado || 0) !== (compras[e.id] || 0));
+      for (const e of cambios) {
+        const nuevo = compras[e.id] > 0 ? compras[e.id] : null;
+        await db(`/equipos?id=eq.${e.id}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ turno_comprado: nuevo }),
+        });
+      }
+      showToast(cambios.length
+        ? `${cambios.length} equipo${cambios.length === 1 ? "" : "s"} actualizado${cambios.length === 1 ? "" : "s"} ✓`
+        : "Sin cambios que guardar");
+      cargarTodo();
+    } catch (e) { showToast(e.message, "err"); }
+    setGuardandoCompras(false);
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -623,6 +743,63 @@ export default function ScheduleGenerator({ session, liga, cancha, miUnidad, hea
 
               {/* El listado de equipos activos se eliminó del calendario: ya hay
                   contadores de equipos y jornadas en el hero, que es suficiente. */}
+            </div>
+
+            {/* ── COMPRA DE HORARIO ──
+                Se coloca al final de la tab porque se configura una sola vez al
+                inicio del torneo y casi nunca se modifica. Los equipos que paguen
+                por un turno fijo van a jugarlo siempre, salvo que se enfrenten a
+                otro equipo con turno comprado (en ese caso se honra al local y
+                el round-robin alterna ida/vuelta de forma natural). */}
+            <div style={{ ...s.card, marginTop:14 }}>
+              <h3 style={s.cardTitle}>🕐 Compra de horario</h3>
+              <div style={{ ...ej.hint, marginBottom:12 }}>
+                Cada equipo que haya comprado un horario juega siempre en ese turno.
+                Si dos equipos con turno comprado se enfrentan, se honra al local
+                — en la vuelta el local cambia y se honra el otro turno automáticamente.
+                Máx {config.numCanchas} equipos por turno (= canchas simultáneas).
+              </div>
+              {equipos.length === 0 ? (
+                <div style={ej.poolEmpty}>No hay equipos activos en esta liga.</div>
+              ) : (
+                <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                  {[...equipos].sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(eq => {
+                    const turnoActual = compras[eq.id] || 0;
+                    return (
+                      <div key={eq.id} style={{ ...s.equipoRow, gap:10 }}>
+                        <span style={{ ...s.dot, background: eq.color_playera || "#999" }}/>
+                        <span className="sg-eq-name" style={{ flex:1, fontWeight:700 }}>{eq.nombre}</span>
+                        <select
+                          className="form-input"
+                          style={{ width:"auto", minWidth:140, padding:"6px 10px", fontSize:12 }}
+                          value={turnoActual}
+                          onChange={e => cambiarCompra(eq.id, Number(e.target.value))}
+                        >
+                          <option value={0}>Sin compra</option>
+                          {Array.from({ length: numTurnosDisponibles }, (_, i) => i + 1).map(t => {
+                            const cupos = conteoPorTurno(t);
+                            const lleno = cupos >= config.numCanchas && turnoActual !== t;
+                            return (
+                              <option key={t} value={t} disabled={lleno}>
+                                Turno {t} (~{horaEstimadaTurno(t)}){lleno ? " — lleno" : ""}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div style={{ display:"flex", justifyContent:"flex-end", marginTop:14 }}>
+                <button
+                  className="btn btn-premium"
+                  onClick={guardarCompras}
+                  disabled={guardandoCompras || equipos.length === 0}
+                >
+                  {guardandoCompras ? "Guardando..." : "💾 Guardar compras"}
+                </button>
+              </div>
             </div>
 
           </div>
