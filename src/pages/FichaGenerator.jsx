@@ -465,10 +465,15 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
 
     // Detectar repeticiones consultando partidos de OTRAS jornadas que ya
     // tengan a esos pares enfrentándose. Excluimos los 2 partidos en juego.
+    // Número de la jornada que estamos editando — necesario para distinguir
+    // si el enfrentamiento ya existe en una jornada PASADA (ya jugada) o
+    // FUTURA (planificada después, que quedaría duplicada con este cambio).
+    const jornadaNumActual = partidoA.jornadas?.numero ?? jornadaActual?.numero;
+
     detectarRepeticiones([
       otroA && eqB ? { local: otroA.id, visitante: eqB.id } : null,
       otroB && eqA ? { local: otroB.id, visitante: eqA.id } : null,
-    ].filter(Boolean), [partidoA.id, partidoB.id]).then(repeticiones => {
+    ].filter(Boolean), [partidoA.id, partidoB.id], jornadaNumActual).then(repeticiones => {
       // Detectar si las fichas tienen datos que se resetearán.
       const reseteos = [];
       if (fichaTieneDatos(partidoA.ficha)) reseteos.push({ partido: partidoA, ficha: partidoA.ficha });
@@ -478,7 +483,7 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
         partidoA, partidoB,
         ladoA: intercambioSel.lado, ladoB: lado,
         eqA, eqB, otroA, otroB,
-        repeticiones, // [{eq1, eq2, jornadaNumero}]
+        repeticiones, // [{local, visitante, jornadaNumero, tipo: "pasada"|"futura"}]
         reseteos,     // [{partido, ficha}]
       });
       setIntercambioSel(null);
@@ -487,8 +492,9 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
 
   // Consulta a BD: para cada par {local, visitante} buscado, devuelve si ya
   // existe un partido con ese enfrentamiento (en cualquier orden) en otra
-  // jornada de la liga. Excluye los 2 partidos involucrados en el swap.
-  const detectarRepeticiones = async (pares, excluirIds) => {
+  // jornada de la liga. Excluye los 2 partidos involucrados en el swap. Cada
+  // repetición lleva el tipo "pasada" o "futura" relativo a jornadaNumActual.
+  const detectarRepeticiones = async (pares, excluirIds, jornadaNumActual) => {
     if (!pares.length) return [];
     const repeticiones = [];
     for (const { local, visitante } of pares) {
@@ -503,7 +509,15 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
           r.jornadas?.liga_id === liga.id && !excluirIds.includes(r.id)
         );
         if (otros.length > 0) {
-          repeticiones.push({ local, visitante, jornadaNumero: otros[0].jornadas?.numero });
+          // Si hay varios duplicados, reportamos el más cercano a la actual.
+          // Priorizamos jornadas futuras (más relevantes para la planeación).
+          const futuras = otros.filter(r => (r.jornadas?.numero ?? 0) > (jornadaNumActual ?? 0));
+          const pasadas = otros.filter(r => (r.jornadas?.numero ?? 0) < (jornadaNumActual ?? 0));
+          const elegido = futuras[0] || pasadas[0] || otros[0];
+          const numeroElegido = elegido.jornadas?.numero ?? null;
+          const tipo = numeroElegido != null && jornadaNumActual != null && numeroElegido > jornadaNumActual
+            ? "futura" : "pasada";
+          repeticiones.push({ local, visitante, jornadaNumero: numeroElegido, tipo });
         }
       } catch (_) { /* silencioso */ }
     }
@@ -1730,11 +1744,30 @@ function ModalConfirmIntercambio({ cfm, aplicando, onCancel, onConfirm }) {
           </div>
         </div>
 
-        {repeticiones.length > 0 && (
-          <div style={mci.alerta}>
-            ⚠️ <strong>Atención:</strong> Este intercambio crea {repeticiones.length === 1 ? "un enfrentamiento que ya se jugó" : `${repeticiones.length} enfrentamientos que ya se jugaron`} en otra jornada. ¿Continuar de todos modos?
-          </div>
-        )}
+        {(() => {
+          const pasadas = repeticiones.filter(r => r.tipo === "pasada");
+          const futuras = repeticiones.filter(r => r.tipo === "futura");
+          return (
+            <>
+              {pasadas.length > 0 && (
+                <div style={mci.alerta}>
+                  ⚠️ <strong>Ya jugado:</strong> {pasadas.length === 1
+                    ? `el enfrentamiento ya se disputó en la jornada ${pasadas[0].jornadaNumero}.`
+                    : `${pasadas.length} de los nuevos enfrentamientos ya se disputaron en jornadas anteriores (${pasadas.map(r => r.jornadaNumero).join(", ")}).`
+                  } ¿Continuar de todos modos?
+                </div>
+              )}
+              {futuras.length > 0 && (
+                <div style={mci.alerta}>
+                  ⚠️ <strong>Choca con jornada futura:</strong> {futuras.length === 1
+                    ? `este enfrentamiento ya está planificado para la jornada ${futuras[0].jornadaNumero}, quedaría duplicado.`
+                    : `${futuras.length} de los nuevos enfrentamientos ya están planificados en jornadas posteriores (${futuras.map(r => r.jornadaNumero).join(", ")}), quedarían duplicados.`
+                  }
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {reseteos.length > 0 && (
           <div style={mci.aviso}>
