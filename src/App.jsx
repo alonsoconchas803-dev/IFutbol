@@ -628,6 +628,55 @@ function HomePage({ canchas, onVerUnidad }) {
 // ─────────────────────────────────────────────────────────────────
 // UNIDAD PAGE
 // ─────────────────────────────────────────────────────────────────
+// Banner de patrocinadores que se inserta al pie de las secciones públicas.
+// Grid de 2 columnas (la app vive en 480px max, ver DISEÑO §1.2): cada tarjeta
+// ocupa ~50% del ancho útil — justamente el tope que pidió el cliente.
+function BannerPatrocinadores({ items }) {
+  if (!items || items.length === 0) return null;
+  const ASPECT = { cuadrado: "1 / 1", horizontal: "16 / 9", vertical: "3 / 4" };
+  return (
+    <div style={{
+      marginTop: 28, marginBottom: 8,
+      background: "linear-gradient(135deg, #faf5ff 0%, #fdf4ff 100%)",
+      border: "1px solid #e9d5ff",
+      borderRadius: "var(--radius-md)",
+      padding: "12px 12px 14px",
+      boxShadow: "0 2px 10px rgba(139,92,246,0.08)",
+    }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 6,
+        marginBottom: 10, paddingBottom: 8,
+        borderBottom: "1px dashed #e9d5ff",
+      }}>
+        <span style={{ fontSize: 13 }}>📢</span>
+        <span style={{
+          fontSize: 10, fontWeight: 800, color: "#7c3aed",
+          textTransform: "uppercase", letterSpacing: 0.8,
+        }}>Patrocinadores</span>
+      </div>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+        gap: 10,
+      }}>
+        {items.map(p => (
+          <div key={p.id} style={{
+            background: "#fff",
+            borderRadius: 10,
+            overflow: "hidden",
+            border: "1px solid #f3e8ff",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
+            aspectRatio: ASPECT[p.formato] || "16 / 9",
+          }}>
+            <img src={p.imagen_url} alt="Patrocinador"
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function UnidadPage({ cancha, onBack, setTopbarBack }) {
   const [torneos, setTorneos] = useState([]);
   const [torneoActivo, setTorneoActivo] = useState(null);
@@ -638,6 +687,9 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
   const [goleadores, setGoleadores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedCell, setSelectedCell] = useState(null); // [rowIdx, colIdx]
+  // Patrocinadores activos de esta unidad — banner al pie de cada sección
+  // (excepto goleadores, que compite visualmente con el ranking).
+  const [patrocinadores, setPatrocinadores] = useState([]);
   // Vista activa dentro del tab "Partidos":
   //   - número → jornada con ese número
   //   - "liguilla" → bracket de liguilla
@@ -650,6 +702,11 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
       setTorneos(data || []);
       setLoading(false);
     });
+    // Solo activos, ordenados. Si la unidad no tiene patrocinadores, el banner
+    // simplemente no se renderiza (BannerPatrocinadores devuelve null).
+    db(`/patrocinadores?cancha_id=eq.${cancha.id}&activo=eq.true&select=*&order=orden,created_at`)
+      .then(data => setPatrocinadores(data || []))
+      .catch(() => setPatrocinadores([]));
   }, [cancha.id]);
 
   // Sincroniza el botón "← back" del topbar con el estado actual
@@ -938,6 +995,7 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
                 ))}
               </div>
         )}
+        <BannerPatrocinadores items={patrocinadores} />
       </div>
     );
   }
@@ -1371,6 +1429,9 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
           {seccion==="ofensiva"&&<TablaEspecial titulo="⚔️ Mejor ofensiva" datos={[...clasificacion].sort((a,b)=>(b.pj>0?b.gf/b.pj:0)-(a.pj>0?a.gf/a.pj:0))} campo="gf" labelCorto="GF" labelLargo="Goles a favor"/>}
           {seccion==="defensiva"&&<TablaEspecial titulo="🛡️ Mejor defensiva" datos={[...clasificacion].sort((a,b)=>(a.pj>0?a.gc/a.pj:999)-(b.pj>0?b.gc/b.pj:999))} campo="gc" labelCorto="GC" labelLargo="Goles en contra"/>}
           {seccion==="fairplay"&&<TablaEspecial titulo="🤝 Fair play" datos={[...clasificacion].sort((a,b)=>(a.pj>0?a.faltas/a.pj:999)-(b.pj>0?b.faltas/b.pj:999))} campo="faltas" labelCorto="FC" labelLargo="Faltas cometidas"/>}
+          {/* Banner de patrocinadores al pie de cada sección — excepto goleadores,
+              donde compite visualmente con la lista de rankings. */}
+          {seccion!=="goleadores" && <BannerPatrocinadores items={patrocinadores} />}
         </>}
     </div>
   );

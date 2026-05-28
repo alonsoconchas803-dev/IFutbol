@@ -32,6 +32,17 @@ const DIAS_LIGA = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","D
 const TURNOS_LIGA = ["Mañana","Tarde","Noche"];
 const COLORES_LIGA = ["#4f8f2f","#3182ce","#e53e3e","#dd6b20","#d69e2e","#805ad5","#d53f8c","#0ea5e9","#14b8a6","#1f2937"];
 
+// Patrocinadores: límites compartidos con la vista pública.
+const MAX_PATROCINADORES = 6;
+const PATRO_TAMANO_MAX_MB = 5;
+const PATRO_ASPECT = { cuadrado: "1 / 1", horizontal: "16 / 9", vertical: "3 / 4" };
+const PATRO_FORMATO_LABEL = { cuadrado: "Cuadrado", horizontal: "Horizontal", vertical: "Vertical" };
+const PATRO_FORMATOS = [
+  { val: "cuadrado",   titulo: "Cuadrado",   desc: "1:1" },
+  { val: "horizontal", titulo: "Horizontal", desc: "16:9" },
+  { val: "vertical",   titulo: "Vertical",   desc: "3:4" },
+];
+
 // Normaliza "1", "00001", "af-1", "AF-00001" → "AF-00001"
 const normalizarAfiliado = (input) => {
   const limpio = String(input || "").trim().toUpperCase().replace(/^AF-?/, "");
@@ -85,6 +96,13 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
   const [personalizarLogoPreview, setPersonalizarLogoPreview] = useState(null);
   const [personalizarPortadaFile, setPersonalizarPortadaFile] = useState(null);
   const [personalizarPortadaPreview, setPersonalizarPortadaPreview] = useState(null);
+
+  // Patrocinadores de la unidad (publicidad)
+  const [patrocinadores, setPatrocinadores] = useState([]);
+  const [patroFormato, setPatroFormato] = useState("horizontal");
+  const [patroFile, setPatroFile] = useState(null);
+  const [patroPreview, setPatroPreview] = useState(null);
+  const [patroLoading, setPatroLoading] = useState(false);
 
   // Color del torneo activo
   const [colorLigaForm, setColorLigaForm] = useState("#4f8f2f");
@@ -594,6 +612,112 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
     setLoading(false);
   };
 
+  // ── PATROCINADORES (publicidad de la unidad) ─────────────────
+  // Cada unidad maneja sus propios patrocinadores; se muestran al pie de las
+  // secciones públicas de torneos (lista, tabla, partidos, eliminatoria),
+  // excepto en "Goleadores" donde compiten visualmente con los rankings.
+  const cargarPatrocinadores = async () => {
+    if (!miUnidad) return;
+    try {
+      const data = await db(`/patrocinadores?cancha_id=eq.${miUnidad.id}&select=*&order=orden,created_at`, token);
+      setPatrocinadores(data || []);
+    } catch (e) { showToast(e.message, "err"); }
+  };
+
+  const onPickPatroFile = (f) => {
+    if (!f) return;
+    // Tope duro de 5 MB: storage.js comprime en 4.5-5 MB pero arriba de eso
+    // mejor rechazar y avisar, así el admin sabe qué pasó con su foto.
+    if (f.size > PATRO_TAMANO_MAX_MB * 1024 * 1024) {
+      const peso = (f.size / 1024 / 1024).toFixed(1);
+      showToast(`La imagen pesa ${peso} MB. Máximo permitido: ${PATRO_TAMANO_MAX_MB} MB. Comprímela y vuelve a intentar.`, "err");
+      return;
+    }
+    if (patroPreview?.startsWith("blob:")) URL.revokeObjectURL(patroPreview);
+    setPatroFile(f);
+    setPatroPreview(URL.createObjectURL(f));
+  };
+
+  const limpiarPatroForm = () => {
+    if (patroPreview?.startsWith("blob:")) URL.revokeObjectURL(patroPreview);
+    setPatroFile(null);
+    setPatroPreview(null);
+    setPatroFormato("horizontal");
+  };
+
+  const agregarPatrocinador = async () => {
+    if (!miUnidad) return;
+    if (!patroFile) return showToast("Sube una imagen primero", "err");
+    if (patrocinadores.length >= MAX_PATROCINADORES) {
+      return showToast(`Máximo ${MAX_PATROCINADORES} patrocinadores por unidad`, "err");
+    }
+    setPatroLoading(true);
+    try {
+      const ext = (patroFile.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `patrocinadores/${miUnidad.id}/${Date.now()}.${ext}`;
+      const imagen_url = await uploadFile("imagenes", path, patroFile, token);
+      const maxOrden = patrocinadores.reduce((m, p) => Math.max(m, p.orden ?? 0), -1);
+      const creado = await db("/patrocinadores", token, {
+        method: "POST",
+        body: JSON.stringify({
+          cancha_id: miUnidad.id,
+          imagen_url,
+          formato: patroFormato,
+          orden: maxOrden + 1,
+          activo: true,
+        }),
+      });
+      const fila = Array.isArray(creado) ? creado[0] : creado;
+      if (!fila) throw new Error("No se pudo guardar el patrocinador.");
+      setPatrocinadores([...patrocinadores, fila]);
+      showToast("Patrocinador agregado ✓");
+      limpiarPatroForm();
+    } catch (e) { showToast(e.message, "err"); }
+    setPatroLoading(false);
+  };
+
+  const togglePatroActivo = async (p) => {
+    try {
+      const filas = await db(`/patrocinadores?id=eq.${p.id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ activo: !p.activo }),
+      });
+      if (!Array.isArray(filas) || filas.length === 0) throw new Error("No se pudo actualizar (revisa permisos).");
+      setPatrocinadores(patrocinadores.map(x => x.id === p.id ? { ...x, activo: !p.activo } : x));
+    } catch (e) { showToast(e.message, "err"); }
+  };
+
+  // Mover con flechas: intercambia el valor "orden" de dos vecinos en la lista
+  // actual (no reasigna toda la secuencia para evitar N escrituras).
+  const moverPatrocinador = async (idx, dir) => {
+    const nuevoIdx = idx + dir;
+    if (nuevoIdx < 0 || nuevoIdx >= patrocinadores.length) return;
+    const a = patrocinadores[idx];
+    const b = patrocinadores[nuevoIdx];
+    const previo = patrocinadores;
+    const copia = [...patrocinadores];
+    copia[idx] = { ...b, orden: a.orden };
+    copia[nuevoIdx] = { ...a, orden: b.orden };
+    setPatrocinadores(copia);
+    try {
+      await Promise.all([
+        db(`/patrocinadores?id=eq.${a.id}`, token, { method: "PATCH", body: JSON.stringify({ orden: b.orden }) }),
+        db(`/patrocinadores?id=eq.${b.id}`, token, { method: "PATCH", body: JSON.stringify({ orden: a.orden }) }),
+      ]);
+    } catch (e) {
+      setPatrocinadores(previo);
+      showToast(e.message, "err");
+    }
+  };
+
+  const eliminarPatrocinador = async (p) => {
+    try {
+      await db(`/patrocinadores?id=eq.${p.id}`, token, { method: "DELETE" });
+      setPatrocinadores(patrocinadores.filter(x => x.id !== p.id));
+      showToast("Patrocinador eliminado");
+    } catch (e) { showToast(e.message, "err"); }
+  };
+
   // ── CRUD TORNEOS (admin de unidad) ──────────────────────────
   // El admin solo puede crear/editar torneos dentro de su propia unidad,
   // así que el cancha_id se fija desde userRole y no se expone en el form.
@@ -710,6 +834,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
       setPersonalizarLogoPreview(miUnidad.logo_url || null);
       setPersonalizarPortadaFile(null);
       setPersonalizarPortadaPreview(miUnidad.portada_url || null);
+      cargarPatrocinadores();
     }
   }, [seccion, miUnidad?.id]);
 
@@ -985,6 +1110,123 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
               </>
             ) : (
               <div style={{ fontSize:13, color:"#6b7280" }}>Cargando datos de la unidad...</div>
+            )}
+          </div>
+
+          {/* Tarjeta 3: Publicidad de patrocinadores */}
+          <div style={{ ...s.persCard, marginTop:16 }}>
+            <div style={s.persCardHead}>
+              <span style={{ ...s.persCardEmoji, background:"linear-gradient(135deg, #faf5ff 0%, #fdf4ff 100%)", border:"1px solid #e9d5ff" }}>📢</span>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={s.persCardTitle}>Publicidad de patrocinadores</div>
+                <div style={s.persCardDesc}>
+                  Sube hasta {MAX_PATROCINADORES} tarjetas. Se muestran al pie de los torneos, la tabla, partidos y eliminatoria.
+                  Máximo {PATRO_TAMANO_MAX_MB} MB por imagen.
+                </div>
+              </div>
+            </div>
+
+            {patrocinadores.length === 0 ? (
+              <div style={{ fontSize:13, color:"#6b7280", marginBottom:14, padding:"12px 0", textAlign:"center" }}>
+                Aún no has subido patrocinadores. Agrega el primero abajo. 📢
+              </div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:14 }}>
+                {patrocinadores.map((p, idx) => (
+                  <div key={p.id} style={s.patroRow}>
+                    <div style={{ ...s.patroThumb, aspectRatio: PATRO_ASPECT[p.formato] || "16 / 9", opacity: p.activo ? 1 : 0.45 }}>
+                      <img src={p.imagen_url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                    </div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <span style={s.patroFormatoPill}>{PATRO_FORMATO_LABEL[p.formato] || p.formato}</span>
+                      <div style={{ fontSize:11, color: p.activo ? "#16a34a" : "#9ca3af", fontWeight:700, marginTop:5 }}>
+                        {p.activo ? "● Activo" : "○ Pausado"}
+                      </div>
+                    </div>
+                    <div style={s.patroActions}>
+                      <button style={{ ...s.patroArrowBtn, opacity: idx === 0 ? 0.35 : 1 }}
+                        disabled={idx === 0} onClick={() => moverPatrocinador(idx, -1)} title="Subir">↑</button>
+                      <button style={{ ...s.patroArrowBtn, opacity: idx === patrocinadores.length - 1 ? 0.35 : 1 }}
+                        disabled={idx === patrocinadores.length - 1} onClick={() => moverPatrocinador(idx, 1)} title="Bajar">↓</button>
+                      <button
+                        style={{
+                          ...s.patroToggleBtn,
+                          background: p.activo ? "#fef3c7" : "#dcfce7",
+                          color: p.activo ? "#92400e" : "#15803d",
+                          borderColor: p.activo ? "#fde68a" : "#bbf7d0",
+                        }}
+                        onClick={() => togglePatroActivo(p)}
+                        title={p.activo ? "Pausar" : "Activar"}>
+                        {p.activo ? "⏸" : "▶"}
+                      </button>
+                      <button style={s.patroDelBtn} onClick={() => eliminarPatrocinador(p)} title="Eliminar">✕</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {patrocinadores.length < MAX_PATROCINADORES ? (
+              <div style={s.patroAddBox}>
+                <div style={{ fontSize:11, fontWeight:800, color:"#581c87", textTransform:"uppercase", letterSpacing:0.7, marginBottom:10 }}>
+                  + Agregar patrocinador ({patrocinadores.length} / {MAX_PATROCINADORES})
+                </div>
+
+                <div style={{ marginBottom:12 }}>
+                  <div style={{ fontSize:11, fontWeight:700, color:"#6b7280", textTransform:"uppercase", letterSpacing:0.6, marginBottom:7 }}>Formato</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:8 }}>
+                    {PATRO_FORMATOS.map(op => (
+                      <div key={op.val} onClick={() => setPatroFormato(op.val)}
+                        style={{
+                          cursor:"pointer", padding:10, borderRadius:10,
+                          border: patroFormato === op.val ? "2px solid #8b5cf6" : "1px solid #e5e7eb",
+                          background: patroFormato === op.val ? "linear-gradient(135deg, #f5f3ff 0%, #fdf4ff 100%)" : "#fff",
+                          textAlign:"center", transition:"all 0.15s",
+                        }}>
+                        <div style={{ fontSize:12, fontWeight:700, color: patroFormato === op.val ? "#7c3aed" : "#111827" }}>{op.titulo}</div>
+                        <div style={{ fontSize:10, color:"#6b7280", marginTop:2 }}>{op.desc}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display:"flex", alignItems:"center", gap:12, background:"#fff", borderRadius:10, padding:10, border:"1px solid #e5e7eb" }}>
+                  <div style={{ width:64, borderRadius:10, background:"#f3f4f6", display:"flex", alignItems:"center", justifyContent:"center", fontSize:24, overflow:"hidden", flexShrink:0, aspectRatio: PATRO_ASPECT[patroFormato] }}>
+                    {patroPreview
+                      ? <img src={patroPreview} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                      : "📢"}
+                  </div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <label style={{ display:"inline-block", background:"#fff", border:"1px solid #d1d5db", borderRadius:8, padding:"7px 12px", color:"#374151", fontSize:12, cursor:"pointer", fontWeight:600 }}>
+                      {patroPreview ? "Cambiar imagen" : "Subir imagen"}
+                      <input type="file" accept="image/*" style={{ display:"none" }}
+                        onChange={e => onPickPatroFile(e.target.files?.[0])} />
+                    </label>
+                    {patroPreview && (
+                      <button type="button"
+                        style={{ background:"transparent", border:"1px solid #fecaca", color:"#dc2626", borderRadius:8, padding:"5px 10px", fontSize:11, cursor:"pointer", fontWeight:600, marginLeft:6 }}
+                        onClick={limpiarPatroForm}>✕ Quitar</button>
+                    )}
+                    <div style={{ fontSize:10.5, color:"#6b7280", marginTop:5 }}>Máx {PATRO_TAMANO_MAX_MB} MB. PNG o JPG.</div>
+                  </div>
+                </div>
+
+                <button
+                  style={{
+                    ...s.btnSave,
+                    width:"100%", marginTop:12,
+                    background:"linear-gradient(135deg, #8b5cf6 0%, #d946ef 100%)",
+                    boxShadow:"0 4px 14px rgba(139,92,246,0.30)",
+                    opacity: (!patroFile || patroLoading) ? 0.6 : 1,
+                  }}
+                  onClick={agregarPatrocinador} disabled={!patroFile || patroLoading}>
+                  {patroLoading ? "Subiendo..." : "📢 Agregar patrocinador"}
+                </button>
+              </div>
+            ) : (
+              <div style={{ fontSize:12, color:"#92400e", background:"#fffbeb", border:"1px solid #fde68a", borderRadius:10, padding:"10px 12px", fontWeight:600 }}>
+                Has alcanzado el máximo de {MAX_PATROCINADORES} patrocinadores. Elimina o pausa uno para liberar espacio.
+              </div>
             )}
           </div>
 
@@ -2144,6 +2386,15 @@ const s = {
   torneoColorName: { fontSize:13.5, fontWeight:700, color:"#111827", marginBottom:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
   torneoColorHex: { fontSize:10.5, color:"#9ca3af", fontFamily:"'DM Mono', monospace", letterSpacing:0.5 },
   torneoColorBtn: { background:"#fff", border:"1.5px solid #4f8f2f", borderRadius:"var(--radius-full,9999px)", padding:"6px 14px", color:"#4f8f2f", fontSize:11.5, fontWeight:800, cursor:"pointer", flexShrink:0 },
+  // ── PATROCINADORES (publicidad de la unidad) ──
+  patroRow: { display:"flex", alignItems:"center", gap:10, padding:"10px 12px", borderRadius:12, background:"linear-gradient(90deg, #faf5ff 0%, #ffffff 65%)", border:"1px solid #e9d5ff" },
+  patroThumb: { height:48, borderRadius:8, background:"#fff", border:"1px solid #e5e7eb", overflow:"hidden", flexShrink:0 },
+  patroFormatoPill: { display:"inline-block", fontSize:10, fontWeight:800, color:"#7c3aed", background:"#f3e8ff", border:"1px solid #e9d5ff", borderRadius:999, padding:"3px 9px", letterSpacing:0.5, textTransform:"uppercase" },
+  patroActions: { display:"flex", gap:5, alignItems:"center", flexShrink:0 },
+  patroArrowBtn: { width:30, height:30, borderRadius:7, border:"1px solid #e5e7eb", background:"#fff", color:"#374151", fontSize:14, fontWeight:800, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" },
+  patroToggleBtn: { width:30, height:30, borderRadius:7, border:"1px solid", fontSize:11, fontWeight:800, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" },
+  patroDelBtn: { width:30, height:30, borderRadius:7, border:"1px solid #fecaca", background:"#fff", color:"#dc2626", fontSize:13, fontWeight:800, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" },
+  patroAddBox: { background:"linear-gradient(135deg, #faf5ff 0%, #fdf4ff 100%)", border:"1px dashed #d8b4fe", borderRadius:12, padding:14 },
   // ── HEADER LEGACY ──
   header: { marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" },
   title: { fontSize: 26, fontWeight: 800, color: "#111827", letterSpacing: -0.8, marginBottom: 4 },
