@@ -188,11 +188,16 @@ function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, mi
     <div className="ifb-ficha-pagina" style={{
       fontFamily: "Arial, sans-serif",
       pageBreakAfter: isLast ? "avoid" : "always",
-      // Carta vertical con @page margin: 7mm deja 265.4mm imprimibles.
-      // Usamos altura fija (no minHeight) un poco menor para tener holgura
-      // ante variaciones de renderizado del PDF, y overflow:hidden como
-      // cinturón de seguridad para que la ficha jamás se parta entre páginas.
-      height: "258mm",
+      // Carta vertical. Aunque @page margin sea 7mm (≈265mm imprimibles), al
+      // imprimir el navegador reserva su PROPIO encabezado/pie (URL, fecha,
+      // "Página X de Y"), que consume ~0.5" por lado y baja el área útil a
+      // ~254mm. Si la ficha rebasa ese límite ni overflow:hidden ni
+      // page-break-inside:avoid la salvan (se ignoran cuando el bloque es más
+      // alto que la página) y el pie de firmas salta a la página siguiente.
+      // Por eso fijamos 245mm: entra completa aunque el navegador agregue su
+      // decoración, a cambio de un pequeño margen inferior en impresoras que
+      // no la añaden.
+      height: "245mm",
       overflow: "hidden",
       boxSizing: "border-box",
       display: "flex",
