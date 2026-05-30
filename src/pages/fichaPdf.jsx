@@ -18,8 +18,11 @@ import { useId, useState, useEffect, memo } from "react";
 import {
   Document, Page, View, Text, Image,
   Svg, Path, Rect, Line, Circle, G, Polygon, ClipPath, Defs,
-  pdf, PDFViewer,
+  pdf,
 } from "@react-pdf/renderer";
+// Worker de pdf.js — se usa para rasterizar el PDF en la vista previa.
+// `?url` hace que Vite emita el archivo y nos dé su URL.
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 // react-pdf trabaja en puntos (pt). 1mm = 2.83465pt.
 const MM = 2.83465;
@@ -352,44 +355,76 @@ export async function generarFichasBlob({ fichasData, liga, miUnidad }) {
 }
 
 // ── Vista previa en pantalla ────────────────────────────────────────
-// Muestra EXACTAMENTE el mismo PDF que descarga el botón, usando PDFViewer.
-// Prefetchea las imágenes a dataURL antes de montar el visor (igual que la
-// descarga) para que escudos/fotos aparezcan en la previa.
+// Genera el MISMO PDF que descarga el botón y lo rasteriza con pdf.js a una
+// imagen por página. ¿Por qué imágenes y no un visor embebido (<iframe>/
+// PDFViewer)? Porque iOS Safari renderiza los PDF embebidos mal escalados y
+// sin poder navegar entre páginas (solo se ve la primera). Como imágenes
+// ajustadas al ancho se ven TODAS las fichas, scrolleables y sin cortes.
 // Va envuelto en memo: el padre re-renderiza con cada toast y no queremos
 // regenerar el PDF salvo que cambien los datos.
 function FichaPdfPreview({ fichasData, liga, miUnidad }) {
-  // Guardamos juntos los datos y sus imágenes prefetcheadas. Así, cuando
-  // cambia la jornada, `resuelto.data !== fichasData` hasta que el prefetch
-  // nuevo termina (mostrando el estado de carga), sin resetear estado de
-  // forma síncrona dentro del efecto.
-  const [resuelto, setResuelto] = useState(null);
+  // Estado keyed por `data`: guardamos el resultado junto a los datos que lo
+  // produjeron. Mientras `estado.data !== fichasData` mostramos "cargando",
+  // sin resetear estado de forma síncrona dentro del efecto.
+  const [estado, setEstado] = useState(null); // { data, paginas? , error? }
 
   useEffect(() => {
     let vivo = true;
-    prefetchImages(fichasData, miUnidad).then((imgs) => {
-      if (vivo) setResuelto({ data: fichasData, imgs });
-    });
+    (async () => {
+      try {
+        const blob = await generarFichasBlob({ fichasData, liga, miUnidad });
+        const buf = await blob.arrayBuffer();
+        if (!vivo) return;
+        const pdfjs = await import("pdfjs-dist");
+        pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+        const doc = await pdfjs.getDocument({ data: buf }).promise;
+        const paginas = [];
+        for (let i = 1; i <= doc.numPages; i++) {
+          if (!vivo) return;
+          const page = await doc.getPage(i);
+          const viewport = page.getViewport({ scale: 1.5 }); // nitidez en retina
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.ceil(viewport.width);
+          canvas.height = Math.ceil(viewport.height);
+          await page.render({ canvas, canvasContext: canvas.getContext("2d"), viewport }).promise;
+          paginas.push(canvas.toDataURL("image/png"));
+          canvas.width = canvas.height = 0; // liberar memoria en móvil
+        }
+        if (vivo) setEstado({ data: fichasData, paginas });
+      } catch (e) {
+        if (vivo) setEstado({ data: fichasData, error: e?.message || String(e) });
+      }
+    })();
     return () => { vivo = false; };
-  }, [fichasData, miUnidad]);
+  }, [fichasData, liga, miUnidad]);
 
-  const listo = resuelto && resuelto.data === fichasData;
+  const actual = estado && estado.data === fichasData ? estado : null;
 
-  if (!listo) {
+  if (!actual) {
     return (
       <div style={{ marginTop: 24, padding: 32, textAlign: "center", color: "#6b7280", fontSize: 13, border: "1px solid #e5e7eb", borderRadius: 8, background: "#f9fafb" }}>
-        Preparando vista previa…
+        Generando vista previa…
+      </div>
+    );
+  }
+  if (actual.error) {
+    return (
+      <div style={{ marginTop: 24, padding: 20, textAlign: "center", color: "#dc2626", fontSize: 13, border: "1px solid #fecaca", borderRadius: 8, background: "#fef2f2" }}>
+        No se pudo generar la vista previa ({actual.error}). Usa el botón “Descargar PDF”.
       </div>
     );
   }
 
   return (
-    <div style={{ marginTop: 24 }}>
-      <PDFViewer
-        showToolbar
-        style={{ width: "100%", height: "80vh", border: "1px solid #d1d5db", borderRadius: 8, background: "#fff" }}
-      >
-        <FichasDocument fichasData={fichasData} liga={liga} miUnidad={miUnidad} imgs={resuelto.imgs} />
-      </PDFViewer>
+    <div style={{ marginTop: 24, display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
+      {actual.paginas.map((src, i) => (
+        <img
+          key={i}
+          src={src}
+          alt={`Ficha ${i + 1}`}
+          style={{ width: "100%", maxWidth: 820, height: "auto", display: "block", border: "1px solid #d1d5db", borderRadius: 8, boxShadow: "0 4px 24px rgba(0,0,0,0.10)", background: "#fff" }}
+        />
+      ))}
     </div>
   );
 }
