@@ -11,10 +11,14 @@
 // reducir el área útil. Eso hacía que las fichas no entraran en una hoja y
 // que apareciera el dominio en el pie. Armando el PDF a mano, cada ficha es
 // una página Carta EXACTA, sin decoración del navegador y sin desbordes.
+/* eslint-disable react-refresh/only-export-components --
+   Este módulo mezcla a propósito el componente de vista previa con las
+   funciones de generación del PDF; el fast-refresh de HMR no aplica aquí. */
+import { useId, useState, useEffect, memo } from "react";
 import {
   Document, Page, View, Text, Image,
   Svg, Path, Rect, Line, Circle, G, Polygon, ClipPath, Defs,
-  pdf,
+  pdf, PDFViewer,
 } from "@react-pdf/renderer";
 
 // react-pdf trabaja en puntos (pt). 1mm = 2.83465pt.
@@ -92,7 +96,7 @@ function JerseyPatron({ diseno, c1, c2 }) {
 }
 
 function Jersey({ diseno = "solido", c1 = "#3182ce", c2 = "#ffffff", size = mm(7) }) {
-  const id = "jc" + Math.random().toString(36).slice(2, 9);
+  const id = "jc" + useId().replace(/:/g, "");
   return (
     <Svg viewBox="0 0 100 120" width={size} height={size * 1.2}>
       <Defs><ClipPath id={id}><Path d={JERSEY_PATH} /></ClipPath></Defs>
@@ -346,3 +350,48 @@ export async function generarFichasBlob({ fichasData, liga, miUnidad }) {
     <FichasDocument fichasData={fichasData} liga={liga} miUnidad={miUnidad} imgs={imgs} />
   ).toBlob();
 }
+
+// ── Vista previa en pantalla ────────────────────────────────────────
+// Muestra EXACTAMENTE el mismo PDF que descarga el botón, usando PDFViewer.
+// Prefetchea las imágenes a dataURL antes de montar el visor (igual que la
+// descarga) para que escudos/fotos aparezcan en la previa.
+// Va envuelto en memo: el padre re-renderiza con cada toast y no queremos
+// regenerar el PDF salvo que cambien los datos.
+function FichaPdfPreview({ fichasData, liga, miUnidad }) {
+  // Guardamos juntos los datos y sus imágenes prefetcheadas. Así, cuando
+  // cambia la jornada, `resuelto.data !== fichasData` hasta que el prefetch
+  // nuevo termina (mostrando el estado de carga), sin resetear estado de
+  // forma síncrona dentro del efecto.
+  const [resuelto, setResuelto] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    prefetchImages(fichasData, miUnidad).then((imgs) => {
+      if (vivo) setResuelto({ data: fichasData, imgs });
+    });
+    return () => { vivo = false; };
+  }, [fichasData, miUnidad]);
+
+  const listo = resuelto && resuelto.data === fichasData;
+
+  if (!listo) {
+    return (
+      <div style={{ marginTop: 24, padding: 32, textAlign: "center", color: "#6b7280", fontSize: 13, border: "1px solid #e5e7eb", borderRadius: 8, background: "#f9fafb" }}>
+        Preparando vista previa…
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <PDFViewer
+        showToolbar
+        style={{ width: "100%", height: "80vh", border: "1px solid #d1d5db", borderRadius: 8, background: "#fff" }}
+      >
+        <FichasDocument fichasData={fichasData} liga={liga} miUnidad={miUnidad} imgs={resuelto.imgs} />
+      </PDFViewer>
+    </div>
+  );
+}
+
+export default memo(FichaPdfPreview);

@@ -1,6 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import JerseySVG from "../components/JerseySVG";
-import IFutbolLogo from "../components/IFutbolLogo";
 import { generarUnaJornada, parKey } from "../lib/roundRobin";
 import PanelSanciones from "../components/PanelSanciones";
 import {
@@ -37,299 +36,12 @@ const db = async (path, token, options = {}) => {
   return res.status === 204 ? null : res.json();
 };
 
-const FILAS = 17;
-const pad = (arr) => { const r = [...(arr || [])]; while (r.length < FILAS) r.push(null); return r; };
 const fmtFecha = (s) => { if (!s) return "—"; const [y, m, d] = s.split("-"); return `${d}/${m}/${y}`; };
 const fmtHora  = (s) => s ? s.substring(0, 5) : "—";
 
-// ─────────────────────────────────────────────────────────────────
-// CSS DE IMPRESIÓN — inyectado globalmente
-// ─────────────────────────────────────────────────────────────────
-const PRINT_CSS = `
-  @page { size: letter portrait; margin: 7mm; }
-
-  @media print {
-    html, body { margin: 0 !important; padding: 0 !important; }
-    body * { visibility: hidden !important; }
-    #ifb-fichas-root, #ifb-fichas-root * {
-      visibility: visible !important;
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-    }
-    #ifb-fichas-root {
-      position: absolute !important;
-      top: 0 !important; left: 0 !important; right: 0 !important;
-      background: white !important;
-    }
-    .ifb-ficha-pagina {
-      page-break-after: always;
-      page-break-inside: avoid;
-      break-inside: avoid;
-      overflow: hidden !important;
-      box-shadow: none !important;
-      border: none !important;
-      border-radius: 0 !important;
-      margin: 0 !important;
-    }
-    .ifb-ficha-pagina:last-child { page-break-after: avoid; }
-  }
-
-  @media screen {
-    #ifb-fichas-root { margin-top: 24px; }
-    .ifb-ficha-pagina {
-      background: white;
-      border: 1px solid #d1d5db;
-      border-radius: 8px;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.10);
-      margin: 0 auto 32px;
-      max-width: 820px;
-      overflow: hidden;
-    }
-  }
-`;
-
-// ─────────────────────────────────────────────────────────────────
-// FICHA INDIVIDUAL
-// ─────────────────────────────────────────────────────────────────
-// Logo del equipo para el marcador. Si no tiene escudo_url, muestra un círculo
-// con el color del equipo y la inicial — así nunca queda un hueco vacío.
-function EscudoEquipo({ equipo, size = 14 }) {
-  const color = equipo?.color_playera || "#6b7280";
-  const inicial = (equipo?.nombre || "?").trim().charAt(0).toUpperCase();
-  if (equipo?.escudo_url) {
-    return (
-      <img src={equipo.escudo_url} alt={equipo.nombre}
-        style={{ width: `${size}mm`, height: `${size}mm`, borderRadius: "1.5mm", objectFit: "cover", background: "#fff", border: `0.5pt solid ${color}`, flexShrink: 0 }} />
-    );
-  }
-  return (
-    <div style={{ width: `${size}mm`, height: `${size}mm`, borderRadius: "1.5mm", background: color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: `${Math.round(size * 0.55)}pt`, flexShrink: 0 }}>
-      {inicial}
-    </div>
-  );
-}
-
-function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, miUnidad, isLast }) {
-  const jornada = partido.jornadas;
-  const eqL = partido.equipos_local;
-  const eqV = partido.equipos_visitante;
-  const jLocal = pad(jugadoresLocal);
-  const jVisit = pad(jugadoresVisitante);
-
-  const COL  = "5mm 6.5mm 8mm 1fr 17mm 5.5mm 6mm";
-  const FILA = {
-    display: "grid", gridTemplateColumns: COL,
-    alignItems: "center", gap: "0 1mm",
-    borderBottom: "0.3pt solid #e5e7eb",
-    minHeight: "6mm", padding: "0.3mm 1.5mm",
-    boxSizing: "border-box",
-  };
-  const FILA_H = {
-    ...FILA, fontWeight: 700, fontSize: "5.5pt",
-    color: "#6b7280", background: "#f9fafb",
-    minHeight: "5mm", borderBottom: "0.8pt solid #d1d5db",
-  };
-
-  const Fila = ({ j, idx, color }) => {
-    const bg = idx % 2 === 0 ? "white" : "#fafafa";
-    if (!j) return (
-      <div style={{ ...FILA, background: bg, fontSize: "6pt" }}>
-        <span style={{ color: "#d1d5db", textAlign: "center" }}>{idx + 1}</span>
-        <span /><span />
-        <span style={{ borderBottom: "0.3pt dashed #d1d5db", height: "0.3mm", display: "block", alignSelf: "center" }} />
-        <span /><span />
-        <span style={{ border: "0.7pt solid #c4c4c4", width: "4.5mm", height: "4.5mm", display: "block", borderRadius: "1mm" }} />
-      </div>
-    );
-    return (
-      <div style={{ ...FILA, background: bg, fontSize: "6pt" }}>
-        <span style={{ color: "#9ca3af", textAlign: "center" }}>{idx + 1}</span>
-        <span style={{ fontWeight: 800, color: color, textAlign: "center", fontSize: "7pt" }}>{j.dorsal ?? "—"}</span>
-        <span style={{ display: "flex", justifyContent: "center" }}>
-          {j.jugadores?.foto_url
-            ? <img src={j.jugadores.foto_url} style={{ width: "5.5mm", height: "5.5mm", borderRadius: "50%", objectFit: "cover", display: "block" }} alt="" loading="lazy" />
-            : <span style={{ width: "5.5mm", height: "5.5mm", borderRadius: "50%", background: color + "28", border: `0.5pt solid ${color}66`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5pt", fontWeight: 800, color }}>
-                {j.dorsal ?? "?"}
-              </span>
-          }
-        </span>
-        <span style={{ overflow: "hidden", lineHeight: 1.2 }}>
-          <div style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {j.jugadores?.nombre_completo ?? "—"}
-          </div>
-          {j.nombre_camiseta && (
-            <div style={{ fontSize: "5pt", color: "#9ca3af", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {j.nombre_camiseta.toUpperCase()}
-            </div>
-          )}
-        </span>
-        <span style={{ fontSize: "5.5pt", color: "#6b7280", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {j.jugadores?.numero_afiliado ?? "—"}
-        </span>
-        <span style={{ border: "0.7pt solid #9ca3af", width: "4mm", height: "4mm", display: "block", margin: "0 auto", borderRadius: "0.5mm" }} />
-        <span style={{ border: "0.7pt solid #9ca3af", width: "4.5mm", height: "4.5mm", display: "block", margin: "0 auto", borderRadius: "0.5mm" }} />
-      </div>
-    );
-  };
-
-  const columnaHeader = (color) => (
-    <div style={FILA_H}>
-      <span style={{ textAlign: "center" }}>#</span>
-      <span style={{ textAlign: "center" }}>N°</span>
-      <span style={{ textAlign: "center" }}>Foto</span>
-      <span>Nombre / Camiseta</span>
-      <span>Afiliado</span>
-      <span style={{ textAlign: "center" }}>☐</span>
-      <span style={{ textAlign: "center" }}>⚽</span>
-    </div>
-  );
-
-  return (
-    <div className="ifb-ficha-pagina" style={{
-      fontFamily: "Arial, sans-serif",
-      pageBreakAfter: isLast ? "avoid" : "always",
-      // NO forzamos una altura fija. iOS Safari (y otros) IGNORAN el
-      // `@page { margin }` al imprimir y aplican sus propios márgenes grandes,
-      // dejando un área útil de apenas ~210-220mm en Carta — mucho menos que
-      // los 265mm teóricos. Forzar una altura alta (258/245mm) hacía que el
-      // contenido se estirara más allá de esa área y el pie de firmas saltara
-      // a la página siguiente (overflow:hidden y page-break-inside:avoid se
-      // ignoran cuando el bloque es más alto que la página). En su lugar la
-      // ficha toma su altura NATURAL compacta (~200mm): así entra completa en
-      // una sola hoja aunque el navegador recorte de forma agresiva, a costa
-      // de un pequeño margen inferior cuando el área imprimible es generosa.
-      boxSizing: "border-box",
-      display: "flex",
-      flexDirection: "column",
-    }}>
-
-      {/* ── ENCABEZADO ──
-          Izquierda: logo de la unidad.
-          Centro: nombre de la unidad (destacado) + nombre del torneo (chico).
-          Derecha: bloque de jornada/fecha/cancha, pegado al logo de iFutbol. */}
-      <div style={{ display: "flex", background: "white", color: "#111827", alignItems: "stretch", borderBottom: "2.5pt solid #4f8f2f" }}>
-        {/* Logo de la unidad (con fallback si no tiene logo cargado) */}
-        <div style={{ padding: "2mm 4mm", display: "flex", alignItems: "center", justifyContent: "center", borderRight: "0.5pt solid #e5e7eb", flexShrink: 0, width: "16mm" }}>
-          {miUnidad?.logo_url ? (
-            <img src={miUnidad.logo_url} alt={miUnidad.nombre || "Unidad"}
-              style={{ maxWidth: "14mm", maxHeight: "14mm", objectFit: "contain" }} />
-          ) : (
-            <span style={{ fontSize: "12pt" }}>🏟️</span>
-          )}
-        </div>
-        {/* Bloque central: unidad arriba (destacada), torneo abajo */}
-        <div style={{ flex: 1, padding: "2.5mm 4mm" }}>
-          <div style={{ fontSize: "9.5pt", fontWeight: 900, lineHeight: 1.2, color: "#111827", letterSpacing: -0.2 }}>
-            {miUnidad?.nombre || liga?.canchas?.nombre || "Unidad Deportiva"}
-          </div>
-          <div style={{ fontSize: "7pt", color: "#6b7280", marginTop: "0.8mm", fontWeight: 600 }}>
-            🏆 {liga?.nombre}
-          </div>
-        </div>
-        {/* Bloque jornada (pegado al logo iFutbol).
-            Sin borderLeft propio: la única línea visible será la que separa
-            la jornada del logo iFutbol (el borderLeft del bloque siguiente). */}
-        <div style={{ padding: "2.5mm 3mm", textAlign: "right", flexShrink: 0 }}>
-          <div style={{ fontSize: "8pt", fontWeight: 800, color: "#3B6D11" }}>Jornada {jornada?.numero ?? "—"}</div>
-          <div style={{ fontSize: "6.5pt", color: "#6b7280", marginTop: "0.5mm" }}>📅 {fmtFecha(jornada?.fecha)}</div>
-          <div style={{ fontSize: "6.5pt", color: "#6b7280" }}>⏰ {fmtHora(partido.hora)}  ·  Campo {partido.cancha_numero ?? "—"}</div>
-        </div>
-        {/* Logo iFutbol al extremo derecho */}
-        <div style={{ padding: "3mm 4mm", display: "flex", alignItems: "center", borderLeft: "0.5pt solid #e5e7eb", flexShrink: 0 }}>
-          <IFutbolLogo color="#4f8f2f" height={14} />
-        </div>
-      </div>
-
-      {/* ── MARCADOR ──
-          Logo a los extremos (izquierda y derecha) con el nombre del equipo
-          al lado, mirando hacia el centro donde está el marcador. */}
-      <div style={{ display: "flex", alignItems: "center", padding: "2.5mm 6mm", borderBottom: "0.8pt solid #e5e7eb", gap: "3mm", background: "white" }}>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "3mm", minWidth: 0 }}>
-          <EscudoEquipo equipo={eqL} size={12} />
-          <span style={{ fontSize: "10pt", fontWeight: 900, color: "#111827" }}>{eqL?.nombre}</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "1.5mm", flexShrink: 0 }}>
-          <span style={{ border: "1.5pt solid #111827", width: "11mm", height: "11mm", display: "inline-block", borderRadius: "2mm" }} />
-          <span style={{ fontSize: "14pt", fontWeight: 900, color: "#111827", lineHeight: 1 }}>:</span>
-          <span style={{ border: "1.5pt solid #111827", width: "11mm", height: "11mm", display: "inline-block", borderRadius: "2mm" }} />
-        </div>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: "3mm", minWidth: 0 }}>
-          <span style={{ fontSize: "10pt", fontWeight: 900, color: "#111827" }}>{eqV?.nombre}</span>
-          <EscudoEquipo equipo={eqV} size={12} />
-        </div>
-      </div>
-
-      {/* ── CABECERAS DE EQUIPO ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderBottom: "0.8pt solid #e5e7eb" }}>
-        <div style={{ padding: "2mm 3mm", display: "flex", alignItems: "center", gap: "3mm", borderRight: "0.5pt solid #e5e7eb", borderTop: `3pt solid ${eqL?.color_playera || "#4f8f2f"}` }}>
-          <JerseySVG diseno={eqL?.diseno_camiseta || "solido"} color1={eqL?.color_playera || "#4f8f2f"} color2={eqL?.color_camiseta_2 || "#fff"} size={22} />
-          <span style={{ fontSize: "8pt", fontWeight: 800, color: "#111827" }}>{eqL?.nombre}</span>
-        </div>
-        <div style={{ padding: "2mm 3mm", display: "flex", alignItems: "center", gap: "3mm", justifyContent: "flex-end", borderTop: `3pt solid ${eqV?.color_playera || "#6b7280"}` }}>
-          <span style={{ fontSize: "8pt", fontWeight: 800, color: "#111827" }}>{eqV?.nombre}</span>
-          <JerseySVG diseno={eqV?.diseno_camiseta || "solido"} color1={eqV?.color_playera || "#6b7280"} color2={eqV?.color_camiseta_2 || "#fff"} size={22} />
-        </div>
-      </div>
-
-      {/* ── TABLA DE JUGADORES ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
-        <div style={{ borderRight: "1pt solid #e5e7eb" }}>
-          {columnaHeader(eqL?.color_playera || "#4f8f2f")}
-          {jLocal.map((j, i) => <Fila key={i} j={j} idx={i} color={eqL?.color_playera || "#4f8f2f"} />)}
-        </div>
-        <div>
-          {columnaHeader(eqV?.color_playera || "#6b7280")}
-          {jVisit.map((j, i) => <Fila key={i} j={j} idx={i} color={eqV?.color_playera || "#6b7280"} />)}
-        </div>
-      </div>
-
-      {/* ── FALTAS ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderTop: "0.8pt solid #e5e7eb" }}>
-        <div style={{ padding: "2mm 3mm", display: "flex", alignItems: "center", gap: "3mm", borderRight: "0.5pt solid #e5e7eb" }}>
-          <span style={{ fontSize: "6.5pt", fontWeight: 600, color: "#374151" }}>Faltas cometidas:</span>
-          <span style={{ border: "0.7pt solid #9ca3af", width: "14mm", height: "6mm", display: "inline-block", borderRadius: "1mm" }} />
-        </div>
-        <div style={{ padding: "2mm 3mm", display: "flex", alignItems: "center", gap: "3mm" }}>
-          <span style={{ fontSize: "6.5pt", fontWeight: 600, color: "#374151" }}>Faltas cometidas:</span>
-          <span style={{ border: "0.7pt solid #9ca3af", width: "14mm", height: "6mm", display: "inline-block", borderRadius: "1mm" }} />
-        </div>
-      </div>
-
-      {/* ── PIE: OBSERVACIONES + FIRMA ──
-          Renglones con altura fija (no flex:1). Antes se estiraban para llenar
-          el espacio sobrante, lo que inflaba la ficha y la empujaba fuera de la
-          hoja en iOS. Ahora ocupan una altura acotada y predecible. */}
-      <div style={{ padding: "2mm 4mm", borderTop: "0.8pt solid #e5e7eb" }}>
-        <div style={{ fontSize: "6.5pt", fontWeight: 700, color: "#374151", marginBottom: "1.5mm" }}>Observaciones:</div>
-
-        <div style={{ paddingBottom: "1.5mm" }}>
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} style={{ borderBottom: "0.4pt solid #c4c4c4", height: "4.5mm" }} />
-          ))}
-        </div>
-
-        <div style={{ display: "flex", gap: "8mm", marginTop: "1mm" }}>
-          <div style={{ flex: 2 }}>
-            <div style={{ borderBottom: "0.7pt solid #374151", marginBottom: "1mm" }} />
-            <span style={{ fontSize: "6pt", color: "#6b7280" }}>Nombre del árbitro</span>
-          </div>
-          <div style={{ flex: 1.5 }}>
-            <div style={{ borderBottom: "0.7pt solid #374151", marginBottom: "1mm" }} />
-            <span style={{ fontSize: "6pt", color: "#6b7280" }}>Firma del árbitro</span>
-          </div>
-          <div style={{ flex: 1.5 }}>
-            <div style={{ borderBottom: "0.7pt solid #374151", marginBottom: "1mm" }} />
-            <span style={{ fontSize: "6pt", color: "#6b7280" }}>Firma delegado A</span>
-          </div>
-          <div style={{ flex: 1.5 }}>
-            <div style={{ borderBottom: "0.7pt solid #374151", marginBottom: "1mm" }} />
-            <span style={{ fontSize: "6pt", color: "#6b7280" }}>Firma delegado B</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+// Vista previa en pantalla = el MISMO PDF que se descarga (react-pdf),
+// cargado de forma diferida para no engordar el bundle inicial.
+const FichaPdfPreview = lazy(() => import("./fichaPdf.jsx"));
 
 // ─────────────────────────────────────────────────────────────────
 // COMPONENTE PRINCIPAL
@@ -361,14 +73,6 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
 
   const showToast = (msg, tipo = "ok") => { setToast({ msg, tipo }); setTimeout(() => setToast(null), 3000); };
 
-  useEffect(() => {
-    // Inyectar CSS de impresión al montar
-    const el = document.createElement("style");
-    el.id = "ifb-print-css";
-    el.innerHTML = PRINT_CSS;
-    document.head.appendChild(el);
-    return () => document.getElementById("ifb-print-css")?.remove();
-  }, []);
 
   const cargarJornadas = async () => {
     const data = await db(`/jornadas?liga_id=eq.${liga.id}&order=numero`, token);
@@ -1046,21 +750,15 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
         )}
       </div>
 
-      {/* FICHAS — visibles en pantalla y al imprimir */}
+      {/* VISTA PREVIA — el mismo PDF que se descarga (react-pdf) */}
       {modo !== "resultados" && fichasData.length > 0 && (
-        <div id="ifb-fichas-root">
-          {fichasData.map((f, i) => (
-            <FichaImprimible
-              key={f.partido.id}
-              partido={f.partido}
-              jugadoresLocal={f.jugadoresLocal}
-              jugadoresVisitante={f.jugadoresVisitante}
-              liga={liga}
-              miUnidad={miUnidad}
-              isLast={i === fichasData.length - 1}
-            />
-          ))}
-        </div>
+        <Suspense fallback={
+          <div style={{ marginTop: 24, padding: 32, textAlign: "center", color: "var(--text-muted)", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "#f9fafb" }}>
+            Cargando vista previa…
+          </div>
+        }>
+          <FichaPdfPreview fichasData={fichasData} liga={liga} miUnidad={miUnidad} />
+        </Suspense>
       )}
 
       {/* MODAL: confirmar intercambio (avisa repeticiones y reseteos de ficha) */}
