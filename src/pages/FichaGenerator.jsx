@@ -340,6 +340,7 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
   const [resumen,     setResumen]    = useState([]);   // partidos + ficha (siempre auto-cargados)
   const [fichasData,  setFichasData] = useState([]);   // datos para imprimir templates en blanco
   const [loading,     setLoading]    = useState(false);
+  const [generandoPdf, setGenerandoPdf] = useState(false);
   const [cargandoResumen, setCargandoResumen] = useState(false);
   const [fichaModalPartido, setFichaModalPartido] = useState(null);
   const [equipos,     setEquipos]    = useState([]);   // para el modal de partido manual
@@ -802,8 +803,31 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
     setLoading(false);
   };
 
-  const imprimir = () => {
-    setTimeout(() => window.print(), 150);
+  // Genera el PDF de las fichas con react-pdf (módulo diferido) y lo descarga.
+  // No usamos window.print() porque iOS Safari le agrega su propio encabezado/
+  // pie (URL, fecha, número de página) y recorta el área útil; armando el PDF
+  // a mano cada ficha es una página Carta exacta y sin esa decoración.
+  const descargarPdf = async () => {
+    if (!fichasData.length) return showToast("Primero genera las fichas", "err");
+    setGenerandoPdf(true);
+    try {
+      const { generarFichasBlob } = await import("./fichaPdf.jsx");
+      const blob = await generarFichasBlob({ fichasData, liga, miUnidad });
+      const url = URL.createObjectURL(blob);
+      const slug = (liga?.nombre || "liga").replace(/[^\w]+/g, "_");
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `fichas_${slug}_J${jornadaActual?.numero ?? ""}.pdf`;
+      a.target = "_blank";
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) {
+      showToast("No se pudo generar el PDF: " + (e?.message || e), "err");
+    }
+    setGenerandoPdf(false);
   };
 
   const jornadaActual = jornadas.find(j => j.id === jornadaSel);
@@ -1003,21 +1027,21 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
             </button>
 
             {fichasData.length > 0 && (
-              <button onClick={imprimir}
+              <button onClick={descargarPdf} disabled={generandoPdf}
                 style={{
-                  background: "#1d4ed8", color: "white", border: "none", borderRadius: 10,
-                  padding: "11px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                  background: generandoPdf ? "#9ca3af" : "#1d4ed8", color: "white", border: "none", borderRadius: 10,
+                  padding: "11px 18px", fontSize: 13, fontWeight: 700, cursor: generandoPdf ? "default" : "pointer",
                   minHeight: 44,
                 }}>
-                💾 Guardar PDF
+                {generandoPdf ? "Generando PDF…" : "💾 Descargar PDF"}
               </button>
             )}
           </div>
         )}
 
         {modo !== "resultados" && fichasData.length > 0 && (
-          <p style={{ color: "#ca8a04", fontSize: 11, background: "#fffbeb", border: "1px solid #fde68a", padding: "6px 12px", borderRadius: 6, marginTop: 8, marginBottom: 0, display: "inline-block" }}>
-            💡 En el diálogo de impresión activa "Gráficos en segundo plano" para que impriman los colores correctamente.
+          <p style={{ color: "#16a34a", fontSize: 11, background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "6px 12px", borderRadius: 6, marginTop: 8, marginBottom: 0, display: "inline-block" }}>
+            💡 El PDF se descarga listo para imprimir o compartir — una ficha por hoja, sin pie de página del navegador.
           </p>
         )}
       </div>
