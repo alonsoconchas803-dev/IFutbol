@@ -121,13 +121,13 @@ function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, mi
     display: "grid", gridTemplateColumns: COL,
     alignItems: "center", gap: "0 1mm",
     borderBottom: "0.3pt solid #e5e7eb",
-    minHeight: "7mm", padding: "0.4mm 1.5mm",
+    minHeight: "6mm", padding: "0.3mm 1.5mm",
     boxSizing: "border-box",
   };
   const FILA_H = {
     ...FILA, fontWeight: 700, fontSize: "5.5pt",
     color: "#6b7280", background: "#f9fafb",
-    minHeight: "5.5mm", borderBottom: "0.8pt solid #d1d5db",
+    minHeight: "5mm", borderBottom: "0.8pt solid #d1d5db",
   };
 
   const Fila = ({ j, idx, color }) => {
@@ -147,8 +147,8 @@ function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, mi
         <span style={{ fontWeight: 800, color: color, textAlign: "center", fontSize: "7pt" }}>{j.dorsal ?? "—"}</span>
         <span style={{ display: "flex", justifyContent: "center" }}>
           {j.jugadores?.foto_url
-            ? <img src={j.jugadores.foto_url} style={{ width: "6.5mm", height: "6.5mm", borderRadius: "50%", objectFit: "cover", display: "block" }} alt="" loading="lazy" />
-            : <span style={{ width: "6.5mm", height: "6.5mm", borderRadius: "50%", background: color + "28", border: `0.5pt solid ${color}66`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5.5pt", fontWeight: 800, color }}>
+            ? <img src={j.jugadores.foto_url} style={{ width: "5.5mm", height: "5.5mm", borderRadius: "50%", objectFit: "cover", display: "block" }} alt="" loading="lazy" />
+            : <span style={{ width: "5.5mm", height: "5.5mm", borderRadius: "50%", background: color + "28", border: `0.5pt solid ${color}66`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5pt", fontWeight: 800, color }}>
                 {j.dorsal ?? "?"}
               </span>
           }
@@ -188,17 +188,16 @@ function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, mi
     <div className="ifb-ficha-pagina" style={{
       fontFamily: "Arial, sans-serif",
       pageBreakAfter: isLast ? "avoid" : "always",
-      // Carta vertical. Aunque @page margin sea 7mm (≈265mm imprimibles), al
-      // imprimir el navegador reserva su PROPIO encabezado/pie (URL, fecha,
-      // "Página X de Y"), que consume ~0.5" por lado y baja el área útil a
-      // ~254mm. Si la ficha rebasa ese límite ni overflow:hidden ni
-      // page-break-inside:avoid la salvan (se ignoran cuando el bloque es más
-      // alto que la página) y el pie de firmas salta a la página siguiente.
-      // Por eso fijamos 245mm: entra completa aunque el navegador agregue su
-      // decoración, a cambio de un pequeño margen inferior en impresoras que
-      // no la añaden.
-      height: "245mm",
-      overflow: "hidden",
+      // NO forzamos una altura fija. iOS Safari (y otros) IGNORAN el
+      // `@page { margin }` al imprimir y aplican sus propios márgenes grandes,
+      // dejando un área útil de apenas ~210-220mm en Carta — mucho menos que
+      // los 265mm teóricos. Forzar una altura alta (258/245mm) hacía que el
+      // contenido se estirara más allá de esa área y el pie de firmas saltara
+      // a la página siguiente (overflow:hidden y page-break-inside:avoid se
+      // ignoran cuando el bloque es más alto que la página). En su lugar la
+      // ficha toma su altura NATURAL compacta (~200mm): así entra completa en
+      // una sola hoja aunque el navegador recorte de forma agresiva, a costa
+      // de un pequeño margen inferior cuando el área imprimible es generosa.
       boxSizing: "border-box",
       display: "flex",
       flexDirection: "column",
@@ -244,19 +243,19 @@ function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, mi
       {/* ── MARCADOR ──
           Logo a los extremos (izquierda y derecha) con el nombre del equipo
           al lado, mirando hacia el centro donde está el marcador. */}
-      <div style={{ display: "flex", alignItems: "center", padding: "4mm 6mm", borderBottom: "0.8pt solid #e5e7eb", gap: "3mm", background: "white" }}>
+      <div style={{ display: "flex", alignItems: "center", padding: "2.5mm 6mm", borderBottom: "0.8pt solid #e5e7eb", gap: "3mm", background: "white" }}>
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "3mm", minWidth: 0 }}>
-          <EscudoEquipo equipo={eqL} />
+          <EscudoEquipo equipo={eqL} size={12} />
           <span style={{ fontSize: "10pt", fontWeight: 900, color: "#111827" }}>{eqL?.nombre}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "1.5mm", flexShrink: 0 }}>
-          <span style={{ border: "1.5pt solid #111827", width: "13mm", height: "13mm", display: "inline-block", borderRadius: "2mm" }} />
+          <span style={{ border: "1.5pt solid #111827", width: "11mm", height: "11mm", display: "inline-block", borderRadius: "2mm" }} />
           <span style={{ fontSize: "14pt", fontWeight: 900, color: "#111827", lineHeight: 1 }}>:</span>
-          <span style={{ border: "1.5pt solid #111827", width: "13mm", height: "13mm", display: "inline-block", borderRadius: "2mm" }} />
+          <span style={{ border: "1.5pt solid #111827", width: "11mm", height: "11mm", display: "inline-block", borderRadius: "2mm" }} />
         </div>
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: "3mm", minWidth: 0 }}>
           <span style={{ fontSize: "10pt", fontWeight: 900, color: "#111827" }}>{eqV?.nombre}</span>
-          <EscudoEquipo equipo={eqV} />
+          <EscudoEquipo equipo={eqV} size={12} />
         </div>
       </div>
 
@@ -296,18 +295,20 @@ function FichaImprimible({ partido, jugadoresLocal, jugadoresVisitante, liga, mi
         </div>
       </div>
 
-      {/* ── PIE: OBSERVACIONES + FIRMA ── */}
-      <div style={{ padding: "2.5mm 4mm", borderTop: "0.8pt solid #e5e7eb", flex: 1, display: "flex", flexDirection: "column" }}>
-        <div style={{ fontSize: "6.5pt", fontWeight: 700, color: "#374151", marginBottom: "2mm" }}>Observaciones:</div>
+      {/* ── PIE: OBSERVACIONES + FIRMA ──
+          Renglones con altura fija (no flex:1). Antes se estiraban para llenar
+          el espacio sobrante, lo que inflaba la ficha y la empujaba fuera de la
+          hoja en iOS. Ahora ocupan una altura acotada y predecible. */}
+      <div style={{ padding: "2mm 4mm", borderTop: "0.8pt solid #e5e7eb" }}>
+        <div style={{ fontSize: "6.5pt", fontWeight: 700, color: "#374151", marginBottom: "1.5mm" }}>Observaciones:</div>
 
-        {/* Renglones que se estiran para llenar el espacio disponible */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-around", paddingBottom: "2mm" }}>
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} style={{ borderBottom: "0.4pt solid #c4c4c4" }} />
+        <div style={{ paddingBottom: "1.5mm" }}>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} style={{ borderBottom: "0.4pt solid #c4c4c4", height: "4.5mm" }} />
           ))}
         </div>
 
-        <div style={{ display: "flex", gap: "8mm", marginTop: "2mm" }}>
+        <div style={{ display: "flex", gap: "8mm", marginTop: "1mm" }}>
           <div style={{ flex: 2 }}>
             <div style={{ borderBottom: "0.7pt solid #374151", marginBottom: "1mm" }} />
             <span style={{ fontSize: "6pt", color: "#6b7280" }}>Nombre del árbitro</span>
