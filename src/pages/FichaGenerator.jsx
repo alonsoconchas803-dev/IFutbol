@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import JerseySVG from "../components/JerseySVG";
 import { generarUnaJornada, parKey } from "../lib/roundRobin";
 import PanelSanciones from "../components/PanelSanciones";
@@ -53,6 +53,7 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
   const [fichasData,  setFichasData] = useState([]);   // datos para imprimir templates en blanco
   const [loading,     setLoading]    = useState(false);
   const [generandoPdf, setGenerandoPdf] = useState(false);
+  const [pdfListo, setPdfListo] = useState(null); // { data, blob } — PDF ya generado por la vista previa
   const [cargandoResumen, setCargandoResumen] = useState(false);
   const [fichaModalPartido, setFichaModalPartido] = useState(null);
   const [equipos,     setEquipos]    = useState([]);   // para el modal de partido manual
@@ -507,32 +508,62 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
     setLoading(false);
   };
 
-  // Genera el PDF de las fichas con react-pdf (módulo diferido) y lo descarga.
-  // No usamos window.print() porque iOS Safari le agrega su propio encabezado/
-  // pie (URL, fecha, número de página) y recorta el área útil; armando el PDF
-  // a mano cada ficha es una página Carta exacta y sin esa decoración.
+  // Entrega el PDF: en iOS/Android abre la hoja de compartir nativa (Imprimir,
+  // Guardar en Archivos, WhatsApp, Mail, AirDrop…). En escritorio (sin soporte
+  // de compartir archivos) cae a descarga directa del archivo.
+  // OJO: navigator.share debe llamarse DENTRO del gesto del usuario, por eso
+  // reutilizamos el blob que ya dejó listo la vista previa (sin awaits previos).
+  const compartirODescargar = async (blob, nombre) => {
+    const file = new File([blob], nombre, { type: "application/pdf" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: "Fichas iFutbol" });
+        return;
+      } catch (e) {
+        if (e?.name === "AbortError") return; // el usuario cerró la hoja
+        // cualquier otro error: caemos a descarga directa abajo
+      }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nombre;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+
+  // No usamos window.print(): iOS Safari le agrega su propio encabezado/pie y
+  // recorta el área. Generamos el PDF con react-pdf (módulo diferido).
   const descargarPdf = async () => {
     if (!fichasData.length) return showToast("Primero genera las fichas", "err");
+    const nombre = `fichas_${(liga?.nombre || "liga").replace(/[^\w]+/g, "_")}_J${jornadaActual?.numero ?? ""}.pdf`;
+
+    // Caso normal: la vista previa ya generó el PDF → compartimos al instante,
+    // dentro del gesto (requisito de iOS para abrir la hoja de compartir).
+    if (pdfListo && pdfListo.data === fichasData) {
+      return compartirODescargar(pdfListo.blob, nombre);
+    }
+
+    // Clic antes de que la previa termine: lo generamos y entregamos.
     setGenerandoPdf(true);
     try {
       const { generarFichasBlob } = await import("./fichaPdf.jsx");
       const blob = await generarFichasBlob({ fichasData, liga, miUnidad });
-      const url = URL.createObjectURL(blob);
-      const slug = (liga?.nombre || "liga").replace(/[^\w]+/g, "_");
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `fichas_${slug}_J${jornadaActual?.numero ?? ""}.pdf`;
-      a.target = "_blank";
-      a.rel = "noopener";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      await compartirODescargar(blob, nombre);
     } catch (e) {
       showToast("No se pudo generar el PDF: " + (e?.message || e), "err");
     }
     setGenerandoPdf(false);
   };
+
+  // La vista previa nos pasa el PDF ya generado para reutilizarlo al compartir.
+  // useCallback estable (solo cambia con fichasData) para no romper el memo del
+  // visor ni regenerar el PDF en cada render del padre.
+  const recibirPdf = useCallback((blob) => {
+    setPdfListo({ data: fichasData, blob });
+  }, [fichasData]);
 
   const jornadaActual = jornadas.find(j => j.id === jornadaSel);
   const totalCerradas = resumen.filter(p => p.ficha?.cerrada).length;
@@ -727,7 +758,7 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
                 padding: "11px 18px", fontSize: 13, fontWeight: 700, cursor: loading ? "default" : "pointer",
                 minHeight: 44,
               }}>
-              {loading ? "Cargando datos..." : "🖨️ Imprimir fichas en blanco"}
+              {loading ? "Cargando datos..." : "📄 Generar fichas en blanco"}
             </button>
 
             {fichasData.length > 0 && (
@@ -757,7 +788,7 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
             Cargando vista previa…
           </div>
         }>
-          <FichaPdfPreview fichasData={fichasData} liga={liga} miUnidad={miUnidad} />
+          <FichaPdfPreview fichasData={fichasData} liga={liga} miUnidad={miUnidad} onPdfReady={recibirPdf} />
         </Suspense>
       )}
 

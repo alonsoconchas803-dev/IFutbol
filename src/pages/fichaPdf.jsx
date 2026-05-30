@@ -362,7 +362,7 @@ export async function generarFichasBlob({ fichasData, liga, miUnidad }) {
 // ajustadas al ancho se ven TODAS las fichas, scrolleables y sin cortes.
 // Va envuelto en memo: el padre re-renderiza con cada toast y no queremos
 // regenerar el PDF salvo que cambien los datos.
-function FichaPdfPreview({ fichasData, liga, miUnidad }) {
+function FichaPdfPreview({ fichasData, liga, miUnidad, onPdfReady }) {
   // Estado keyed por `data`: guardamos el resultado junto a los datos que lo
   // produjeron. Mientras `estado.data !== fichasData` mostramos "cargando",
   // sin resetear estado de forma síncrona dentro del efecto.
@@ -373,6 +373,10 @@ function FichaPdfPreview({ fichasData, liga, miUnidad }) {
     (async () => {
       try {
         const blob = await generarFichasBlob({ fichasData, liga, miUnidad });
+        // Avisamos al padre con el PDF ya generado para que el botón de
+        // descargar/compartir lo reutilice sin volver a generarlo (y pueda
+        // abrir la hoja de compartir dentro del gesto del usuario).
+        if (vivo) onPdfReady?.(blob);
         const buf = await blob.arrayBuffer();
         if (!vivo) return;
         const pdfjs = await import("pdfjs-dist");
@@ -396,7 +400,7 @@ function FichaPdfPreview({ fichasData, liga, miUnidad }) {
       }
     })();
     return () => { vivo = false; };
-  }, [fichasData, liga, miUnidad]);
+  }, [fichasData, liga, miUnidad, onPdfReady]);
 
   const actual = estado && estado.data === fichasData ? estado : null;
 
