@@ -197,7 +197,7 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
       if (portadaFile) {
         const ext = portadaFile.name.split(".").pop();
         const path = `portadas-unidades/${Date.now()}.${ext}`;
-        portada_url = await uploadFile("imagenes", path, portadaFile, token);
+        portada_url = await uploadFile("imagenes", path, portadaFile, token, "portada");
       }
       const payload = { ...canchaForm, logo_url, portada_url };
       if (editCanchaId) {

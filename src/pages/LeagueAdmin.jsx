@@ -594,7 +594,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
       if (personalizarPortadaFile) {
         const ext = personalizarPortadaFile.name.split(".").pop();
         const path = `portadas-unidades/${Date.now()}.${ext}`;
-        portada_url = await uploadFile("imagenes", path, personalizarPortadaFile, token);
+        portada_url = await uploadFile("imagenes", path, personalizarPortadaFile, token, "portada");
       }
       const payload = { ...personalizarForm, logo_url, portada_url };
       const filas = await db(`/canchas?id=eq.${miUnidad.id}`, token, { method: "PATCH", body: JSON.stringify(payload) });
@@ -860,7 +860,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
       if (escudoFile) {
         const ext = escudoFile.name.split(".").pop();
         const path = `escudos/${Date.now()}.${ext}`;
-        escudo_url = await uploadFile("imagenes", path, escudoFile, token);
+        escudo_url = await uploadFile("imagenes", path, escudoFile, token, "escudo");
       }
 
       const payload = { nombre: equipoForm.nombre, color_playera: equipoForm.color_playera, color_camiseta_2: equipoForm.color_camiseta_2, diseno_camiseta: equipoForm.diseno_camiseta, escudo_url, liga_id: ligaSeleccionada.id };

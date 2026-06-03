@@ -668,7 +668,7 @@ function BannerPatrocinadores({ items }) {
             boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
             aspectRatio: ASPECT[p.formato] || "16 / 9",
           }}>
-            <img src={p.imagen_url} alt="Patrocinador"
+            <img src={p.imagen_url} alt="Patrocinador" loading="lazy"
               style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
           </div>
         ))}
@@ -1088,7 +1088,7 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
                           style={{ background: baseBg(selectedCell&&selectedCell[0]===ri, selectedCell&&selectedCell[1]===1, selectedCell&&selectedCell[0]===ri&&selectedCell[1]===1), transition:"background 0.15s", cursor:"pointer" }}
                           onClick={()=>setSelectedCell(selectedCell&&selectedCell[0]===ri&&selectedCell[1]===1?null:[ri,1])}>
                         <div style={{ display:"flex",alignItems:"center",gap:4 }}>
-                          {r.equipo.escudo_url?<img src={r.equipo.escudo_url} style={{ width:18,height:18,borderRadius:4,objectFit:"cover",flexShrink:0 }} alt=""/>:<div style={{ width:9,height:9,borderRadius:"50%",background:r.equipo.color_playera||"#999",flexShrink:0 }}/>}
+                          {r.equipo.escudo_url?<img src={r.equipo.escudo_url} loading="lazy" style={{ width:18,height:18,borderRadius:4,objectFit:"cover",flexShrink:0 }} alt=""/>:<div style={{ width:9,height:9,borderRadius:"50%",background:r.equipo.color_playera||"#999",flexShrink:0 }}/>}
                           <span style={{ fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",fontSize:11 }}>{r.equipo.nombre}</span>
                         </div>
                       </td>,
@@ -1410,7 +1410,7 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
                 <div key={eq.id} style={{ background:"white",borderRadius:"var(--radius-md)",padding:"10px 8px",textAlign:"center",boxShadow:"var(--shadow-sm)",border:"1px solid var(--border)",borderTop:`3px solid ${eq.color_playera||"var(--green)"}` }}>
                   <div style={{ display:"flex",justifyContent:"center",marginBottom:6 }}>
                     {eq.escudo_url
-                      ? <img src={eq.escudo_url} style={{ width:38,height:38,borderRadius:8,objectFit:"cover" }} alt=""/>
+                      ? <img src={eq.escudo_url} loading="lazy" style={{ width:38,height:38,borderRadius:8,objectFit:"cover" }} alt=""/>
                       : <div style={{ width:38,height:38,borderRadius:8,background:eq.color_playera||"var(--green)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:800,color:"white" }}>{eq.nombre[0]}</div>}
                   </div>
                   <div style={{ fontWeight:700,fontSize:12,marginBottom:6,lineHeight:1.2,wordBreak:"break-word" }}>{eq.nombre}</div>
@@ -1460,7 +1460,7 @@ function TablaEspecial({ titulo, datos, campo, labelCorto, labelLargo }) {
             <td style={{ textAlign:"center" }}><span className="rank-badge" style={{ background:i===0?"#FFD700":i===1?"#C0C0C0":i===2?"#CD7F32":"#f3f4f6",color:i<3?"#111":"#888" }}>{i+1}</span></td>
             <td><div style={{ display:"flex",alignItems:"center",gap:6 }}>
               {r.equipo.escudo_url
-                ? <img src={r.equipo.escudo_url} style={{ width:18,height:18,borderRadius:4,objectFit:"cover",flexShrink:0 }} alt=""/>
+                ? <img src={r.equipo.escudo_url} loading="lazy" style={{ width:18,height:18,borderRadius:4,objectFit:"cover",flexShrink:0 }} alt=""/>
                 : <div style={{ width:9,height:9,borderRadius:"50%",background:r.equipo.color_playera||"#999",flexShrink:0 }}/>}
               <span style={{ fontWeight:600,fontSize:11,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{r.equipo.nombre}</span>
             </div></td>

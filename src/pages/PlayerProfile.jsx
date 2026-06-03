@@ -331,7 +331,7 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
       if (tarjetaEscudoFile) {
         const ext = tarjetaEscudoFile.name.split(".").pop();
         const path = `escudos/${equipoCapData.id}-${Date.now()}.${ext}`;
-        escudo_url = await uploadFile("imagenes", path, tarjetaEscudoFile, token);
+        escudo_url = await uploadFile("imagenes", path, tarjetaEscudoFile, token, "escudo");
       }
       const payload = { ...tarjetaForm, escudo_url };
       await db(`/equipos?id=eq.${equipoCapData.id}`, token, {
