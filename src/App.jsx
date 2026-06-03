@@ -7,6 +7,7 @@ import PlayerProfile from "./pages/PlayerProfile";
 import JerseySVG from "./components/JerseySVG";
 import IFutbolLogo from "./components/IFutbolLogo";
 import BracketTree from "./components/BracketTree";
+import { iniciarLoginOAuth, intercambiarCodigoOAuth } from "./lib/pkce";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -154,6 +155,25 @@ export default function App() {
       setModal("forgot_password");
       setScreen("home");
       limpiarUrl();
+      return;
+    }
+
+    // Retorno de OAuth (PKCE): la URL trae ?code=... → canjearlo por una sesión.
+    // El usuario nuevo de Google no tiene rol ni fila en jugadores, así que
+    // loadUserRole lo manda al flujo de "completar perfil" automáticamente.
+    if (queryParams.get("code")) {
+      (async () => {
+        const res = await intercambiarCodigoOAuth();
+        if (res?.ok) {
+          setSession(res.session);
+          await loadUserRole(res.session.access_token, res.session.user.id, res.session.user?.user_metadata);
+          showToast("¡Bienvenido!");
+        } else if (res) {
+          showToast(res.error, "err");
+          setScreen("home");
+        }
+        limpiarUrl();
+      })();
       return;
     }
 
@@ -1481,6 +1501,41 @@ function EmptyState({ icon, txt }) {
 // ─────────────────────────────────────────────────────────────────
 // LOGIN MODAL
 // ─────────────────────────────────────────────────────────────────
+// Logo "G" multicolor de Google para el botón de OAuth.
+const GoogleG = () => (
+  <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true" style={{ flexShrink:0 }}>
+    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+  </svg>
+);
+
+// Botón "Continuar con Google" + separador "o". Arranca el flujo OAuth PKCE
+// (redirige el navegador); el retorno se procesa en el useEffect de App.
+// dividerPos: "top" (separador arriba del botón) o "bottom" (debajo).
+function BotonGoogle({ label = "Continuar con Google", dividerPos = "top" }) {
+  const Separador = () => (
+    <div style={{ display:"flex",alignItems:"center",gap:10,margin:"2px 0 14px" }}>
+      <div style={{ flex:1,height:1,background:"var(--border)" }}/>
+      <span style={{ fontSize:12,color:"var(--text-muted)" }}>o</span>
+      <div style={{ flex:1,height:1,background:"var(--border)" }}/>
+    </div>
+  );
+  return (
+    <>
+      {dividerPos === "top" && <Separador/>}
+      <button type="button" onClick={()=>iniciarLoginOAuth("google")}
+        style={{ width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:10,
+          padding:"11px 16px",borderRadius:"var(--radius-md)",border:"1px solid var(--border)",
+          background:"#fff",color:"#3c4043",fontWeight:600,fontSize:14,cursor:"pointer",marginBottom:14 }}>
+        <GoogleG/>{label}
+      </button>
+      {dividerPos === "bottom" && <Separador/>}
+    </>
+  );
+}
+
 function LoginModal({ onClose, onLogin, onRegister, onForgotPassword }) {
   const [form, setForm] = useState({ email:"", password:"" });
   const [error, setError] = useState("");
@@ -1502,6 +1557,7 @@ function LoginModal({ onClose, onLogin, onRegister, onForgotPassword }) {
           <span style={{ ...m.link,fontSize:13 }} onClick={onForgotPassword}>¿Olvidaste tu contraseña?</span>
         </div>
         <button className="btn btn-premium" style={{ width:"100%",marginBottom:14 }} onClick={handle} disabled={loading}>{loading?"Entrando...":"Entrar →"}</button>
+        <BotonGoogle/>
         <p style={{ textAlign:"center",fontSize:13,color:"var(--text-muted)" }}>¿No tienes cuenta? <span style={m.link} onClick={onRegister}>Regístrate como jugador</span></p>
       </div>
     </div>
@@ -1730,6 +1786,7 @@ function RegisterPlayerModal({ onClose, showToast, onLogin }) {
       <div className="ifutbol-modal" onClick={e=>e.stopPropagation()}>
         <ModalHeader title="Crear cuenta de jugador" subtitle="Tu número de afiliado se genera automáticamente" onClose={onClose}/>
         {error&&<div style={m.err}>⚠️ {error}</div>}
+        <BotonGoogle label="Registrarse con Google" dividerPos="bottom"/>
         <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:18,background:"var(--bg)",borderRadius:12,padding:14 }}>
           <div style={{ position:"relative", width:60, height:60, flexShrink:0 }}>
             <div style={{ width:60,height:60,borderRadius:"50%",background:"var(--border)",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26 }}>
