@@ -148,7 +148,7 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
       if (fotoFile) {
         const ext = fotoFile.name.split(".").pop();
         const path = `fotos/${userId}.${ext}`;
-        foto_url = await uploadFile("imagenes", path, fotoFile, token);
+        foto_url = await uploadFile("imagenes", path, fotoFile, token, "jugador");
       }
       const payload = {
         ...form,
