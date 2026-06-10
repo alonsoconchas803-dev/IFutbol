@@ -7,6 +7,7 @@ import PlayerProfile from "./pages/PlayerProfile";
 import JerseySVG from "./components/JerseySVG";
 import IFutbolLogo from "./components/IFutbolLogo";
 import BracketTree from "./components/BracketTree";
+import { iniciarLoginOAuth, intercambiarCodigoOAuth } from "./lib/pkce";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -119,6 +120,9 @@ export default function App() {
   // Si la sesión es válida pero no hay rol ni jugador ni metadata para
   // auto-crear, abrimos un modal donde el usuario completa lo mínimo.
   const [needsPlayerProfile, setNeedsPlayerProfile] = useState(false);
+  // Controla si el formulario de "completar perfil" está abierto. No se fuerza:
+  // el jugador lo abre desde el botón del dashboard bloqueado (perfilIncompleto).
+  const [mostrarFormPerfil, setMostrarFormPerfil] = useState(false);
 
   const showToast = (msg, tipo = "ok") => {
     setToast({ msg, tipo });
@@ -154,6 +158,25 @@ export default function App() {
       setModal("forgot_password");
       setScreen("home");
       limpiarUrl();
+      return;
+    }
+
+    // Retorno de OAuth (PKCE): la URL trae ?code=... → canjearlo por una sesión.
+    // El usuario nuevo de Google no tiene rol ni fila en jugadores, así que
+    // loadUserRole lo manda al flujo de "completar perfil" automáticamente.
+    if (queryParams.get("code")) {
+      (async () => {
+        const res = await intercambiarCodigoOAuth();
+        if (res?.ok) {
+          setSession(res.session);
+          await loadUserRole(res.session.access_token, res.session.user.id, res.session.user?.user_metadata);
+          showToast("¡Bienvenido!");
+        } else if (res) {
+          showToast(res.error, "err");
+          setScreen("home");
+        }
+        limpiarUrl();
+      })();
       return;
     }
 
@@ -245,7 +268,11 @@ export default function App() {
         }
       }
       // Sin rol, sin jugador y sin metadata utilizable: pedirle al usuario que
-      // complete su perfil para no dejarlo en limbo.
+      // complete su perfil para no dejarlo en limbo. Lo marcamos como "player"
+      // (para que el chrome muestre el rol) pero con el perfil incompleto: el
+      // dashboard queda bloqueado hasta que llene el formulario y obtenga su
+      // número de afiliado.
+      setUserRole({ rol: "player" });
       setNeedsPlayerProfile(true);
       setScreen("dashboard");
     } catch (e) { console.error(e); }
@@ -286,6 +313,8 @@ export default function App() {
           onHome={goHome} initials={initials()}
           seccionInicial={dashSeccion}
           topbarBack={topbarBack} setTopbarBack={setTopbarBack}
+          perfilIncompleto={needsPlayerProfile}
+          onCompletarPerfil={() => setMostrarFormPerfil(true)}
         />
         {welcomeAfiliado && (
           <WelcomeAfiliadoModal
@@ -293,11 +322,12 @@ export default function App() {
             onClose={() => setWelcomeAfiliado(null)}
           />
         )}
-        {needsPlayerProfile && (
+        {mostrarFormPerfil && (
           <CompletarPerfilJugadorModal
             session={session}
-            onCancel={handleLogout}
+            onCancel={() => setMostrarFormPerfil(false)}
             onCreated={(jug) => {
+              setMostrarFormPerfil(false);
               setNeedsPlayerProfile(false);
               setUserRole({ rol: "player" });
               setJugadorData(jug);
@@ -352,7 +382,7 @@ function Modals({ modal, setModal, onLogin, showToast, recoveryToken, onResetSuc
 // ─────────────────────────────────────────────────────────────────
 // DASHBOARD LAYOUT (con navegación lateral funcional)
 // ─────────────────────────────────────────────────────────────────
-function DashboardLayout({ session, userRole, jugadorData, displayName, onLogout, toast, showToast, onHome, initials, seccionInicial, topbarBack, setTopbarBack }) {
+function DashboardLayout({ session, userRole, jugadorData, displayName, onLogout, toast, showToast, onHome, initials, seccionInicial, topbarBack, setTopbarBack, perfilIncompleto, onCompletarPerfil }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const rol = userRole?.rol;
   const roleInfo = ROLES_INFO[rol] || { label:"Usuario", icon:"👤", color:"#666" };
@@ -365,6 +395,22 @@ function DashboardLayout({ session, userRole, jugadorData, displayName, onLogout
   const PLAYER_MAP = { perfil:"perfil", ligas:"ligas", estadisticas:"estadisticas" };
 
   const renderContent = () => {
+    // Perfil incompleto (jugador recién registrado / por Google sin afiliado):
+    // bloqueamos el dashboard y mostramos solo el aviso con el CTA.
+    if (perfilIncompleto) {
+      return (
+        <div style={{ maxWidth:440, margin:"32px auto", textAlign:"center", padding:"0 16px" }}>
+          <div style={{ fontSize:54, marginBottom:16 }}>📝</div>
+          <h2 style={{ fontSize:22, fontWeight:800, marginBottom:10 }}>Completa tu perfil</h2>
+          <p style={{ color:"var(--text-sub)", lineHeight:1.5, marginBottom:24 }}>
+            Completa tu perfil para obtener tu <b>número de afiliado</b>, ver tus estadísticas y poder unirte a tu equipo.
+          </p>
+          <button className="btn btn-premium" style={{ width:"100%", maxWidth:300 }} onClick={onCompletarPerfil}>
+            Completar formulario →
+          </button>
+        </div>
+      );
+    }
     if (rol === "super_admin") {
       return <SuperAdmin session={session} seccionInicial={SUPER_MAP[activeSection] || "stats"} setTopbarBack={setTopbarBack} />;
     }
@@ -419,7 +465,7 @@ function DashboardLayout({ session, userRole, jugadorData, displayName, onLogout
             <span style={{ fontSize:17, width:22, textAlign:"center", flexShrink:0 }}>🏠</span>
             <span>Inicio</span>
           </div>
-          {menuItems.map(({ icon, label, key }) => (
+          {!perfilIncompleto && menuItems.map(({ icon, label, key }) => (
             <div key={key}
               className={`nav-item ${activeSection === key ? "nav-item-active" : ""}`}
               onClick={() => goTo(key)}>
@@ -1481,6 +1527,41 @@ function EmptyState({ icon, txt }) {
 // ─────────────────────────────────────────────────────────────────
 // LOGIN MODAL
 // ─────────────────────────────────────────────────────────────────
+// Logo "G" multicolor de Google para el botón de OAuth.
+const GoogleG = () => (
+  <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true" style={{ flexShrink:0 }}>
+    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+  </svg>
+);
+
+// Botón "Continuar con Google" + separador "o". Arranca el flujo OAuth PKCE
+// (redirige el navegador); el retorno se procesa en el useEffect de App.
+// dividerPos: "top" (separador arriba del botón) o "bottom" (debajo).
+function BotonGoogle({ label = "Continuar con Google", dividerPos = "top" }) {
+  const Separador = () => (
+    <div style={{ display:"flex",alignItems:"center",gap:10,margin:"2px 0 14px" }}>
+      <div style={{ flex:1,height:1,background:"var(--border)" }}/>
+      <span style={{ fontSize:12,color:"var(--text-muted)" }}>o</span>
+      <div style={{ flex:1,height:1,background:"var(--border)" }}/>
+    </div>
+  );
+  return (
+    <>
+      {dividerPos === "top" && <Separador/>}
+      <button type="button" onClick={()=>iniciarLoginOAuth("google")}
+        style={{ width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:10,
+          padding:"11px 16px",borderRadius:"var(--radius-md)",border:"1px solid var(--border)",
+          background:"#fff",color:"#3c4043",fontWeight:600,fontSize:14,cursor:"pointer",marginBottom:14 }}>
+        <GoogleG/>{label}
+      </button>
+      {dividerPos === "bottom" && <Separador/>}
+    </>
+  );
+}
+
 function LoginModal({ onClose, onLogin, onRegister, onForgotPassword }) {
   const [form, setForm] = useState({ email:"", password:"" });
   const [error, setError] = useState("");
@@ -1502,6 +1583,7 @@ function LoginModal({ onClose, onLogin, onRegister, onForgotPassword }) {
           <span style={{ ...m.link,fontSize:13 }} onClick={onForgotPassword}>¿Olvidaste tu contraseña?</span>
         </div>
         <button className="btn btn-premium" style={{ width:"100%",marginBottom:14 }} onClick={handle} disabled={loading}>{loading?"Entrando...":"Entrar →"}</button>
+        <BotonGoogle/>
         <p style={{ textAlign:"center",fontSize:13,color:"var(--text-muted)" }}>¿No tienes cuenta? <span style={m.link} onClick={onRegister}>Regístrate como jugador</span></p>
       </div>
     </div>
@@ -1636,59 +1718,33 @@ function ResetPasswordModal({ accessToken, onClose, onSuccess }) {
 // ─────────────────────────────────────────────────────────────────
 // REGISTER PLAYER MODAL
 // ─────────────────────────────────────────────────────────────────
-function RegisterPlayerModal({ onClose, showToast, onLogin }) {
-  const [form, setForm] = useState({ nombre_completo:"",email:"",fecha_nacimiento:"",domicilio:"",posicion_preferida:"Delantero",numero_camiseta:"",nombre_camiseta:"",password:"",confirm:"" });
-  const [fotoPreview, setFotoPreview] = useState(null);
+function RegisterPlayerModal({ onClose, onLogin }) {
+  const [form, setForm] = useState({ email:"", password:"", confirm:"" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(null);
 
   const handle = async () => {
-    if (!form.nombre_completo||!form.email||!form.password) return setError("Completa los campos obligatorios");
-    if (form.password!==form.confirm) return setError("Las contraseñas no coinciden");
+    if (!form.email || !form.password) return setError("Completa correo y contraseña");
+    if (form.password !== form.confirm) return setError("Las contraseñas no coinciden");
     const pwdErr = validarPassword(form.password);
     if (pwdErr) return setError(pwdErr);
     setLoading(true); setError("");
-    // Guardamos los datos del jugador en user_metadata. Si la confirmación de
-    // correo está activa el signup NO devuelve token (no se crea la fila en
-    // jugadores ahora mismo); el primer login post-confirmación leerá esta
-    // metadata y creará el perfil automáticamente.
-    const playerSignup = {
-      nombre_completo: form.nombre_completo,
-      fecha_nacimiento: form.fecha_nacimiento || null,
-      domicilio: form.domicilio,
-      posicion_preferida: form.posicion_preferida,
-      numero_preferido: form.numero_camiseta ? +form.numero_camiseta : null,
-      nombre_camiseta_preferido: form.nombre_camiseta?.trim() ? form.nombre_camiseta.trim().toUpperCase() : null,
-    };
-    const data = await api("/auth/v1/signup",{
-      method:"POST",
-      body:JSON.stringify({ email:form.email, password:form.password, data:{ player_signup: playerSignup } })
+    // Solo creamos la cuenta. El perfil de jugador y su número de afiliado se
+    // llenan DESPUÉS, ya con sesión iniciada, desde CompletarPerfilJugadorModal.
+    const data = await api("/auth/v1/signup", {
+      method: "POST",
+      body: JSON.stringify({ email: form.email, password: form.password }),
     });
-    if (data.user||data.id) {
-      const token = data.session?.access_token||data.access_token;
-      const userId = data.user?.id||data.id;
-      if (token) {
-        const jugRes = await fetch(`${SUPABASE_URL}/rest/v1/jugadores`,{method:"POST",headers:{"apikey":SUPABASE_KEY,"Authorization":`Bearer ${token}`,"Content-Type":"application/json","Prefer":"return=representation"},body:JSON.stringify({ user_id:userId, ...playerSignup })});
-        const jugData = await jugRes.json();
-        if (!jugRes.ok) {
-          setError(jugData?.message || "No se pudo crear el perfil de jugador");
-          setLoading(false);
-          return;
-        }
-        const afiliado = Array.isArray(jugData)?jugData[0]?.numero_afiliado:jugData?.numero_afiliado;
-        if (!afiliado) {
-          setError("No se generó el número de afiliado. Intenta de nuevo.");
-          setLoading(false);
-          return;
-        }
-        setSuccess(afiliado);
-      } else {
-        // Confirm email activo: el perfil se creará al primer login.
-        setSuccess("pending_confirmation");
-      }
-    } else { setError(data.msg||data.error_description||"Error al registrarse"); }
     setLoading(false);
+    if (data.user || data.id) {
+      const token = data.session?.access_token || data.access_token;
+      // Con confirmación de correo activa no hay token → "revisa tu correo".
+      // Sin confirmación hay sesión → solo le pedimos iniciar sesión.
+      setSuccess(token ? "created" : "pending_confirmation");
+    } else {
+      setError(data.msg || data.error_description || "Error al registrarse");
+    }
   };
 
   if (success === "pending_confirmation") return (
@@ -1697,10 +1753,10 @@ function RegisterPlayerModal({ onClose, showToast, onLogin }) {
         <div style={{ fontSize:52,marginBottom:14 }}>📧</div>
         <h3 style={{ fontSize:22,fontWeight:800,marginBottom:8 }}>Revisa tu correo</h3>
         <p style={{ color:"var(--text-sub)",marginBottom:16,lineHeight:1.5 }}>
-          Te enviamos un enlace de confirmación a <b>{form.email}</b>. Confírmalo y vuelve a iniciar sesión.
+          Te enviamos un enlace de confirmación a <b>{form.email}</b>.
         </p>
         <p style={{ fontSize:13,color:"var(--text-sub)",marginBottom:22,lineHeight:1.45 }}>
-          La primera vez que entres te mostraremos tu <b>número de afiliado</b>.
+          Confírmalo, inicia sesión y completa tu perfil para obtener tu <b>número de afiliado</b>.
         </p>
         <button className="btn btn-premium" style={{ width:"100%" }} onClick={onLogin}>Ir a iniciar sesión →</button>
       </div>
@@ -1710,17 +1766,12 @@ function RegisterPlayerModal({ onClose, showToast, onLogin }) {
   if (success) return (
     <div className="ifutbol-overlay" onClick={onClose}>
       <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:380,textAlign:"center" }}>
-        <div style={{ fontSize:52,marginBottom:14 }}>🎉</div>
-        <h3 style={{ fontSize:22,fontWeight:800,marginBottom:8 }}>¡Registro exitoso!</h3>
-        <p style={{ color:"var(--text-sub)",marginBottom:20 }}>Tu cuenta ha sido creada correctamente</p>
-        <div style={{ background:"var(--green-light)",border:"1px solid #c3e6a3",borderRadius:12,padding:"16px 24px",marginBottom:16 }}>
-          <div style={{ fontSize:11,color:"var(--green)",fontWeight:700,marginBottom:4 }}>TU NÚMERO DE AFILIADO</div>
-          <div style={{ fontSize:28,fontWeight:900,color:"var(--green)",letterSpacing:2 }}>{success}</div>
-        </div>
-        <p style={{ fontSize:12.5,color:"var(--text-sub)",marginBottom:20,lineHeight:1.45 }}>
-          Pásale este código al <b>capitán</b> del equipo donde quieras jugar. Solo él podrá inscribirte.
+        <div style={{ fontSize:52,marginBottom:14 }}>✅</div>
+        <h3 style={{ fontSize:22,fontWeight:800,marginBottom:8 }}>¡Cuenta creada!</h3>
+        <p style={{ color:"var(--text-sub)",marginBottom:22,lineHeight:1.5 }}>
+          Inicia sesión y completa tu perfil para obtener tu <b>número de afiliado</b>.
         </p>
-        <button className="btn btn-premium" style={{ width:"100%" }} onClick={onClose}>Ir al inicio →</button>
+        <button className="btn btn-premium" style={{ width:"100%" }} onClick={onLogin}>Ir a iniciar sesión →</button>
       </div>
     </div>
   );
@@ -1730,6 +1781,7 @@ function RegisterPlayerModal({ onClose, showToast, onLogin }) {
       <div className="ifutbol-modal" onClick={e=>e.stopPropagation()}>
         <ModalHeader title="Crear cuenta de jugador" subtitle="Tu número de afiliado se genera automáticamente" onClose={onClose}/>
         {error&&<div style={m.err}>⚠️ {error}</div>}
+        <BotonGoogle label="Registrarse con Google" dividerPos="bottom"/>
         <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:18,background:"var(--bg)",borderRadius:12,padding:14 }}>
           <div style={{ position:"relative", width:60, height:60, flexShrink:0 }}>
             <div style={{ width:60,height:60,borderRadius:"50%",background:"var(--border)",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26 }}>
