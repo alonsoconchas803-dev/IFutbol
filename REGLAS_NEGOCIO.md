@@ -227,9 +227,9 @@ El admin de liga puede configurar cada jornada:
 - Fecha de nacimiento
 - Domicilio
 - Posición preferida (Portero, Defensa, Mediocampista, Delantero)
-- Número en camiseta (1-99)
+- Número en camiseta (0-999; "0", "00" y "000" son opciones distintas válidas)
 - Nombre al reverso de la camiseta (en mayúsculas)
-- Número de afiliado (generado automáticamente con formato AF-00001, AF-00002, etc.)
+- Número de afiliado (generado automáticamente con formato AF-1, AF-2, etc., sin ceros de relleno)
 - Email y contraseña (para iniciar sesión)
 
 ### 4.4 Restricción de inscripción

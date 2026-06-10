@@ -498,6 +498,9 @@ export default function FichaGenerator({ session, liga, miUnidad, headerExtra, r
         if (!porEquipo[j.equipo_id]) porEquipo[j.equipo_id] = [];
         porEquipo[j.equipo_id].push(j);
       });
+      // dorsal es texto: PostgREST lo ordena alfabéticamente ("10" < "2"), se reordena numérico.
+      Object.values(porEquipo).forEach(arr =>
+        arr.sort((a, b) => (parseInt(a.dorsal, 10) || 0) - (parseInt(b.dorsal, 10) || 0)));
 
       setFichasData(resumen.map(p => ({
         partido: p,
@@ -1007,8 +1010,10 @@ export function FichaDetalleModal({ partido, token, liga, onClose }) {
           token
         );
         if (cancelado) return;
-        setJugadoresLocal((data || []).filter(j => j.equipo_id === eqL?.id));
-        setJugadoresVisit((data || []).filter(j => j.equipo_id === eqV?.id));
+        // dorsal es texto: PostgREST lo ordena alfabéticamente ("10" < "2"), se reordena numérico.
+        const porDorsal = (a, b) => (parseInt(a.dorsal, 10) || 0) - (parseInt(b.dorsal, 10) || 0);
+        setJugadoresLocal((data || []).filter(j => j.equipo_id === eqL?.id).sort(porDorsal));
+        setJugadoresVisit((data || []).filter(j => j.equipo_id === eqV?.id).sort(porDorsal));
       } finally {
         if (!cancelado) setCargando(false);
       }
@@ -1216,8 +1221,10 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
             .then(r => r.ok ? r.json() : null).catch(() => null),
         ]);
         if (cancelado) return;
-        setJugadoresLocal((data || []).filter(j => j.equipo_id === eqL?.id));
-        setJugadoresVisit((data || []).filter(j => j.equipo_id === eqV?.id));
+        // dorsal es texto: PostgREST lo ordena alfabéticamente ("10" < "2"), se reordena numérico.
+        const porDorsal = (a, b) => (parseInt(a.dorsal, 10) || 0) - (parseInt(b.dorsal, 10) || 0);
+        setJugadoresLocal((data || []).filter(j => j.equipo_id === eqL?.id).sort(porDorsal));
+        setJugadoresVisit((data || []).filter(j => j.equipo_id === eqV?.id).sort(porDorsal));
         setSanciones((sancsAqui || []).map(s => ({
           id: s.id,
           jugador_id: s.jugador_id,

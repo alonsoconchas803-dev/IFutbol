@@ -8,6 +8,7 @@ import JerseySVG from "./components/JerseySVG";
 import IFutbolLogo from "./components/IFutbolLogo";
 import BracketTree from "./components/BracketTree";
 import { iniciarLoginOAuth, intercambiarCodigoOAuth } from "./lib/pkce";
+import { uploadFile } from "./lib/storage";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -403,7 +404,7 @@ function DashboardLayout({ session, userRole, jugadorData, displayName, onLogout
           <div style={{ fontSize:54, marginBottom:16 }}>📝</div>
           <h2 style={{ fontSize:22, fontWeight:800, marginBottom:10 }}>Completa tu perfil</h2>
           <p style={{ color:"var(--text-sub)", lineHeight:1.5, marginBottom:24 }}>
-            Completa tu perfil para obtener tu <b>número de afiliado</b>, ver tus estadísticas y poder unirte a tu equipo.
+            Completa tu perfil de jugador para obtener tu <b>número de afiliado</b>, ver tus estadísticas y poder unirte a tu equipo.
           </p>
           <button className="btn btn-premium" style={{ width:"100%", maxWidth:300 }} onClick={onCompletarPerfil}>
             Completar formulario →
@@ -1782,57 +1783,9 @@ function RegisterPlayerModal({ onClose, onLogin }) {
         <ModalHeader title="Crear cuenta de jugador" subtitle="Tu número de afiliado se genera automáticamente" onClose={onClose}/>
         {error&&<div style={m.err}>⚠️ {error}</div>}
         <BotonGoogle label="Registrarse con Google" dividerPos="bottom"/>
-        <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:18,background:"var(--bg)",borderRadius:12,padding:14 }}>
-          <div style={{ position:"relative", width:60, height:60, flexShrink:0 }}>
-            <div style={{ width:60,height:60,borderRadius:"50%",background:"var(--border)",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26 }}>
-              {fotoPreview?<img src={fotoPreview} style={{ width:"100%",height:"100%",objectFit:"cover" }} alt=""/>:"📷"}
-            </div>
-            {fotoPreview && (
-              <span title="Foto cargada"
-                style={{ position:"absolute", bottom:-2, right:-2, width:20, height:20, borderRadius:"50%", background:"#16a34a", color:"#fff", fontSize:11, fontWeight:900, display:"flex", alignItems:"center", justifyContent:"center", border:"2px solid #fff", boxShadow:"0 2px 6px rgba(0,0,0,0.18)" }}>
-                ✓
-              </span>
-            )}
-          </div>
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
-              <label style={{ display:"inline-block",background:"white",border:"1px solid var(--border)",borderRadius:8,padding:"6px 12px",color:"var(--text-sub)",fontSize:13,cursor:"pointer" }}>
-                {fotoPreview ? "Cambiar foto" : "Subir foto de rostro *"}
-                <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{
-                  const f = e.target.files?.[0];
-                  if (!f) return;
-                  if (typeof fotoPreview === "string" && fotoPreview.startsWith("blob:")) URL.revokeObjectURL(fotoPreview);
-                  setFotoPreview(URL.createObjectURL(f));
-                  showToast && showToast(`Foto "${f.name}" cargada ✓`);
-                }}/>
-              </label>
-              {fotoPreview && (
-                <button type="button"
-                  style={{ background:"transparent",border:"1px solid #fecaca",color:"#dc2626",borderRadius:8,padding:"5px 10px",fontSize:11.5,fontWeight:600,cursor:"pointer" }}
-                  onClick={()=>{
-                    if (typeof fotoPreview === "string" && fotoPreview.startsWith("blob:")) URL.revokeObjectURL(fotoPreview);
-                    setFotoPreview(null);
-                  }}>
-                  ✕ Quitar
-                </button>
-              )}
-            </div>
-            {fotoPreview ? (
-              <p style={{ fontSize:11,color:"#16a34a",margin:"4px 0 0",fontWeight:600 }}>✓ Foto lista para enviar.</p>
-            ) : (
-              <p style={{ fontSize:11,color:"var(--text-muted)",margin:"4px 0 0" }}>Foto de cédula, perfil y estadísticas</p>
-            )}
-          </div>
-        </div>
+        <div style={{ marginBottom:14 }}><Field label="Correo electrónico *"><input className="form-input" type="email" placeholder="tu@correo.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></Field></div>
         <div style={{ display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:"0 14px" }}>
-          <div style={{ gridColumn:"1/-1",marginBottom:14 }}><Field label="Nombre completo *"><input className="form-input" type="text" placeholder="Juan Pérez" value={form.nombre_completo} onChange={e=>setForm({...form,nombre_completo:toTitleCase(e.target.value)})}/></Field></div>
-          <div style={{ marginBottom:14,minWidth:0 }}><Field label="Fecha de nacimiento"><input className="form-input" type="date" value={form.fecha_nacimiento} onChange={e=>setForm({...form,fecha_nacimiento:e.target.value})}/></Field></div>
-          <div style={{ marginBottom:14,minWidth:0 }}><Field label="Posición preferida"><select className="form-input" value={form.posicion_preferida} onChange={e=>setForm({...form,posicion_preferida:e.target.value})}>{POSITIONS.map(p=><option key={p}>{p}</option>)}</select></Field></div>
-          <div style={{ marginBottom:14,minWidth:0 }}><Field label="Número preferido (1-99)"><input className="form-input" type="number" min="1" max="99" placeholder="ej. 10" value={form.numero_camiseta} onChange={e=>setForm({...form,numero_camiseta:e.target.value})}/></Field></div>
-          <div style={{ marginBottom:14,minWidth:0 }}><Field label="Nombre en camiseta"><input className="form-input" type="text" placeholder="GARCÍA" value={form.nombre_camiseta} onChange={e=>setForm({...form,nombre_camiseta:e.target.value.toUpperCase()})}/></Field></div>
-          <div style={{ gridColumn:"1/-1",marginBottom:14 }}><Field label="Domicilio"><input className="form-input" type="text" placeholder="Calle, Ciudad" value={form.domicilio} onChange={e=>setForm({...form,domicilio:e.target.value})}/></Field></div>
-          <div style={{ gridColumn:"1/-1",marginBottom:14 }}><Field label="Correo electrónico *"><input className="form-input" type="email" placeholder="tu@correo.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></Field></div>
-          <div style={{ marginBottom:14,minWidth:0 }}><Field label="Contraseña *"><input className="form-input" type="password" placeholder="Mín. 8, con mayús, minús y número" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></Field></div>
+          <div style={{ marginBottom:20,minWidth:0 }}><Field label="Contraseña *"><input className="form-input" type="password" placeholder="Mín. 8, con mayús, minús y número" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></Field></div>
           <div style={{ marginBottom:20,minWidth:0 }}><Field label="Confirmar contraseña *"><input className="form-input" type="password" placeholder="Repite tu contraseña" value={form.confirm} onChange={e=>setForm({...form,confirm:e.target.value})}/></Field></div>
         </div>
         <button className="btn btn-premium" style={{ width:"100%",marginBottom:14 }} onClick={handle} disabled={loading}>{loading?"Creando cuenta...":"Crear cuenta de jugador →"}</button>
@@ -1880,10 +1833,13 @@ function CompletarPerfilJugadorModal({ session, onCancel, onCreated }) {
   const [form, setForm] = useState({
     nombre_completo: "",
     fecha_nacimiento: "",
+    domicilio: "",
     posicion_preferida: "Delantero",
     numero_camiseta: "",
     nombre_camiseta: "",
   });
+  const [fotoFile, setFotoFile] = useState(null);
+  const [fotoPreview, setFotoPreview] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const token = session?.access_token;
@@ -1891,14 +1847,21 @@ function CompletarPerfilJugadorModal({ session, onCancel, onCreated }) {
 
   const handle = async () => {
     if (!form.nombre_completo.trim()) return setError("Escribe tu nombre completo");
+    if (!fotoFile) return setError("Sube una foto de tu rostro");
+    if (form.numero_camiseta && !/^\d{1,3}$/.test(form.numero_camiseta.trim()))
+      return setError("El número preferido debe ser de 0 a 999 (también vale 00 o 000)");
     setLoading(true); setError("");
     try {
+      const ext = fotoFile.name.split(".").pop();
+      const foto_url = await uploadFile("imagenes", `fotos/${userId}.${ext}`, fotoFile, token, "jugador");
       const payload = {
         user_id: userId,
         nombre_completo: form.nombre_completo.trim(),
         fecha_nacimiento: form.fecha_nacimiento || null,
+        domicilio: form.domicilio?.trim() || null,
+        foto_url,
         posicion_preferida: form.posicion_preferida,
-        numero_preferido: form.numero_camiseta ? +form.numero_camiseta : null,
+        numero_preferido: form.numero_camiseta?.trim() || null,
         nombre_camiseta_preferido: form.nombre_camiseta?.trim() ? form.nombre_camiseta.trim().toUpperCase() : null,
       };
       const res = await fetch(`${SUPABASE_URL}/rest/v1/jugadores`, {
@@ -1935,6 +1898,26 @@ function CompletarPerfilJugadorModal({ session, onCancel, onCreated }) {
           </p>
         </div>
         {error && <div style={m.err}>⚠️ {error}</div>}
+        <div style={{ display:"flex", alignItems:"center", gap:14, marginBottom:14, background:"var(--bg)", borderRadius:12, padding:14 }}>
+          <div style={{ width:60, height:60, borderRadius:"50%", background:"var(--border)", overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, flexShrink:0 }}>
+            {fotoPreview ? <img src={fotoPreview} style={{ width:"100%", height:"100%", objectFit:"cover" }} alt=""/> : "📷"}
+          </div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <label style={{ display:"inline-block", background:"white", border:"1px solid var(--border)", borderRadius:8, padding:"6px 12px", color:"var(--text-sub)", fontSize:13, cursor:"pointer" }}>
+              {fotoPreview ? "Cambiar foto" : "Subir foto de rostro *"}
+              <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{
+                const f = e.target.files?.[0];
+                if (!f) return;
+                if (typeof fotoPreview === "string" && fotoPreview.startsWith("blob:")) URL.revokeObjectURL(fotoPreview);
+                setFotoFile(f);
+                setFotoPreview(URL.createObjectURL(f));
+              }}/>
+            </label>
+            <p style={{ fontSize:11, color:"var(--text-muted)", margin:"6px 0 0", lineHeight:1.4 }}>
+              No te preocupes por la foto perfecta: podrás cambiarla cuando quieras desde tu perfil.
+            </p>
+          </div>
+        </div>
         <div style={{ marginBottom:14 }}>
           <Field label="Nombre completo *">
             <input className="form-input" type="text" placeholder="Juan Pérez"
@@ -1960,10 +1943,10 @@ function CompletarPerfilJugadorModal({ session, onCancel, onCreated }) {
             </Field>
           </div>
           <div style={{ marginBottom:14, minWidth:0 }}>
-            <Field label="Número preferido (1-99)">
-              <input className="form-input" type="number" min="1" max="99" placeholder="ej. 10"
+            <Field label="Número preferido">
+              <input className="form-input" type="text" inputMode="numeric" maxLength={3} placeholder="0-999"
                 value={form.numero_camiseta}
-                onChange={e=>setForm({...form, numero_camiseta: e.target.value})}/>
+                onChange={e=>setForm({...form, numero_camiseta: e.target.value.replace(/[^0-9]/g, "")})}/>
             </Field>
           </div>
           <div style={{ marginBottom:14, minWidth:0 }}>
@@ -1971,6 +1954,13 @@ function CompletarPerfilJugadorModal({ session, onCancel, onCreated }) {
               <input className="form-input" type="text" placeholder="GARCÍA"
                 value={form.nombre_camiseta}
                 onChange={e=>setForm({...form, nombre_camiseta: e.target.value.toUpperCase()})}/>
+            </Field>
+          </div>
+          <div style={{ gridColumn:"1/-1", marginBottom:14 }}>
+            <Field label="Domicilio">
+              <input className="form-input" type="text" placeholder="Calle, Ciudad"
+                value={form.domicilio}
+                onChange={e=>setForm({...form, domicilio: e.target.value})}/>
             </Field>
           </div>
         </div>

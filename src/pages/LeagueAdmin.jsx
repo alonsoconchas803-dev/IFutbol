@@ -43,21 +43,23 @@ const PATRO_FORMATOS = [
   { val: "vertical",   titulo: "Vertical",   desc: "3:4" },
 ];
 
-// Normaliza "1", "00001", "af-1", "AF-00001" → "AF-00001"
+// Normaliza "1", "00001", "af-1", "AF-00001" → "AF-1" (sin ceros de relleno)
 const normalizarAfiliado = (input) => {
   const limpio = String(input || "").trim().toUpperCase().replace(/^AF-?/, "");
   if (!limpio) return "";
-  if (/^\d+$/.test(limpio)) return `AF-${limpio.padStart(5, "0")}`;
+  if (/^\d+$/.test(limpio)) return `AF-${parseInt(limpio, 10)}`;
   return `AF-${limpio}`;
 };
 
 // Devuelve { dorsal, cambiado } usando el preferido si está libre,
-// o el primer libre disponible (1..99). Si todos están ocupados → null.
+// o el primer libre disponible (1..999). Si todos están ocupados → null.
+// Los dorsales son texto ("0", "00" y "000" son opciones distintas válidas).
 const calcularDorsal = (preferido, ocupados) => {
-  const set = ocupados instanceof Set ? ocupados : new Set(ocupados || []);
-  if (preferido && !set.has(preferido)) return { dorsal: preferido, cambiado: false };
-  for (let i = 1; i <= 99; i++) {
-    if (!set.has(i)) return { dorsal: i, cambiado: !!preferido };
+  const set = new Set([...(ocupados || [])].map(String));
+  const pref = preferido != null && preferido !== "" ? String(preferido) : null;
+  if (pref && !set.has(pref)) return { dorsal: pref, cambiado: false };
+  for (let i = 1; i <= 999; i++) {
+    if (!set.has(String(i))) return { dorsal: String(i), cambiado: !!pref };
   }
   return { dorsal: null, cambiado: false };
 };
@@ -159,6 +161,8 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
         `/jugador_equipo?equipo_id=eq.${equipoId}&liga_id=eq.${ligaId}&select=*,jugadores(nombre_completo,foto_url,posicion_preferida,numero_afiliado)&order=dorsal`,
         token
       );
+      // dorsal es texto: PostgREST lo ordena alfabéticamente ("10" < "2"), se reordena numérico.
+      (data || []).sort((a, b) => (parseInt(a.dorsal, 10) || 0) - (parseInt(b.dorsal, 10) || 0));
       setJugadoresEquipo(data || []);
       // Carga sanciones activas del equipo para subrayar y bloquear eliminación.
       try {
@@ -235,7 +239,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
         let dorsalFinal = null;
         let avisoDorsal = "";
         if (capitanForm.dorsal) {
-          const dManual = +capitanForm.dorsal;
+          const dManual = String(capitanForm.dorsal).trim();
           if (ocupados.has(dManual)) {
             showToast(`El dorsal ${dManual} ya está en uso en este equipo`, "err");
             setLoading(false);
@@ -2087,7 +2091,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                 <span style={{ display: "flex", alignItems: "center", padding: "0 14px", background: "#f3f4f6", color: "#6b7280", fontSize: 14, fontWeight: 700, borderRight: `1px solid ${BORDER}` }}>AF-</span>
                 <input
                   style={{ ...s.input, border: "none", borderRadius: 0, background: "transparent", flex: 1 }}
-                  placeholder="00001"
+                  placeholder="63"
                   inputMode="numeric"
                   value={capitanForm.numero_afiliado}
                   onChange={e => setCapitanForm({ ...capitanForm, numero_afiliado: e.target.value })}
@@ -2099,8 +2103,9 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
               <label style={s.label}>Dorsal (opcional)</label>
               <input
                 style={s.input}
-                type="number"
-                min="1" max="99"
+                type="text"
+                inputMode="numeric"
+                maxLength={3}
                 placeholder="Si aún no está inscrito"
                 value={capitanForm.dorsal}
                 onChange={e => setCapitanForm({ ...capitanForm, dorsal: e.target.value })}
@@ -2171,7 +2176,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
               <label style={s.label}>Números de afiliado</label>
               <textarea
                 style={{ ...s.input, minHeight: 90, resize: "vertical", fontFamily: "inherit" }}
-                placeholder={"00001\n00002\n00003"}
+                placeholder={"61\n62\n63"}
                 inputMode="numeric"
                 value={anadirAfiliados}
                 onChange={e => setAnadirAfiliados(e.target.value)}

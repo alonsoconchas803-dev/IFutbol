@@ -10,20 +10,22 @@ const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
 const COLORES_CAMISETA = ["#e53e3e","#dd6b20","#d69e2e","#38a169","#3182ce","#805ad5","#d53f8c","#2d3748"];
 const COLORES_SECUNDARIOS = ["#ffffff","#000000","#f5f5f5","#fbbf24","#ef4444","#3b82f6","#10b981","#8b5cf6"];
 
-// Normaliza "1", "00001", "af-1", "AF-00001" → "AF-00001"
+// Normaliza "1", "00001", "af-1", "AF-00001" → "AF-1" (sin ceros de relleno)
 const normalizarAfiliado = (input) => {
   const limpio = String(input || "").trim().toUpperCase().replace(/^AF-?/, "");
   if (!limpio) return "";
-  if (/^\d+$/.test(limpio)) return `AF-${limpio.padStart(5, "0")}`;
+  if (/^\d+$/.test(limpio)) return `AF-${parseInt(limpio, 10)}`;
   return `AF-${limpio}`;
 };
 
 // Devuelve { dorsal, cambiado } usando el preferido si está libre, o el primer libre.
+// Los dorsales son texto ("0", "00" y "000" son opciones distintas válidas).
 const calcularDorsal = (preferido, ocupados) => {
-  const set = ocupados instanceof Set ? ocupados : new Set(ocupados || []);
-  if (preferido && !set.has(preferido)) return { dorsal: preferido, cambiado: false };
-  for (let i = 1; i <= 99; i++) {
-    if (!set.has(i)) return { dorsal: i, cambiado: !!preferido };
+  const set = new Set([...(ocupados || [])].map(String));
+  const pref = preferido != null && preferido !== "" ? String(preferido) : null;
+  if (pref && !set.has(pref)) return { dorsal: pref, cambiado: false };
+  for (let i = 1; i <= 999; i++) {
+    if (!set.has(String(i))) return { dorsal: String(i), cambiado: !!pref };
   }
   return { dorsal: null, cambiado: false };
 };
@@ -152,7 +154,7 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
       }
       const payload = {
         ...form,
-        numero_preferido: form.numero_preferido === "" ? null : +form.numero_preferido,
+        numero_preferido: String(form.numero_preferido).trim() || null,
         nombre_camiseta_preferido: form.nombre_camiseta_preferido?.trim() ? form.nombre_camiseta_preferido.trim().toUpperCase() : null,
         foto_url
       };
@@ -186,13 +188,15 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
   };
 
   const guardarInscripcion = async () => {
-    if (!inscEditForm.dorsal) return showToast("El dorsal es obligatorio", "err");
+    const dorsal = String(inscEditForm.dorsal).trim();
+    if (!dorsal) return showToast("El dorsal es obligatorio", "err");
+    if (!/^\d{1,3}$/.test(dorsal)) return showToast("El dorsal debe ser de 0 a 999", "err");
     setGuardando(true);
     try {
       await db(`/jugador_equipo?id=eq.${editandoInsc.id}`, token, {
         method: "PATCH",
         body: JSON.stringify({
-          dorsal: +inscEditForm.dorsal,
+          dorsal,
           nombre_camiseta: inscEditForm.nombre_camiseta.toUpperCase() || editandoInsc.nombre_camiseta,
         }),
       });
@@ -772,9 +776,9 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
   // ── EDITAR DORSAL ─────────────────────────────────────────────
   const guardarDorsalCap = async () => {
     if (!dorsalTarget) return;
-    const num = parseInt(dorsalNuevo, 10);
-    if (!num || num < 1 || num > 99) return showToast("Dorsal entre 1 y 99", "err");
-    const ocupado = jugadoresEquipoCap.find(j => j.dorsal === num && j.id !== dorsalTarget.id);
+    const num = String(dorsalNuevo).trim();
+    if (!/^\d{1,3}$/.test(num)) return showToast("Dorsal de 0 a 999 (también vale 00 o 000)", "err");
+    const ocupado = jugadoresEquipoCap.find(j => String(j.dorsal) === num && j.id !== dorsalTarget.id);
     if (ocupado) return showToast(`El dorsal ${num} ya lo usa ${ocupado.jugadores?.nombre_completo}`, "err");
     setGuardando(true);
     try {
@@ -910,10 +914,10 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
                     </select>
                   </div>
                   <div style={s.field}>
-                    <label style={s.label}>Número preferido en camiseta (1–99)</label>
-                    <input style={s.input} type="number" min="1" max="99" placeholder="ej. 10"
+                    <label style={s.label}>Número preferido en camiseta</label>
+                    <input style={s.input} type="text" inputMode="numeric" maxLength={3} placeholder="0-999"
                       value={form.numero_preferido}
-                      onChange={e => setForm({ ...form, numero_preferido: e.target.value })} />
+                      onChange={e => setForm({ ...form, numero_preferido: e.target.value.replace(/[^0-9]/g, "") })} />
                     <p style={{ fontSize:11, color:"#9ca3af", marginTop:4 }}>
                       Cuando te inscriban en un equipo, intentarán darte este dorsal. Si está ocupado, te asignarán otro.
                     </p>
@@ -1392,7 +1396,9 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
           if (!a.es_capitan && b.es_capitan) return 1;
           if (a.jugador_id === miJugadorId && b.jugador_id !== miJugadorId) return -1;
           if (b.jugador_id === miJugadorId && a.jugador_id !== miJugadorId) return 1;
-          return (a.dorsal ?? 999) - (b.dorsal ?? 999);
+          // Dorsal es texto ("00" es válido): se ordena por su valor numérico.
+          const dA = parseInt(a.dorsal, 10); const dB = parseInt(b.dorsal, 10);
+          return (Number.isNaN(dA) ? 1000 : dA) - (Number.isNaN(dB) ? 1000 : dB);
         });
         return (
           <div>
@@ -1649,7 +1655,7 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
               <label style={s.label}>Números de afiliado</label>
               <textarea
                 style={{ ...s.input, minHeight: 90, resize: "vertical", fontFamily: "inherit" }}
-                placeholder={"00001\n00002\n00003"}
+                placeholder={"61\n62\n63"}
                 inputMode="numeric"
                 value={anadirAfiliados}
                 onChange={e => setAnadirAfiliados(e.target.value)}
@@ -1747,10 +1753,10 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
               <strong>{dorsalTarget.jugadores?.nombre_completo}</strong>
             </div>
             <div style={s.field}>
-              <label style={s.label}>Nuevo dorsal (1–99)</label>
-              <input style={s.input} type="number" min="1" max="99"
+              <label style={s.label}>Nuevo dorsal</label>
+              <input style={s.input} type="text" inputMode="numeric" maxLength={3} placeholder="0-999"
                 value={dorsalNuevo}
-                onChange={e => setDorsalNuevo(e.target.value)}
+                onChange={e => setDorsalNuevo(e.target.value.replace(/[^0-9]/g, ""))}
                 autoFocus />
               <p style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
                 No puede repetirse en este equipo.
@@ -1777,8 +1783,8 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
             <div style={s.formRow}>
               <div style={s.field}>
                 <label style={s.label}>Dorsal *</label>
-                <input style={s.input} type="number" min="1" max="99" placeholder="ej. 10"
-                  value={inscEditForm.dorsal} onChange={e => setInscEditForm({ ...inscEditForm, dorsal: e.target.value })} />
+                <input style={s.input} type="text" inputMode="numeric" maxLength={3} placeholder="0-999"
+                  value={inscEditForm.dorsal} onChange={e => setInscEditForm({ ...inscEditForm, dorsal: e.target.value.replace(/[^0-9]/g, "") })} />
               </div>
               <div style={s.field}>
                 <label style={s.label}>Nombre en camiseta</label>

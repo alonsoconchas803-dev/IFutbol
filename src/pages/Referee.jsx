@@ -304,8 +304,10 @@ export default function Referee({ session, setTopbarBack, seccionInicial }) {
         db(`/jugador_equipo?equipo_id=eq.${partido.equipos_local.id}&liga_id=eq.${ligaId}&select=*,jugadores(nombre_completo,numero_afiliado)&order=dorsal`, token),
         db(`/jugador_equipo?equipo_id=eq.${partido.equipos_visitante.id}&liga_id=eq.${ligaId}&select=*,jugadores(nombre_completo,numero_afiliado)&order=dorsal`, token),
       ]);
-      setJugadoresLocal(local || []);
-      setJugadoresVisitante(visitante || []);
+      // dorsal es texto: PostgREST lo ordena alfabéticamente ("10" < "2"), se reordena numérico.
+      const porDorsal = (a, b) => (parseInt(a.dorsal, 10) || 0) - (parseInt(b.dorsal, 10) || 0);
+      setJugadoresLocal((local || []).sort(porDorsal));
+      setJugadoresVisitante((visitante || []).sort(porDorsal));
     } catch (e) { console.error(e); }
   };
 
