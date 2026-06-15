@@ -1281,6 +1281,10 @@ function FichaEditorModal({ partido, token, liga, showToast, onClose, onGuardado
       setGoleadores([...goleadores, {
         jugador_id: jugInfo.jugador_id,
         nombre: jugInfo.jugadores?.nombre_completo,
+        // Nombre de camiseta: se usa en la vista pública (UnidadPage) para no
+        // exponer el nombre real del jugador. El campo `nombre` (real) se
+        // conserva para la ficha interna y el PDF, que sí pueden mostrarlo.
+        nombre_camiseta: jugInfo.nombre_camiseta || null,
         equipo: equipoId,
         equipo_nombre: equipoNombre,
         dorsal: jugInfo.dorsal,

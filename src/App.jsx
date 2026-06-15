@@ -9,6 +9,7 @@ import IFutbolLogo from "./components/IFutbolLogo";
 import BracketTree from "./components/BracketTree";
 import { iniciarLoginOAuth, intercambiarCodigoOAuth } from "./lib/pkce";
 import { uploadFile } from "./lib/storage";
+import { LegalModal, AceptoTerminos, LEGAL_VERSION } from "./components/LegalDocs";
 
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
@@ -509,6 +510,8 @@ function TopbarBackBtn({ back }) {
 
 function PublicLayout({ children, session, userRole, displayName, sidebarOpen, setSidebarOpen, setModal, onLogout, initials, toast, onHome, onDashboard, topbarBack }) {
   const roleInfo = ROLES_INFO[userRole?.rol] || null;
+  const [legalDoc, setLegalDoc] = useState(null);
+  const footLink = { background:"none", border:"none", color:"var(--text-muted)", fontSize:12, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", textDecoration:"underline", padding:0 };
   return (
     <div style={s.root}>
       <style>{css}</style>
@@ -563,6 +566,13 @@ function PublicLayout({ children, session, userRole, displayName, sidebarOpen, s
       </aside>
 
       <main style={s.main}>{children}</main>
+
+      <footer style={{ padding:"18px 16px 24px", textAlign:"center", display:"flex", flexWrap:"wrap", justifyContent:"center", alignItems:"center", gap:"4px 12px" }}>
+        <span style={{ fontSize:12, color:"var(--text-muted)" }}>© {new Date().getFullYear()} iFutbol</span>
+        <button style={footLink} onClick={()=>setLegalDoc("terminos")}>Términos y Condiciones</button>
+        <button style={footLink} onClick={()=>setLegalDoc("privacidad")}>Aviso de Privacidad</button>
+      </footer>
+      {legalDoc && <LegalModal doc={legalDoc} onClose={()=>setLegalDoc(null)} />}
     </div>
   );
 }
@@ -818,10 +828,14 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
     setClasificacion(Object.values(tabla).filter(r=>r.equipo.activo!==false).sort((a,b)=>b.pts-a.pts||(b.gf-b.gc)-(a.gf-a.gc)));
 
     // Goleadores: acumula goles por jugador desde las fichas cerradas.
+    // PRIVACIDAD: en la vista pública nunca se muestra el nombre real del
+    // jugador (g.nombre), solo su nombre de camiseta. Se prefiere la camiseta
+    // de su inscripción vigente (más abajo); como respaldo, la guardada en la
+    // ficha; y si no hay ninguna, una etiqueta por dorsal.
     const gm={};
     fichas.forEach(p=>(p.ficha_partido?.goleadores||[]).forEach(g=>{
       if(!g.jugador_id)return;
-      if(!gm[g.jugador_id])gm[g.jugador_id]={nombre:g.nombre,equipo_nombre:g.equipo_nombre,goles:0};
+      if(!gm[g.jugador_id])gm[g.jugador_id]={nombre:g.nombre_camiseta||null,equipo_nombre:g.equipo_nombre,dorsal:g.dorsal,goles:0};
       gm[g.jugador_id].goles+=g.goles||0;
     }));
     // El equipo mostrado debe ser el equipo ACTUAL del jugador, no el que quedó
@@ -829,16 +843,27 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
     // el equipo nuevo. Se resuelve por su inscripción vigente en jugador_equipo.
     const golJugIds=Object.keys(gm);
     if(golJugIds.length>0){
-      const inscripciones=await db(`/jugador_equipo?liga_id=eq.${ligaId}&jugador_id=in.(${golJugIds.join(",")})&select=jugador_id,equipo_id,created_at&order=created_at.desc`);
+      const inscripciones=await db(`/jugador_equipo?liga_id=eq.${ligaId}&jugador_id=in.(${golJugIds.join(",")})&select=jugador_id,equipo_id,nombre_camiseta,created_at&order=created_at.desc`);
       const equipoActualPorJug={};
-      (inscripciones||[]).forEach(i=>{ if(!equipoActualPorJug[i.jugador_id])equipoActualPorJug[i.jugador_id]=i.equipo_id; });
+      const camisetaPorJug={};
+      (inscripciones||[]).forEach(i=>{
+        if(!equipoActualPorJug[i.jugador_id]){
+          equipoActualPorJug[i.jugador_id]=i.equipo_id;
+          // Nombre de camiseta vigente: tiene prioridad sobre el de la ficha.
+          if(i.nombre_camiseta)camisetaPorJug[i.jugador_id]=i.nombre_camiseta;
+        }
+      });
       const nombrePorEquipo=Object.fromEntries(eqsF.map(e=>[e.id,e.nombre]));
       golJugIds.forEach(jid=>{
         const eqActual=equipoActualPorJug[jid];
         // Si no tiene inscripción vigente, se conserva el equipo de la ficha.
         if(eqActual&&nombrePorEquipo[eqActual])gm[jid].equipo_nombre=nombrePorEquipo[eqActual];
+        if(camisetaPorJug[jid])gm[jid].nombre=camisetaPorJug[jid];
       });
     }
+    // Respaldo final: si no hay nombre de camiseta por ningún lado, se usa una
+    // etiqueta por dorsal en lugar de dejar el nombre real (que nunca se carga).
+    Object.values(gm).forEach(r=>{ if(!r.nombre)r.nombre=r.dorsal?`Dorsal ${r.dorsal}`:"Jugador"; });
     setGoleadores(Object.values(gm).sort((a,b)=>b.goles-a.goles).slice(0,10));
     setLoading(false);
   };
@@ -1541,7 +1566,10 @@ const GoogleG = () => (
 // Botón "Continuar con Google" + separador "o". Arranca el flujo OAuth PKCE
 // (redirige el navegador); el retorno se procesa en el useEffect de App.
 // dividerPos: "top" (separador arriba del botón) o "bottom" (debajo).
-function BotonGoogle({ label = "Continuar con Google", dividerPos = "top" }) {
+// disabled + onBlocked: cuando el registro exige aceptar Términos, el botón
+// de Google se bloquea hasta que se marque el checkbox (onBlocked muestra el
+// aviso). Así también el alta vía Google queda sujeta al consentimiento.
+function BotonGoogle({ label = "Continuar con Google", dividerPos = "top", disabled = false, onBlocked }) {
   const Separador = () => (
     <div style={{ display:"flex",alignItems:"center",gap:10,margin:"2px 0 14px" }}>
       <div style={{ flex:1,height:1,background:"var(--border)" }}/>
@@ -1552,10 +1580,13 @@ function BotonGoogle({ label = "Continuar con Google", dividerPos = "top" }) {
   return (
     <>
       {dividerPos === "top" && <Separador/>}
-      <button type="button" onClick={()=>iniciarLoginOAuth("google")}
+      <button type="button"
+        onClick={()=> disabled ? onBlocked?.() : iniciarLoginOAuth("google")}
+        aria-disabled={disabled}
         style={{ width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:10,
           padding:"11px 16px",borderRadius:"var(--radius-md)",border:"1px solid var(--border)",
-          background:"#fff",color:"#3c4043",fontWeight:600,fontSize:14,cursor:"pointer",marginBottom:14 }}>
+          background:"#fff",color:"#3c4043",fontWeight:600,fontSize:14,marginBottom:14,
+          cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.55 : 1 }}>
         <GoogleG/>{label}
       </button>
       {dividerPos === "bottom" && <Separador/>}
@@ -1724,18 +1755,25 @@ function RegisterPlayerModal({ onClose, onLogin }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(null);
+  const [acepto, setAcepto] = useState(false);
 
   const handle = async () => {
     if (!form.email || !form.password) return setError("Completa correo y contraseña");
     if (form.password !== form.confirm) return setError("Las contraseñas no coinciden");
+    if (!acepto) return setError("Debes aceptar los Términos y el Aviso de Privacidad");
     const pwdErr = validarPassword(form.password);
     if (pwdErr) return setError(pwdErr);
     setLoading(true); setError("");
     // Solo creamos la cuenta. El perfil de jugador y su número de afiliado se
     // llenan DESPUÉS, ya con sesión iniciada, desde CompletarPerfilJugadorModal.
+    // Guardamos el consentimiento (fecha + versión) en la metadata del usuario.
     const data = await api("/auth/v1/signup", {
       method: "POST",
-      body: JSON.stringify({ email: form.email, password: form.password }),
+      body: JSON.stringify({
+        email: form.email,
+        password: form.password,
+        data: { acepto_terminos_at: new Date().toISOString(), version_terminos: LEGAL_VERSION },
+      }),
     });
     setLoading(false);
     if (data.user || data.id) {
@@ -1782,13 +1820,15 @@ function RegisterPlayerModal({ onClose, onLogin }) {
       <div className="ifutbol-modal" onClick={e=>e.stopPropagation()}>
         <ModalHeader title="Crear cuenta de jugador" subtitle="Tu número de afiliado se genera automáticamente" onClose={onClose}/>
         {error&&<div style={m.err}>⚠️ {error}</div>}
-        <BotonGoogle label="Registrarse con Google" dividerPos="bottom"/>
+        <BotonGoogle label="Registrarse con Google" dividerPos="bottom" disabled={!acepto}
+          onBlocked={()=>setError("Primero acepta los Términos y el Aviso de Privacidad")}/>
         <div style={{ marginBottom:14 }}><Field label="Correo electrónico *"><input className="form-input" type="email" placeholder="tu@correo.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></Field></div>
         <div style={{ display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:"0 14px" }}>
           <div style={{ marginBottom:20,minWidth:0 }}><Field label="Contraseña *"><input className="form-input" type="password" placeholder="Mín. 8, con mayús, minús y número" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></Field></div>
           <div style={{ marginBottom:20,minWidth:0 }}><Field label="Confirmar contraseña *"><input className="form-input" type="password" placeholder="Repite tu contraseña" value={form.confirm} onChange={e=>setForm({...form,confirm:e.target.value})}/></Field></div>
         </div>
-        <button className="btn btn-premium" style={{ width:"100%",marginBottom:14 }} onClick={handle} disabled={loading}>{loading?"Creando cuenta...":"Crear cuenta de jugador →"}</button>
+        <AceptoTerminos checked={acepto} onChange={setAcepto}/>
+        <button className="btn btn-premium" style={{ width:"100%",marginBottom:14 }} onClick={handle} disabled={loading||!acepto}>{loading?"Creando cuenta...":"Crear cuenta de jugador →"}</button>
         <p style={{ textAlign:"center",fontSize:13,color:"var(--text-muted)" }}>¿Ya tienes cuenta? <span style={m.link} onClick={onLogin}>Inicia sesión</span></p>
       </div>
     </div>
@@ -1842,16 +1882,32 @@ function CompletarPerfilJugadorModal({ session, onCancel, onCreated }) {
   const [fotoPreview, setFotoPreview] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Consentimiento: si la cuenta se creó por Google, este es el primer (y único)
+  // punto donde el jugador acepta los Términos antes de entregar datos sensibles.
+  const yaAcepto = !!session?.user?.user_metadata?.acepto_terminos_at;
+  const [acepto, setAcepto] = useState(yaAcepto);
   const token = session?.access_token;
   const userId = session?.user?.id;
 
   const handle = async () => {
     if (!form.nombre_completo.trim()) return setError("Escribe tu nombre completo");
     if (!fotoFile) return setError("Sube una foto de tu rostro");
+    if (!acepto) return setError("Debes aceptar los Términos y el Aviso de Privacidad");
     if (form.numero_camiseta && !/^\d{1,3}$/.test(form.numero_camiseta.trim()))
       return setError("El número preferido debe ser de 0 a 999 (también vale 00 o 000)");
     setLoading(true); setError("");
     try {
+      // Registra el consentimiento en la metadata del usuario si aún no lo tenía
+      // (caso típico: alta por Google, que no pasa por RegisterPlayerModal).
+      if (!yaAcepto) {
+        try {
+          await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+            method: "PUT",
+            headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ data: { acepto_terminos_at: new Date().toISOString(), version_terminos: LEGAL_VERSION } }),
+          });
+        } catch (_) { /* no bloquea la creación del perfil */ }
+      }
       const ext = fotoFile.name.split(".").pop();
       const foto_url = await uploadFile("imagenes", `fotos/${userId}.${ext}`, fotoFile, token, "jugador");
       const payload = {
@@ -1964,7 +2020,8 @@ function CompletarPerfilJugadorModal({ session, onCancel, onCreated }) {
             </Field>
           </div>
         </div>
-        <button className="btn btn-premium" style={{ width:"100%", marginBottom:10 }} onClick={handle} disabled={loading}>
+        {!yaAcepto && <AceptoTerminos checked={acepto} onChange={setAcepto}/>}
+        <button className="btn btn-premium" style={{ width:"100%", marginBottom:10 }} onClick={handle} disabled={loading||!acepto}>
           {loading ? "Creando perfil..." : "Crear mi perfil →"}
         </button>
         <button className="btn btn-ghost" style={{ width:"100%" }} onClick={onCancel}>
@@ -1983,10 +2040,12 @@ function RegisterStaffModal({ onClose, showToast }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [acepto, setAcepto] = useState(false);
 
   const handle = async () => {
     if (!form.tipo) return setError("Selecciona si eres árbitro o admin de liga");
     if (!form.nombre_completo || !form.email || !form.password) return setError("Completa todos los campos");
+    if (!acepto) return setError("Debes aceptar los Términos y el Aviso de Privacidad");
     const pwdErr = validarPassword(form.password);
     if (pwdErr) return setError(pwdErr);
     setLoading(true); setError("");
@@ -2003,6 +2062,8 @@ function RegisterStaffModal({ onClose, showToast }) {
         data: {
           nombre_completo: form.nombre_completo,
           tipo_rol: form.tipo,
+          acepto_terminos_at: new Date().toISOString(),
+          version_terminos: LEGAL_VERSION,
         },
       }),
     });
@@ -2073,8 +2134,9 @@ function RegisterStaffModal({ onClose, showToast }) {
           </div>
         </div>
         <Field label="Correo electrónico *"><input className="form-input" type="email" placeholder="tu@correo.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></Field>
-        <div style={{ marginBottom:24 }}><Field label="Contraseña *"><input className="form-input" type="password" placeholder="Mín. 8, con mayús, minús y número" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></Field></div>
-        <button className="btn btn-premium" style={{ width:"100%" }} onClick={handle} disabled={loading}>{loading?"Enviando...":"Enviar solicitud de registro →"}</button>
+        <div style={{ marginBottom:16 }}><Field label="Contraseña *"><input className="form-input" type="password" placeholder="Mín. 8, con mayús, minús y número" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></Field></div>
+        <AceptoTerminos checked={acepto} onChange={setAcepto}/>
+        <button className="btn btn-premium" style={{ width:"100%" }} onClick={handle} disabled={loading||!acepto}>{loading?"Enviando...":"Enviar solicitud de registro →"}</button>
       </div>
     </div>
   );
