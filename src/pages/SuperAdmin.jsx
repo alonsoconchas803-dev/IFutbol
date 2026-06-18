@@ -1037,7 +1037,7 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
       {/* ── MODAL CANCHA ── */}
       {modal === "cancha" && (
         <div style={s.overlay} onClick={() => setModal(null)}>
-          <div style={{ ...s.modalBox, maxWidth: 560, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+          <div style={{ ...s.modalBox, maxWidth: 560 }} onClick={e => e.stopPropagation()}>
             <h3 style={s.modalTitle}>{editCanchaId ? "Editar unidad deportiva" : "Nueva unidad deportiva"}</h3>
 
             <div style={s.field}>
@@ -1271,8 +1271,12 @@ const s = {
   barTrack: { flex: 1, height: 7, background: "#e5e7eb", borderRadius: 4, overflow: "hidden" },
   barFill: { height: "100%", background: GREEN, borderRadius: 4, transition: "width 0.5s ease" },
   barCount: { fontSize: 11.5, fontWeight: 700, color: "#111827", width: 18, textAlign: "right" },
-  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 12 },
-  modalBox: { background: "#ffffff", border: `1px solid ${BORDER}`, borderRadius: 14, padding: 20, width: "100%", maxWidth: 440, boxSizing: "border-box", boxShadow: "0 8px 32px rgba(0,0,0,0.12)", maxHeight: "92vh", overflowY: "auto", overflowX: "hidden" },
+  // El overlay scrollea todo el contenido; el modalBox usa margin:auto para
+  // centrarse cuando cabe y, cuando es más alto que la pantalla, mantener el
+  // borde superior alcanzable (a diferencia de justify-content:center, que lo
+  // recorta). WebkitOverflowScrolling para scroll fluido en iOS.
+  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)", display: "flex", flexDirection: "column", overflowY: "auto", WebkitOverflowScrolling: "touch", zIndex: 1000, padding: 12, boxSizing: "border-box" },
+  modalBox: { background: "#ffffff", border: `1px solid ${BORDER}`, borderRadius: 14, padding: 20, width: "100%", maxWidth: 440, margin: "auto", boxSizing: "border-box", boxShadow: "0 8px 32px rgba(0,0,0,0.12)", overflowX: "hidden" },
   modalTitle: { fontSize: 17, fontWeight: 800, color: "#111827", marginBottom: 18 },
   field: { marginBottom: 14, flex: 1 },
   formRow: { display: "flex", gap: 10, flexWrap: "wrap" },

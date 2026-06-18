@@ -66,7 +66,11 @@ select option { background: #fff; color: var(--text); }
 @keyframes slideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
 @keyframes glow { 0%,100% { box-shadow: 0 0 10px var(--green-glow); } 50% { box-shadow: 0 0 24px var(--green-glow); } }
 
-.animate-in { animation: fadeIn 0.35s ease forwards; }
+/* Sin "forwards": con fill-mode forwards, iOS Safari mantiene un stacking
+   context permanente que atrapa el overlay de los modales (queda por debajo
+   del topbar). fadeIn termina en opacity:1 (el default), así que quitarlo no
+   cambia el resultado visual. */
+.animate-in { animation: fadeIn 0.35s ease; }
 
 /* ── CARDS ── (mobile-only: padding compacto, sin transformaciones que muevan layout) */
 .card {
