@@ -220,9 +220,9 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
   };
 
   const eliminarCancha = async (id) => {
-    if (!confirm("¿Eliminar esta unidad deportiva? Se eliminarán también sus ligas.")) return;
+    if (!confirm("¿Eliminar esta unidad deportiva? Esta acción no se puede deshacer.\n\nSolo se puede eliminar si ya no tiene ligas. Las estadísticas históricas de los jugadores no se ven afectadas.")) return;
     try {
-      await db(`/canchas?id=eq.${id}`, token, { method: "DELETE" });
+      await db("/rpc/eliminar_unidad", token, { method: "POST", body: JSON.stringify({ p_cancha_id: id }) });
       showToast("Unidad deportiva eliminada");
       cargarCanchas();
     } catch (e) { showToast(e.message, "err"); }
