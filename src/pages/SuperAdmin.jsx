@@ -543,18 +543,16 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
       {/* ── SECCIÓN CANCHAS ── */}
       {seccion === "canchas" && (
         <div>
-          <div style={s.secHeader}>
-            <span style={s.secCount}>{canchas.length} unidades deportivas registradas</span>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {canchas.length > 1 && (
-                <button style={reordenando ? s.btnReordenarOn : s.btnReordenar} onClick={() => setReordenando(!reordenando)}>
-                  {reordenando ? "✓ Listo" : "↕ Reordenar"}
-                </button>
-              )}
-              <button style={s.btnAdd} onClick={() => { setCanchaForm({ nombre: "", direccion: "", num_canchas: 1, logo_url: "", estilo_tarjeta: "logo_arriba", color_marca: "#4f8f2f", lema: "", portada_url: "", tamano_logo: "mediano", forma_logo: "cuadrado", intensidad_fondo: "medio" }); setLogoFile(null); setLogoPreview(null); setPortadaFile(null); setPortadaPreview(null); setEditCanchaId(null); setModal("cancha"); }}>
-                + Nueva unidad deportiva
+          <div style={{ ...s.secCount, marginBottom: 10 }}>{canchas.length} unidades deportivas registradas</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+            <button style={s.btnAdd} onClick={() => { setCanchaForm({ nombre: "", direccion: "", num_canchas: 1, logo_url: "", estilo_tarjeta: "logo_arriba", color_marca: "#4f8f2f", lema: "", portada_url: "", tamano_logo: "mediano", forma_logo: "cuadrado", intensidad_fondo: "medio" }); setLogoFile(null); setLogoPreview(null); setPortadaFile(null); setPortadaPreview(null); setEditCanchaId(null); setModal("cancha"); }}>
+              + Nueva unidad deportiva
+            </button>
+            {canchas.length > 1 && (
+              <button style={reordenando ? s.btnReordenarOn : s.btnReordenar} onClick={() => setReordenando(!reordenando)}>
+                {reordenando ? "✓ Listo" : "↕ Reordenar"}
               </button>
-            </div>
+            )}
           </div>
 
           {canchas.length === 0 ? (
