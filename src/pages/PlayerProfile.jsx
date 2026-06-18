@@ -497,27 +497,30 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
 
   // ── ESTADÍSTICAS ──────────────────────────────────────────────
   const cargarEstadisticas = async () => {
-    if (!jugador || inscripciones.length === 0) return;
+    // Cargamos aunque no haya inscripciones: el jugador puede tener solo
+    // estadísticas históricas (de ligas ya borradas) que igual hay que mostrar.
+    if (!jugador) return;
     setStatsLoading(true);
     try {
       const equipoIds = [...new Set(inscripciones.map(i => i.equipo_id))];
       const ligaIds = [...new Set(inscripciones.map(i => i.liga_id))];
+      const tieneInscripciones = equipoIds.length > 0;
 
-      const ligasFull = await db(
+      const ligasFull = tieneInscripciones ? await db(
         `/ligas?id=in.(${ligaIds.join(",")})&select=id,nombre,temporada,activa,color_marca,cancha_id,canchas(nombre)`,
         token
-      );
+      ) : [];
 
       // Cargar todos los equipos de los partidos (rivales) en batch separado
-      const partidosRaw = await db(
+      const partidosRaw = tieneInscripciones ? await db(
         `/partidos?or=(equipo_local_id.in.(${equipoIds.join(",")}),equipo_visitante_id.in.(${equipoIds.join(",")}))&equipo_local_id=not.is.null&equipo_visitante_id=not.is.null&select=id,equipo_local_id,equipo_visitante_id,jornada_id,jornadas(numero,fecha,liga_id),ficha_partido(*)`,
         token
-      );
+      ) : [];
 
-      const liguillaRaw = await db(
+      const liguillaRaw = tieneInscripciones ? await db(
         `/liguilla_partidos?or=(equipo_local_id.in.(${equipoIds.join(",")}),equipo_visitante_id.in.(${equipoIds.join(",")}))&cerrado=eq.true&select=id,liga_id,equipo_local_id,equipo_visitante_id,fase,goles_local,goles_visitante,goleadores,jornadas(numero,fecha)`,
         token
-      );
+      ) : [];
 
       // Cargar info de TODOS los equipos involucrados (mis equipos + rivales)
       const todosEquipoIds = new Set(equipoIds);
@@ -591,6 +594,36 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
         });
       }
 
+      // Estadísticas históricas congeladas (de ligas/unidades ya borradas).
+      // Vienen denormalizadas: se mapean a la MISMA forma que los partidos en
+      // vivo. Solo existen para ligas borradas → no hay doble conteo. Se marcan
+      // activa:false para que caigan en el ámbito "histórico".
+      const historico = await db(
+        `/estadisticas_historicas?jugador_id=eq.${jugador.id}&select=*`,
+        token
+      );
+      (historico || []).forEach(h => {
+        procesados.push({
+          id: h.id,
+          liga_id: h.liga_id,
+          liga_nombre: h.liga_nombre,
+          temporada: h.temporada,
+          activa: false,
+          unidad: h.unidad_nombre,
+          color_liga: h.color_liga,
+          jornada: h.jornada,
+          fecha: h.fecha,
+          miEquipo: h.equipo_id ? { id: h.equipo_id, nombre: h.equipo_nombre, color_playera: h.equipo_color } : null,
+          rival: h.rival_id ? { id: h.rival_id, nombre: h.rival_nombre, color_playera: h.rival_color } : null,
+          miMarcador: h.mi_marcador,
+          rivalMarcador: h.rival_marcador,
+          misGoles: h.mis_goles,
+          presente: h.presente,
+          tipo: h.tipo,
+          fase: h.fase,
+        });
+      });
+
       procesados.sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
       setPartidosJugados(procesados);
 
@@ -611,10 +644,18 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
   // Recarga cada vez que se entra a la sección o cambian las inscripciones,
   // para reflejar fichas recién cerradas o cambios del árbitro.
   useEffect(() => {
-    if (seccion === "estadisticas" && jugador && inscripciones.length > 0) {
+    if (seccion === "estadisticas" && jugador) {
       cargarEstadisticas();
     }
   }, [seccion, jugador?.id, inscripciones.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Si el jugador solo tiene historial (todas sus ligas activas se borraron),
+  // abrimos directo el ámbito histórico para que vea sus estadísticas.
+  useEffect(() => {
+    if (partidosJugados.length > 0 && !partidosJugados.some(p => p.activa)) {
+      setAmbitoStats("historico");
+    }
+  }, [partidosJugados]);
 
   // Helper: agrega un partido a un acumulador de stats { pj, goles, v, e, d }.
   const acumStats = (acc, p) => {
@@ -1012,7 +1053,7 @@ export default function PlayerProfile({ session, seccionInicial = "perfil", setT
         <div>
           {statsLoading ? (
             <div style={{ textAlign:"center", padding:60 }}><div style={s.spinner} /></div>
-          ) : ligasInscrito.length === 0 ? (
+          ) : ligasInscrito.length === 0 && !hayHistorico ? (
             <div style={s.empty}>
               <div style={s.emptyIcon}>📊</div>
               <div style={s.emptyTxt}>Aún no estás inscrito en ningún torneo</div>

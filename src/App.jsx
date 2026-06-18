@@ -76,6 +76,7 @@ const MENU = {
     { icon:"📊", label:"Resumen",             key:"stats" },
     { icon:"📨", label:"Solicitudes",         key:"solicitudes" },
     { icon:"⚽", label:"Resultados",          key:"resultados" },
+    { icon:"📢", label:"Publicidad",          key:"publicidad" },
     { icon:"📜", label:"Registro de acciones", key:"auditoria" },
   ],
   league_admin: [
@@ -113,6 +114,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen]   = useState(false);
   const [toast, setToast]               = useState(null);
   const [canchas, setCanchas]           = useState([]);
+  const [publicidadHome, setPublicidadHome] = useState([]);
   const [topbarBack, setTopbarBack]     = useState(null);
   const [recoveryToken, setRecoveryToken] = useState(null);
   // Cuando se crea el perfil de jugador por primera vez (auto-creado desde
@@ -136,7 +138,10 @@ export default function App() {
   const goDashboard = useCallback((sec) => { setDashSeccion(sec || null); setScreen("dashboard"); }, []);
 
   useEffect(() => {
-    db("/canchas?select=*&order=created_at.asc").then(d => setCanchas(d || []));
+    db("/canchas?select=*&order=orden,created_at.asc").then(d => setCanchas(d || []));
+    db("/publicidad_home?activo=eq.true&select=*&order=orden,created_at")
+      .then(d => setPublicidadHome(d || []))
+      .catch(() => setPublicidadHome([]));
   }, []);
 
   // Detectar enlaces de recuperación de contraseña de Supabase.
@@ -363,7 +368,7 @@ export default function App() {
       initials={initials()} toast={toast} onHome={goHome}
       onDashboard={goDashboard}
       topbarBack={topbarBack}>
-      <HomePage canchas={canchas} onVerUnidad={c => { setUnidadActiva(c); setScreen("unidad"); setSidebarOpen(false); setTopbarBack(null); }} />
+      <HomePage canchas={canchas} publicidad={publicidadHome} onVerUnidad={c => { setUnidadActiva(c); setScreen("unidad"); setSidebarOpen(false); setTopbarBack(null); }} />
       <Modals modal={modal} setModal={setModal} onLogin={handleLogin} showToast={showToast} />
     </PublicLayout>
   );
@@ -391,7 +396,7 @@ function DashboardLayout({ session, userRole, jugadorData, displayName, onLogout
   const menuItems = MENU[rol] || [];
   const [activeSection, setActiveSection] = useState(seccionInicial || menuItems[0]?.key || "panel");
 
-  const SUPER_MAP  = { canchas:"canchas", ligas:"ligas", equipos:"equipos", stats:"stats", solicitudes:"solicitudes", resultados:"resultados", auditoria:"auditoria" };
+  const SUPER_MAP  = { canchas:"canchas", ligas:"ligas", equipos:"equipos", stats:"stats", solicitudes:"solicitudes", resultados:"resultados", publicidad:"publicidad", auditoria:"auditoria" };
   const LEAGUE_MAP = { torneos:"torneos", equipos:"equipos", jugadores:"jugadores", calendario:"calendario", arbitros:"arbitros", fichas:"fichas", resultados:"resultados", personalizar:"personalizar" };
   const REFEREE_MAP = { partidos:"partidos", fichas:"fichas", unidades:"unidades" };
   const PLAYER_MAP = { perfil:"perfil", ligas:"ligas", estadisticas:"estadisticas" };
@@ -656,7 +661,7 @@ function UnidadCard({ c, onClick }) {
 // ─────────────────────────────────────────────────────────────────
 // HOME PAGE
 // ─────────────────────────────────────────────────────────────────
-function HomePage({ canchas, onVerUnidad }) {
+function HomePage({ canchas, publicidad = [], onVerUnidad }) {
   return (
     <div>
       <div style={{ marginBottom:28, padding:"20px 24px", background:"var(--green)", borderRadius:"var(--radius-lg)", boxShadow:"0 4px 16px rgba(79,143,47,0.3)" }}>
@@ -665,12 +670,7 @@ function HomePage({ canchas, onVerUnidad }) {
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(220px, 1fr))", gap:16 }}>
         {canchas.map(c => <UnidadCard key={c.id} c={c} onClick={() => onVerUnidad(c)} />)}
-        <div style={{ background:"white", borderRadius:"var(--radius-md)", padding:20, boxShadow:"var(--shadow-md)", border:"1px solid var(--border)", minHeight:180, display:"flex", flexDirection:"column" }}>
-          <div style={{ fontSize:11, fontWeight:700, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:1, marginBottom:12 }}>Publicidad</div>
-          <div style={{ flex:1, background:"var(--bg)", borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", color:"var(--text-muted)", fontSize:13, padding:20, textAlign:"center" }}>
-            📢 Espacio publicitario
-          </div>
-        </div>
+        {publicidad.map(p => <PublicidadCard key={p.id} p={p} />)}
         {canchas.length === 0 && (
           <div className="empty-state" style={{ gridColumn:"1/-1" }}>
             <div className="empty-state-icon">🏟️</div>
@@ -680,6 +680,27 @@ function HomePage({ canchas, onVerUnidad }) {
       </div>
     </div>
   );
+}
+
+// Tarjeta de publicidad de la página principal. Si trae enlace, es clicable
+// (se abre en pestaña nueva); si no, es solo imagen (comercios sin sitio web).
+function PublicidadCard({ p }) {
+  const inner = (
+    <div style={{ background:"white", borderRadius:"var(--radius-md)", boxShadow:"var(--shadow-md)", border:"1px solid var(--border)", overflow:"hidden", minHeight:180, display:"flex", flexDirection:"column", height:"100%" }}>
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:1, padding:"14px 16px 0" }}>Publicidad</div>
+      <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", padding:14 }}>
+        <img src={p.imagen_url} alt="Publicidad" loading="lazy" style={{ maxWidth:"100%", maxHeight:160, objectFit:"contain", borderRadius:8 }} />
+      </div>
+    </div>
+  );
+  if (p.enlace) {
+    return (
+      <a href={p.enlace} target="_blank" rel="noopener noreferrer" style={{ textDecoration:"none", display:"block" }}>
+        {inner}
+      </a>
+    );
+  }
+  return inner;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -755,7 +776,7 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
   const [liguilla, setLiguilla] = useState([]);
 
   useEffect(() => {
-    db(`/ligas?cancha_id=eq.${cancha.id}&activa=eq.true&select=*&order=nombre`).then(data => {
+    db(`/ligas?cancha_id=eq.${cancha.id}&activa=eq.true&select=*&order=orden,nombre`).then(data => {
       setTorneos(data || []);
       setLoading(false);
     });

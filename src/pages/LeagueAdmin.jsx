@@ -125,12 +125,30 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
   const cargarLigas = async () => {
     try {
       const ligaFiltro = userRole?.cancha_id ? `&cancha_id=eq.${userRole.cancha_id}` : "";
-      const data = await db(`/ligas?select=*,canchas(nombre)&activa=eq.true${ligaFiltro}&order=nombre`, token);
+      const data = await db(`/ligas?select=*,canchas(nombre)&activa=eq.true${ligaFiltro}&order=orden,nombre`, token);
       setLigas(data || []);
       if (data?.length > 0 && !ligaSeleccionada) {
         setLigaSeleccionada(data[0]);
       }
     } catch (e) { showToast(e.message, "err"); }
+  };
+
+  // Reordenar torneos de la unidad con flechas: intercambia "orden" entre vecinos.
+  const moverLiga = async (idx, dir) => {
+    const nuevoIdx = idx + dir;
+    if (nuevoIdx < 0 || nuevoIdx >= ligas.length) return;
+    const a = ligas[idx], b = ligas[nuevoIdx];
+    const previo = ligas;
+    const copia = [...ligas];
+    copia[idx] = { ...b, orden: a.orden };
+    copia[nuevoIdx] = { ...a, orden: b.orden };
+    setLigas(copia);
+    try {
+      await Promise.all([
+        db(`/ligas?id=eq.${a.id}`, token, { method: "PATCH", body: JSON.stringify({ orden: b.orden }) }),
+        db(`/ligas?id=eq.${b.id}`, token, { method: "PATCH", body: JSON.stringify({ orden: a.orden }) }),
+      ]);
+    } catch (e) { setLigas(previo); showToast(e.message, "err"); }
   };
 
   // ── CARGAR EQUIPOS ────────────────────────────────────────────
@@ -779,14 +797,15 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
     if (!eliminarLigaTarget) return;
     setLoading(true);
     try {
-      await db(`/ligas?id=eq.${eliminarLigaTarget.id}`, token, { method: "DELETE" });
-      showToast("Torneo eliminado");
+      // RPC: congela las estadísticas de los jugadores y luego borra todo el
+      // subárbol del torneo (equipos, partidos, fichas, jornadas...).
+      await db("/rpc/eliminar_liga", token, { method: "POST", body: JSON.stringify({ p_liga_id: eliminarLigaTarget.id }) });
+      showToast("Torneo eliminado (estadísticas archivadas)");
       if (ligaSeleccionada?.id === eliminarLigaTarget.id) setLigaSeleccionada(null);
       setEliminarLigaTarget(null);
       await cargarLigas();
     } catch (e) {
-      // Lo más común: hay equipos/jornadas/fichas atadas y la FK lo bloquea.
-      showToast(e.message || "No se pudo eliminar (puede tener equipos o partidos)", "err");
+      showToast(e.message || "No se pudo eliminar el torneo", "err");
     }
     setLoading(false);
   };
@@ -1042,7 +1061,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
             </div>
           ) : (
             <div style={s.torneosGrid}>
-              {ligas.map(l => {
+              {ligas.map((l, idx) => {
                 const color = l.color_marca || "#4f8f2f";
                 const dia = l.dia || "—";
                 const turno = l.turno || "—";
@@ -1056,6 +1075,12 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                           <div style={s.torneoTemporada}>Temporada {l.temporada}</div>
                         )}
                       </div>
+                      {ligas.length > 1 && (
+                        <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
+                          <button style={{ ...s.btnEdit, opacity: idx === 0 ? 0.35 : 1 }} disabled={idx === 0} onClick={() => moverLiga(idx, -1)} title="Subir">↑</button>
+                          <button style={{ ...s.btnEdit, opacity: idx === ligas.length - 1 ? 0.35 : 1 }} disabled={idx === ligas.length - 1} onClick={() => moverLiga(idx, 1)} title="Bajar">↓</button>
+                        </div>
+                      )}
                     </div>
 
                     <div style={s.torneoMetaRow}>

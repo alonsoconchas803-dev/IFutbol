@@ -9,6 +9,10 @@ import ColorPicker from "../components/ColorPicker";
 const SUPABASE_URL = "https://qemsqvbwlfnaogdcwcrs.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jtbK9HuCWeZnok12oaWm6Q_t4dXOIUW";
 
+// Tope de tarjetas de publicidad en la página principal.
+const MAX_PUBLICIDAD = 6;
+const PUBLI_TAMANO_MAX_MB = 5;
+
 const db = async (path, token, options = {}) => {
   const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
     ...options,
@@ -60,6 +64,13 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
   const [ligaForm, setLigaForm] = useState({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: "", temporada: "", color_marca: "#4f8f2f" });
   const [editLigaId, setEditLigaId] = useState(null);
 
+  // Publicidad de la página principal
+  const [publicidad, setPublicidad] = useState([]);
+  const [publiFile, setPubliFile] = useState(null);
+  const [publiPreview, setPubliPreview] = useState(null);
+  const [publiEnlace, setPubliEnlace] = useState("");
+  const [publiLoading, setPubliLoading] = useState(false);
+
   // Resultados (fichas cerradas)
   const [resultados, setResultados] = useState([]);
   const [resultadosLoading, setResultadosLoading] = useState(false);
@@ -77,16 +88,51 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
   // ── CARGAR DATOS ──────────────────────────────────────────────
   const cargarCanchas = async () => {
     try {
-      const data = await db("/canchas?select=*&order=created_at.asc", token);
+      const data = await db("/canchas?select=*&order=orden,created_at.asc", token);
       setCanchas(data || []);
     } catch (e) { showToast(e.message, "err"); }
   };
 
   const cargarLigas = async () => {
     try {
-      const data = await db("/ligas?select=*,canchas(nombre)&order=created_at.asc", token);
+      const data = await db("/ligas?select=*,canchas(nombre)&order=orden,created_at.asc", token);
       setLigas(data || []);
     } catch (e) { showToast(e.message, "err"); }
+  };
+
+  // Reordenar con flechas: intercambia el valor "orden" de dos vecinos.
+  // Actualización optimista; si falla un PATCH se revierte recargando.
+  const moverCancha = async (idx, dir) => {
+    const nuevoIdx = idx + dir;
+    if (nuevoIdx < 0 || nuevoIdx >= canchas.length) return;
+    const a = canchas[idx], b = canchas[nuevoIdx];
+    const copia = [...canchas];
+    copia[idx] = { ...b, orden: a.orden };
+    copia[nuevoIdx] = { ...a, orden: b.orden };
+    setCanchas(copia);
+    try {
+      await Promise.all([
+        db(`/canchas?id=eq.${a.id}`, token, { method: "PATCH", body: JSON.stringify({ orden: b.orden }) }),
+        db(`/canchas?id=eq.${b.id}`, token, { method: "PATCH", body: JSON.stringify({ orden: a.orden }) }),
+      ]);
+    } catch (e) { showToast(e.message, "err"); cargarCanchas(); }
+  };
+
+  // Reordena ligas dentro de la lista mostrada (que ya viene filtrada por unidad
+  // cuando ligasCanchaFilter está activo), intercambiando "orden" entre vecinos.
+  const moverLiga = async (lista, idx, dir) => {
+    const nuevoIdx = idx + dir;
+    if (nuevoIdx < 0 || nuevoIdx >= lista.length) return;
+    const a = lista[idx], b = lista[nuevoIdx];
+    setLigas(prev => prev.map(l =>
+      l.id === a.id ? { ...l, orden: b.orden } : l.id === b.id ? { ...l, orden: a.orden } : l
+    ));
+    try {
+      await Promise.all([
+        db(`/ligas?id=eq.${a.id}`, token, { method: "PATCH", body: JSON.stringify({ orden: b.orden }) }),
+        db(`/ligas?id=eq.${b.id}`, token, { method: "PATCH", body: JSON.stringify({ orden: a.orden }) }),
+      ]);
+    } catch (e) { showToast(e.message, "err"); cargarLigas(); }
   };
 
   useEffect(() => { cargarCanchas(); cargarLigas(); }, []);
@@ -180,7 +226,97 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
 
   useEffect(() => {
     if (seccion === "resultados") cargarResultadosSA();
+    if (seccion === "publicidad") cargarPublicidad();
   }, [seccion, filtroLigaRes]);
+
+  // ── PUBLICIDAD DE LA PÁGINA PRINCIPAL ─────────────────────────
+  const cargarPublicidad = async () => {
+    try {
+      const data = await db("/publicidad_home?select=*&order=orden,created_at", token);
+      setPublicidad(data || []);
+    } catch (e) { showToast(e.message, "err"); }
+  };
+
+  const onPickPubliFile = (f) => {
+    if (!f) return;
+    if (f.size > PUBLI_TAMANO_MAX_MB * 1024 * 1024) {
+      const peso = (f.size / 1024 / 1024).toFixed(1);
+      showToast(`La imagen pesa ${peso} MB. Máximo permitido: ${PUBLI_TAMANO_MAX_MB} MB.`, "err");
+      return;
+    }
+    if (publiPreview?.startsWith("blob:")) URL.revokeObjectURL(publiPreview);
+    setPubliFile(f);
+    setPubliPreview(URL.createObjectURL(f));
+  };
+
+  const limpiarPubliForm = () => {
+    if (publiPreview?.startsWith("blob:")) URL.revokeObjectURL(publiPreview);
+    setPubliFile(null);
+    setPubliPreview(null);
+    setPubliEnlace("");
+  };
+
+  const agregarPublicidad = async () => {
+    if (!publiFile) return showToast("Sube una imagen primero", "err");
+    if (publicidad.length >= MAX_PUBLICIDAD) {
+      return showToast(`Máximo ${MAX_PUBLICIDAD} tarjetas de publicidad`, "err");
+    }
+    setPubliLoading(true);
+    try {
+      const ext = (publiFile.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `publicidad_home/${Date.now()}.${ext}`;
+      const imagen_url = await uploadFile("imagenes", path, publiFile, token);
+      const maxOrden = publicidad.reduce((m, p) => Math.max(m, p.orden ?? 0), -1);
+      const enlace = publiEnlace.trim() || null;
+      const creado = await db("/publicidad_home", token, {
+        method: "POST",
+        body: JSON.stringify({ imagen_url, enlace, orden: maxOrden + 1, activo: true }),
+      });
+      const fila = Array.isArray(creado) ? creado[0] : creado;
+      if (!fila) throw new Error("No se pudo guardar la publicidad.");
+      setPublicidad([...publicidad, fila]);
+      showToast("Publicidad agregada ✓");
+      limpiarPubliForm();
+    } catch (e) { showToast(e.message, "err"); }
+    setPubliLoading(false);
+  };
+
+  const togglePubliActivo = async (p) => {
+    try {
+      const filas = await db(`/publicidad_home?id=eq.${p.id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ activo: !p.activo }),
+      });
+      if (!Array.isArray(filas) || filas.length === 0) throw new Error("No se pudo actualizar (revisa permisos).");
+      setPublicidad(publicidad.map(x => x.id === p.id ? { ...x, activo: !p.activo } : x));
+    } catch (e) { showToast(e.message, "err"); }
+  };
+
+  const moverPublicidad = async (idx, dir) => {
+    const nuevoIdx = idx + dir;
+    if (nuevoIdx < 0 || nuevoIdx >= publicidad.length) return;
+    const a = publicidad[idx], b = publicidad[nuevoIdx];
+    const previo = publicidad;
+    const copia = [...publicidad];
+    copia[idx] = { ...b, orden: a.orden };
+    copia[nuevoIdx] = { ...a, orden: b.orden };
+    setPublicidad(copia);
+    try {
+      await Promise.all([
+        db(`/publicidad_home?id=eq.${a.id}`, token, { method: "PATCH", body: JSON.stringify({ orden: b.orden }) }),
+        db(`/publicidad_home?id=eq.${b.id}`, token, { method: "PATCH", body: JSON.stringify({ orden: a.orden }) }),
+      ]);
+    } catch (e) { setPublicidad(previo); showToast(e.message, "err"); }
+  };
+
+  const eliminarPublicidad = async (p) => {
+    if (!confirm("¿Eliminar esta tarjeta de publicidad?")) return;
+    try {
+      await db(`/publicidad_home?id=eq.${p.id}`, token, { method: "DELETE" });
+      setPublicidad(publicidad.filter(x => x.id !== p.id));
+      showToast("Publicidad eliminada");
+    } catch (e) { showToast(e.message, "err"); }
+  };
 
   // ── CANCHAS ───────────────────────────────────────────────────
   const guardarCancha = async () => {
@@ -271,10 +407,10 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
   };
 
   const eliminarLiga = async (id) => {
-    if (!confirm("¿Eliminar esta liga?")) return;
+    if (!confirm("¿Eliminar esta liga? Esta acción no se puede deshacer.\n\nSe borrarán sus equipos, partidos y fichas, pero las estadísticas de los jugadores quedarán archivadas en su historial.")) return;
     try {
-      await db(`/ligas?id=eq.${id}`, token, { method: "DELETE" });
-      showToast("Liga eliminada");
+      await db("/rpc/eliminar_liga", token, { method: "POST", body: JSON.stringify({ p_liga_id: id }) });
+      showToast("Liga eliminada (estadísticas archivadas)");
       cargarLigas();
     } catch (e) { showToast(e.message, "err"); }
   };
@@ -366,6 +502,7 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
           stats:       { icon: "📊", label: "RESUMEN",       title: "Estadísticas",         sub: "Visión general de la plataforma" },
           resultados:  { icon: "⚽", label: "FICHAS",         title: "Resultados",           sub: "Fichas cerradas y marcadores" },
           solicitudes: { icon: "📨", label: "REGISTROS",     title: "Solicitudes",          sub: "Aprobar o rechazar registros" },
+          publicidad:  { icon: "📢", label: "PUBLICIDAD",    title: "Publicidad principal", sub: "Tarjetas de anuncios en la página de inicio" },
           auditoria:   { icon: "📜", label: "AUDITORÍA",    title: "Registro de acciones", sub: "Acciones recientes de admins, árbitros y capitanes" },
         };
         const h = HEADERS[seccion] || HEADERS.canchas;
@@ -402,7 +539,7 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
             </div>
           ) : (
             <div style={s.grid}>
-              {canchas.map(c => (
+              {canchas.map((c, idx) => (
                 <div key={c.id} style={s.card} className="sa-card">
                   <div style={s.cardTop}>
                     <div style={s.cardIcon}>
@@ -412,6 +549,8 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
                     </div>
                     <div style={s.cardActionsCol}>
                       <div style={s.cardActions}>
+                        <button style={{ ...s.btnEdit, opacity: idx === 0 ? 0.35 : 1 }} disabled={idx === 0} onClick={() => moverCancha(idx, -1)} title="Subir">↑</button>
+                        <button style={{ ...s.btnEdit, opacity: idx === canchas.length - 1 ? 0.35 : 1 }} disabled={idx === canchas.length - 1} onClick={() => moverCancha(idx, 1)} title="Bajar">↓</button>
                         <button style={s.btnEdit} onClick={() => editarCancha(c)} title="Editar">✏️</button>
                         <button style={s.btnDel} onClick={() => eliminarCancha(c.id)} title="Eliminar">🗑️</button>
                       </div>
@@ -468,9 +607,15 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
             </div>
           ) : (
             <div style={s.ligaList}>
-              {ligasMostradas.map(l => (
+              {ligasMostradas.map((l, idx) => (
                 <div key={l.id} style={{ ...s.ligaRow, opacity: l.activa ? 1 : 0.5 }} className="sa-card">
                   <div style={s.ligaLeft}>
+                    {canchaFiltro && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        <button style={{ ...s.btnEdit, opacity: idx === 0 ? 0.35 : 1 }} disabled={idx === 0} onClick={() => moverLiga(ligasMostradas, idx, -1)} title="Subir">↑</button>
+                        <button style={{ ...s.btnEdit, opacity: idx === ligasMostradas.length - 1 ? 0.35 : 1 }} disabled={idx === ligasMostradas.length - 1} onClick={() => moverLiga(ligasMostradas, idx, 1)} title="Bajar">↓</button>
+                      </div>
+                    )}
                     <div style={{ ...s.ligaDot, background: l.activa ? "#4ade80" : "#666" }} />
                     <div>
                       <div style={s.ligaNombre}>{l.nombre}</div>
@@ -651,6 +796,80 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
                 </>
               )}
             </>
+          )}
+        </div>
+      )}
+
+      {/* ── SECCIÓN PUBLICIDAD (página principal) ── */}
+      {seccion === "publicidad" && (
+        <div>
+          <div style={s.secHeader}>
+            <span style={s.secCount}>{publicidad.length} / {MAX_PUBLICIDAD} tarjetas · se muestran en la página de inicio</span>
+          </div>
+
+          {publicidad.length === 0 ? (
+            <div style={s.empty}>
+              <div style={s.emptyIcon}>📢</div>
+              <div style={s.emptyTxt}>Aún no hay publicidad en la página principal. Agrega la primera abajo.</div>
+            </div>
+          ) : (
+            <div style={s.ligaList}>
+              {publicidad.map((p, idx) => (
+                <div key={p.id} style={{ ...s.ligaRow, opacity: p.activo ? 1 : 0.5 }} className="sa-card">
+                  <div style={s.ligaLeft}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <button style={{ ...s.btnEdit, opacity: idx === 0 ? 0.35 : 1 }} disabled={idx === 0} onClick={() => moverPublicidad(idx, -1)} title="Subir">↑</button>
+                      <button style={{ ...s.btnEdit, opacity: idx === publicidad.length - 1 ? 0.35 : 1 }} disabled={idx === publicidad.length - 1} onClick={() => moverPublicidad(idx, 1)} title="Bajar">↓</button>
+                    </div>
+                    <img src={p.imagen_url} alt="Publicidad" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 10, border: "1px solid #e5e7eb" }} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={s.ligaNombre}>{p.enlace ? "Con enlace" : "Sin enlace"}</div>
+                      <div style={{ ...s.ligaMeta, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }}>
+                        {p.enlace || "No clicable (solo imagen)"}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={s.ligaRight}>
+                    <span style={{ ...s.statusBadge, background: p.activo ? "#0d2a0d" : "#1a1a1a", color: p.activo ? "#4ade80" : "#666", border: `1px solid ${p.activo ? "#1a4a1a" : "#333"}` }}>
+                      {p.activo ? "Visible" : "Oculta"}
+                    </span>
+                    <button style={s.btnToggle} onClick={() => togglePubliActivo(p)}>{p.activo ? "Ocultar" : "Mostrar"}</button>
+                    <button style={s.btnDel} onClick={() => eliminarPublicidad(p)}>🗑️</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Formulario para agregar */}
+          {publicidad.length < MAX_PUBLICIDAD && (
+            <div style={{ marginTop: 20, padding: 18, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>+ Agregar tarjeta de publicidad</div>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+                <label style={{ cursor: "pointer", display: "block" }}>
+                  <div style={{ width: 120, height: 120, borderRadius: 12, border: "2px dashed #cbd5e1", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", background: "#f8fafc", color: "#94a3b8", fontSize: 13, textAlign: "center", padding: 8 }}>
+                    {publiPreview ? <img src={publiPreview} alt="preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "📷 Subir imagen"}
+                  </div>
+                  <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => onPickPubliFile(e.target.files?.[0])} />
+                </label>
+                <div style={{ flex: 1, minWidth: 220 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Enlace (opcional)</label>
+                  <input
+                    style={s.input}
+                    type="url"
+                    placeholder="https://… (déjalo vacío si no tienen sitio)"
+                    value={publiEnlace}
+                    onChange={e => setPubliEnlace(e.target.value)}
+                  />
+                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
+                    Si agregas un enlace, la tarjeta será clicable y abrirá esa página en una pestaña nueva.
+                  </div>
+                  <button style={{ ...s.btnAdd, marginTop: 12 }} onClick={agregarPublicidad} disabled={!publiFile || publiLoading}>
+                    {publiLoading ? "Subiendo..." : "📢 Agregar publicidad"}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       )}
