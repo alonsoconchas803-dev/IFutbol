@@ -68,6 +68,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
   const [seccion, setSeccion] = useState(seccionInicial);
   const [ligas, setLigas] = useState([]);
   const [ligaSeleccionada, setLigaSeleccionada] = useState(null);
+  const [reordenandoLigas, setReordenandoLigas] = useState(false); // muestra las flechas de orden
   const [equipos, setEquipos] = useState([]);
   const [jugadores, setJugadores] = useState([]);
   const [equipoDetalle, setEquipoDetalle] = useState(null);
@@ -1047,7 +1048,18 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
             <span style={{ fontSize:13, color:"#6b7280", fontWeight:600 }}>
               {ligas.length} {ligas.length === 1 ? "torneo activo" : "torneos activos"}
             </span>
-            <button style={s.btnAdd} onClick={abrirNuevoTorneo}>+ Nuevo torneo</button>
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+              {ligas.length > 1 && (
+                <button
+                  style={{ ...s.btnAdd, ...(reordenandoLigas
+                    ? { background:"#0d2a0d", color:"#4ade80", border:"1px solid #1a4a1a" }
+                    : { background:"#fff", color:"#374151", border:"1px solid #e5e7eb" }) }}
+                  onClick={() => setReordenandoLigas(!reordenandoLigas)}>
+                  {reordenandoLigas ? "✓ Listo" : "↕ Reordenar"}
+                </button>
+              )}
+              <button style={s.btnAdd} onClick={abrirNuevoTorneo}>+ Nuevo torneo</button>
+            </div>
           </div>
 
           {ligas.length === 0 ? (
@@ -1075,7 +1087,7 @@ export default function LeagueAdmin({ session, userRole, seccionInicial = "equip
                           <div style={s.torneoTemporada}>Temporada {l.temporada}</div>
                         )}
                       </div>
-                      {ligas.length > 1 && (
+                      {reordenandoLigas && ligas.length > 1 && (
                         <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
                           <button style={{ ...s.btnEdit, opacity: idx === 0 ? 0.35 : 1 }} disabled={idx === 0} onClick={() => moverLiga(idx, -1)} title="Subir">↑</button>
                           <button style={{ ...s.btnEdit, opacity: idx === ligas.length - 1 ? 0.35 : 1 }} disabled={idx === ligas.length - 1} onClick={() => moverLiga(idx, 1)} title="Bajar">↓</button>

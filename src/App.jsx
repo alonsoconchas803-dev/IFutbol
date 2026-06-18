@@ -138,7 +138,7 @@ export default function App() {
   const goDashboard = useCallback((sec) => { setDashSeccion(sec || null); setScreen("dashboard"); }, []);
 
   useEffect(() => {
-    db("/canchas?select=*&order=orden,created_at.asc").then(d => setCanchas(d || []));
+    db("/canchas?select=*&activa=eq.true&order=orden,created_at.asc").then(d => setCanchas(d || []));
     db("/publicidad_home?activo=eq.true&select=*&order=orden,created_at")
       .then(d => setPublicidadHome(d || []))
       .catch(() => setPublicidadHome([]));

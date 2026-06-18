@@ -44,6 +44,7 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
   const [modal, setModal] = useState(null); // "cancha" | "liga" | "equipo"
+  const [reordenando, setReordenando] = useState(false); // muestra las flechas de orden
 
   // Formulario canchas
   const [canchaForm, setCanchaForm] = useState({ nombre: "", direccion: "", num_canchas: 1, logo_url: "", estilo_tarjeta: "logo_arriba", color_marca: "#4f8f2f", lema: "", portada_url: "", tamano_logo: "mediano", forma_logo: "cuadrado", intensidad_fondo: "medio" });
@@ -145,6 +146,9 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
       setLigasCanchaFilter(null);
     }
   }, [seccionInicial]);
+
+  // El modo "reordenar" se apaga al cambiar de sección para no dejar flechas sueltas.
+  useEffect(() => { setReordenando(false); }, [seccion, ligasCanchaFilter]);
 
   // Topbar back: solo aparece cuando se está dentro de las ligas de una unidad
   // (la sección "auditoria" maneja su propio topbarBack internamente)
@@ -364,6 +368,21 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
     } catch (e) { showToast(e.message, "err"); }
   };
 
+  // Activar / desactivar unidad: una unidad inactiva no aparece en la
+  // página principal (igual que una liga inactiva).
+  const toggleCancha = async (c) => {
+    const activa = c.activa !== false;
+    try {
+      const filas = await db(`/canchas?id=eq.${c.id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ activa: !activa }),
+      });
+      if (!Array.isArray(filas) || filas.length === 0) throw new Error("No se pudo actualizar (revisa permisos).");
+      setCanchas(canchas.map(x => x.id === c.id ? { ...x, activa: !activa } : x));
+      showToast(activa ? "Unidad desactivada (oculta del inicio)" : "Unidad activada ✓");
+    } catch (e) { showToast(e.message, "err"); }
+  };
+
   const editarCancha = (c) => {
     setCanchaForm({
       nombre: c.nombre,
@@ -526,9 +545,16 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
         <div>
           <div style={s.secHeader}>
             <span style={s.secCount}>{canchas.length} unidades deportivas registradas</span>
-            <button style={s.btnAdd} onClick={() => { setCanchaForm({ nombre: "", direccion: "", num_canchas: 1, logo_url: "", estilo_tarjeta: "logo_arriba", color_marca: "#4f8f2f", lema: "", portada_url: "", tamano_logo: "mediano", forma_logo: "cuadrado", intensidad_fondo: "medio" }); setLogoFile(null); setLogoPreview(null); setPortadaFile(null); setPortadaPreview(null); setEditCanchaId(null); setModal("cancha"); }}>
-              + Nueva unidad deportiva
-            </button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {canchas.length > 1 && (
+                <button style={reordenando ? s.btnReordenarOn : s.btnReordenar} onClick={() => setReordenando(!reordenando)}>
+                  {reordenando ? "✓ Listo" : "↕ Reordenar"}
+                </button>
+              )}
+              <button style={s.btnAdd} onClick={() => { setCanchaForm({ nombre: "", direccion: "", num_canchas: 1, logo_url: "", estilo_tarjeta: "logo_arriba", color_marca: "#4f8f2f", lema: "", portada_url: "", tamano_logo: "mediano", forma_logo: "cuadrado", intensidad_fondo: "medio" }); setLogoFile(null); setLogoPreview(null); setPortadaFile(null); setPortadaPreview(null); setEditCanchaId(null); setModal("cancha"); }}>
+                + Nueva unidad deportiva
+              </button>
+            </div>
           </div>
 
           {canchas.length === 0 ? (
@@ -539,8 +565,10 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
             </div>
           ) : (
             <div style={s.grid}>
-              {canchas.map((c, idx) => (
-                <div key={c.id} style={s.card} className="sa-card">
+              {canchas.map((c, idx) => {
+                const activa = c.activa !== false;
+                return (
+                <div key={c.id} style={{ ...s.card, opacity: activa ? 1 : 0.55 }} className="sa-card">
                   <div style={s.cardTop}>
                     <div style={s.cardIcon}>
                       {c.logo_url
@@ -549,10 +577,17 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
                     </div>
                     <div style={s.cardActionsCol}>
                       <div style={s.cardActions}>
-                        <button style={{ ...s.btnEdit, opacity: idx === 0 ? 0.35 : 1 }} disabled={idx === 0} onClick={() => moverCancha(idx, -1)} title="Subir">↑</button>
-                        <button style={{ ...s.btnEdit, opacity: idx === canchas.length - 1 ? 0.35 : 1 }} disabled={idx === canchas.length - 1} onClick={() => moverCancha(idx, 1)} title="Bajar">↓</button>
-                        <button style={s.btnEdit} onClick={() => editarCancha(c)} title="Editar">✏️</button>
-                        <button style={s.btnDel} onClick={() => eliminarCancha(c.id)} title="Eliminar">🗑️</button>
+                        {reordenando ? (
+                          <>
+                            <button style={{ ...s.btnEdit, opacity: idx === 0 ? 0.35 : 1 }} disabled={idx === 0} onClick={() => moverCancha(idx, -1)} title="Subir">↑</button>
+                            <button style={{ ...s.btnEdit, opacity: idx === canchas.length - 1 ? 0.35 : 1 }} disabled={idx === canchas.length - 1} onClick={() => moverCancha(idx, 1)} title="Bajar">↓</button>
+                          </>
+                        ) : (
+                          <>
+                            <button style={s.btnEdit} onClick={() => editarCancha(c)} title="Editar">✏️</button>
+                            <button style={s.btnDel} onClick={() => eliminarCancha(c.id)} title="Eliminar">🗑️</button>
+                          </>
+                        )}
                       </div>
                       <button style={s.btnVerLigas} onClick={() => { setLigasCanchaFilter(c.id); setSeccion("ligas"); }}>
                         🏆 Ver ligas
@@ -565,8 +600,15 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
                   <div style={s.cardLigas}>
                     {ligas.filter(l => l.cancha_id === c.id).length} ligas activas
                   </div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 12, paddingTop: 12, borderTop: "1px solid #f1f5f9" }}>
+                    <span style={{ ...s.statusBadge, background: activa ? "#0d2a0d" : "#1a1a1a", color: activa ? "#4ade80" : "#999", border: `1px solid ${activa ? "#1a4a1a" : "#333"}` }}>
+                      {activa ? "Visible en inicio" : "Oculta"}
+                    </span>
+                    <button style={s.btnToggle} onClick={() => toggleCancha(c)}>{activa ? "Desactivar" : "Activar"}</button>
+                  </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -583,11 +625,18 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
               {ligasMostradas.length} {ligasMostradas.length === 1 ? "liga" : "ligas"}
               {canchaFiltro ? ` en ${canchaFiltro.nombre}` : " registradas"}
             </span>
-            <button style={s.btnAdd}
-              onClick={() => { setLigaForm({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: canchaFiltro?.id || "", temporada: "", color_marca: "#4f8f2f" }); setEditLigaId(null); setModal("liga"); }}
-              disabled={canchas.length === 0}>
-              + Nueva liga
-            </button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {canchaFiltro && ligasMostradas.length > 1 && (
+                <button style={reordenando ? s.btnReordenarOn : s.btnReordenar} onClick={() => setReordenando(!reordenando)}>
+                  {reordenando ? "✓ Listo" : "↕ Reordenar"}
+                </button>
+              )}
+              <button style={s.btnAdd}
+                onClick={() => { setLigaForm({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: canchaFiltro?.id || "", temporada: "", color_marca: "#4f8f2f" }); setEditLigaId(null); setModal("liga"); }}
+                disabled={canchas.length === 0}>
+                + Nueva liga
+              </button>
+            </div>
           </div>
 
           {canchas.length === 0 && (
@@ -610,7 +659,7 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
               {ligasMostradas.map((l, idx) => (
                 <div key={l.id} style={{ ...s.ligaRow, opacity: l.activa ? 1 : 0.5 }} className="sa-card">
                   <div style={s.ligaLeft}>
-                    {canchaFiltro && (
+                    {canchaFiltro && reordenando && (
                       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                         <button style={{ ...s.btnEdit, opacity: idx === 0 ? 0.35 : 1 }} disabled={idx === 0} onClick={() => moverLiga(ligasMostradas, idx, -1)} title="Subir">↑</button>
                         <button style={{ ...s.btnEdit, opacity: idx === ligasMostradas.length - 1 ? 0.35 : 1 }} disabled={idx === ligasMostradas.length - 1} onClick={() => moverLiga(ligasMostradas, idx, 1)} title="Bajar">↓</button>
@@ -1038,7 +1087,11 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
       {modal === "cancha" && (
         <div style={s.overlay} onClick={() => setModal(null)}>
           <div style={{ ...s.modalBox, maxWidth: 560 }} onClick={e => e.stopPropagation()}>
-            <h3 style={s.modalTitle}>{editCanchaId ? "Editar unidad deportiva" : "Nueva unidad deportiva"}</h3>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
+              <h3 style={{ ...s.modalTitle, marginBottom: 0 }}>{editCanchaId ? "Editar unidad deportiva" : "Nueva unidad deportiva"}</h3>
+              <button onClick={() => setModal(null)} aria-label="Cerrar"
+                style={{ background: "#f3f4f6", border: `1px solid ${BORDER}`, borderRadius: 8, width: 32, height: 32, minWidth: 32, cursor: "pointer", fontSize: 16, color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
+            </div>
 
             <div style={s.field}>
               <label style={s.label}>Nombre de la unidad deportiva *</label>
@@ -1233,6 +1286,8 @@ const s = {
   secHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 10, flexWrap: "wrap" },
   secCount: { color: "#6b7280", fontSize: 12 },
   btnAdd: { background: GREEN, color: "#ffffff", border: "none", borderRadius: 10, padding: "9px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer", minHeight: 40 },
+  btnReordenar: { background: "#ffffff", color: "#374151", border: `1px solid ${BORDER}`, borderRadius: 10, padding: "9px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer", minHeight: 40 },
+  btnReordenarOn: { background: "#0d2a0d", color: "#4ade80", border: "1px solid #1a4a1a", borderRadius: 10, padding: "9px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer", minHeight: 40 },
   grid: { display: "grid", gridTemplateColumns: "1fr", gap: 12 },
   card: { background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 12, padding: 14, boxShadow: "0 2px 8px rgba(79,143,47,0.08)", borderTop: `3px solid ${GREEN}` },
   cardTop: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 8 },
