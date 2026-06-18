@@ -618,23 +618,21 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
         const ligasMostradas = ligasCanchaFilter ? ligas.filter(l => l.cancha_id === ligasCanchaFilter) : ligas;
         return (
         <div>
-          <div style={s.secHeader}>
-            <span style={s.secCount}>
-              {ligasMostradas.length} {ligasMostradas.length === 1 ? "liga" : "ligas"}
-              {canchaFiltro ? ` en ${canchaFiltro.nombre}` : " registradas"}
-            </span>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {canchaFiltro && ligasMostradas.length > 1 && (
-                <button style={reordenando ? s.btnReordenarOn : s.btnReordenar} onClick={() => setReordenando(!reordenando)}>
-                  {reordenando ? "✓ Listo" : "↕ Reordenar"}
-                </button>
-              )}
-              <button style={s.btnAdd}
-                onClick={() => { setLigaForm({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: canchaFiltro?.id || "", temporada: "", color_marca: "#4f8f2f" }); setEditLigaId(null); setModal("liga"); }}
-                disabled={canchas.length === 0}>
-                + Nueva liga
+          <div style={{ ...s.secCount, marginBottom: 10 }}>
+            {ligasMostradas.length} {ligasMostradas.length === 1 ? "liga" : "ligas"}
+            {canchaFiltro ? ` en ${canchaFiltro.nombre}` : " registradas"}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+            <button style={s.btnAdd}
+              onClick={() => { setLigaForm({ nombre: "", dia: "Lunes", turno: "Noche", cancha_id: canchaFiltro?.id || "", temporada: "", color_marca: "#4f8f2f" }); setEditLigaId(null); setModal("liga"); }}
+              disabled={canchas.length === 0}>
+              + Nueva liga
+            </button>
+            {canchaFiltro && ligasMostradas.length > 1 && (
+              <button style={reordenando ? s.btnReordenarOn : s.btnReordenar} onClick={() => setReordenando(!reordenando)}>
+                {reordenando ? "✓ Listo" : "↕ Reordenar"}
               </button>
-            </div>
+            )}
           </div>
 
           {canchas.length === 0 && (
