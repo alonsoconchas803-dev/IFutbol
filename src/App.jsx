@@ -625,7 +625,7 @@ function UnidadCard({ c, onClick }) {
         <div style={{ position:"absolute", inset:0, background:`linear-gradient(180deg, rgba(0,0,0,${intCfg.alphaTop}) 0%, rgba(0,0,0,${intCfg.alphaBot}) 100%)`, zIndex:0 }} />
         {c.logo_url && (
           <div style={{ position:"absolute", top:12, right:12, width:48, height:48, borderRadius: c.forma_logo === "circulo" ? "50%" : 10, overflow:"hidden", boxShadow:"0 2px 8px rgba(0,0,0,0.4)", background:"#fff", zIndex:1, display:"flex", alignItems:"center", justifyContent:"center" }}>
-            <img src={c.logo_url} alt={c.nombre} style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+            <img src={c.logo_url} alt={c.nombre} style={{ width:"100%", height:"100%", objectFit: c.forma_logo === "circulo" ? "cover" : "contain" }} />
           </div>
         )}
         <div style={{ position:"relative", zIndex:1, marginTop: 60 }}>
@@ -647,7 +647,7 @@ function UnidadCard({ c, onClick }) {
       <div style={{ padding: conPortada ? "0 18px 18px" : 0 }}>
         <div style={{ width: tamano, height: tamano, borderRadius: radius, background: c.logo_url ? "#fff" : colorBg10, display:"flex", alignItems:"center", justifyContent:"center", fontSize: Math.round(tamano*0.45), marginBottom:14, marginTop: conPortada ? -tamano/2 : 0, overflow:"hidden", boxShadow: conPortada ? "0 4px 12px rgba(0,0,0,0.15)" : "none", border: conPortada ? "3px solid #fff" : "none" }}>
           {c.logo_url
-            ? <img src={c.logo_url} alt={c.nombre} style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+            ? <img src={c.logo_url} alt={c.nombre} style={{ width:"100%", height:"100%", objectFit: c.forma_logo === "circulo" ? "cover" : "contain" }} />
             : "🏟️"}
         </div>
         <div style={{ fontSize:16, fontWeight:800, color:"var(--text)", marginBottom: c.lema ? 3 : 5 }}>{c.nombre}</div>
@@ -1014,7 +1014,7 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
               {/* Logo */}
               <div style={{ width:75, height:75, background: cancha.logo_url ? "#fff" : `${colorMarca}22`, borderRadius: radiusLogo, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", border:"3px solid #fff", boxShadow:"0 4px 12px rgba(0,0,0,0.22)", fontSize:44, flexShrink:0 }}>
                 {cancha.logo_url
-                  ? <img src={cancha.logo_url} alt={cancha.nombre} style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+                  ? <img src={cancha.logo_url} alt={cancha.nombre} style={{ width:"100%", height:"100%", objectFit: cancha.forma_logo === "circulo" ? "cover" : "contain" }} />
                   : "🏟️"}
               </div>
               {/* Card glassmorphism */}
@@ -1043,7 +1043,7 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
           <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20 }}>
             <div style={{ fontSize:44, width:75, height:75, background: cancha.logo_url ? "#fff" : `${colorMarca}22`, borderRadius: radiusLogo, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", flexShrink:0 }}>
               {cancha.logo_url
-                ? <img src={cancha.logo_url} alt={cancha.nombre} style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+                ? <img src={cancha.logo_url} alt={cancha.nombre} style={{ width:"100%", height:"100%", objectFit: cancha.forma_logo === "circulo" ? "cover" : "contain" }} />
                 : "🏟️"}
             </div>
             <div style={{
@@ -1113,7 +1113,7 @@ function UnidadPage({ cancha, onBack, setTopbarBack }) {
           </div>
           <div style={{ width:58, height:58, background: cancha.logo_url ? "#fff" : "rgba(255,255,255,0.18)", borderRadius: cancha.forma_logo === "circulo" ? "50%" : 12, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", fontSize:30, flexShrink:0 }}>
             {cancha.logo_url
-              ? <img src={cancha.logo_url} alt="" style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+              ? <img src={cancha.logo_url} alt="" style={{ width:"100%", height:"100%", objectFit: cancha.forma_logo === "circulo" ? "cover" : "contain" }} />
               : "🏟️"}
           </div>
         </div>

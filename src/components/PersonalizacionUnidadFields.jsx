@@ -2,6 +2,7 @@
 // Reutilizado por SuperAdmin (al crear/editar) y LeagueAdmin (al personalizar la propia).
 
 import ColorPicker from "./ColorPicker";
+import { recortarCuadradoCentrado } from "../utils/recorteImagen";
 
 const COLORES_MARCA = ["#4f8f2f","#3182ce","#e53e3e","#dd6b20","#d69e2e","#805ad5","#d53f8c","#0ea5e9","#14b8a6","#1f2937"];
 
@@ -129,7 +130,14 @@ export default function PersonalizacionUnidadFields({
               : "🏟️"}
           </div>
         }
-        onPickFile={(f) => { limpiarBlob(logoPreview); setLogoFile(f); setLogoPreview(URL.createObjectURL(f)); }}
+        onPickFile={async (f) => {
+          // Recortamos a cuadrado centrado antes de subir: así el logo se ve
+          // completo y sin franjas tanto en círculo como en cuadrado redondeado.
+          const cuadrada = await recortarCuadradoCentrado(f);
+          limpiarBlob(logoPreview);
+          setLogoFile(cuadrada);
+          setLogoPreview(URL.createObjectURL(cuadrada));
+        }}
         onClear={() => { limpiarBlob(logoPreview); setLogoFile(null); setLogoPreview(null); setForm({ ...form, logo_url: "" }); }}
         showToast={showToast}
       />
