@@ -1220,10 +1220,31 @@ export default function SuperAdmin({ session, seccionInicial = "canchas", setTop
             </div>
             <div style={s.field}>
               <label style={s.label}>Unidad Deportiva *</label>
-              <select style={s.input} value={ligaForm.cancha_id} onChange={e => setLigaForm({ ...ligaForm, cancha_id: e.target.value })}>
-                <option value="">Selecciona una unidad deportiva</option>
-                {canchas.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-              </select>
+              {(() => {
+                // El cancha_id se fija desde la unidad por la que entraste
+                // ("Ver ligas"), así que no se elige a mano: se muestra fijo
+                // para evitar asignar la liga a la unidad equivocada por error.
+                const unidadFija = canchas.find(c => c.id === ligaForm.cancha_id);
+                if (unidadFija) {
+                  return (
+                    <>
+                      <div style={{ ...s.input, display: "flex", alignItems: "center", background: "#f3f4f6", color: "#374151", fontWeight: 600 }}>
+                        🏟️ {unidadFija.nombre}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "#6b7280", marginTop: 6 }}>
+                        La liga se creará en esta unidad deportiva.
+                      </div>
+                    </>
+                  );
+                }
+                // Fallback (no debería pasar): permitir elegir manualmente.
+                return (
+                  <select style={s.input} value={ligaForm.cancha_id} onChange={e => setLigaForm({ ...ligaForm, cancha_id: e.target.value })}>
+                    <option value="">Selecciona una unidad deportiva</option>
+                    {canchas.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  </select>
+                );
+              })()}
             </div>
             <div style={s.field}>
               <label style={s.label}>Temporada (opcional)</label>
