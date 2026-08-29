@@ -1772,84 +1772,24 @@ function ResetPasswordModal({ accessToken, onClose, onSuccess }) {
 // REGISTER PLAYER MODAL
 // ─────────────────────────────────────────────────────────────────
 function RegisterPlayerModal({ onClose, onLogin }) {
-  const [form, setForm] = useState({ email:"", password:"", confirm:"" });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState(null);
   const [acepto, setAcepto] = useState(false);
-
-  const handle = async () => {
-    if (!form.email || !form.password) return setError("Completa correo y contraseña");
-    if (form.password !== form.confirm) return setError("Las contraseñas no coinciden");
-    if (!acepto) return setError("Debes aceptar los Términos y el Aviso de Privacidad");
-    const pwdErr = validarPassword(form.password);
-    if (pwdErr) return setError(pwdErr);
-    setLoading(true); setError("");
-    // Solo creamos la cuenta. El perfil de jugador y su número de afiliado se
-    // llenan DESPUÉS, ya con sesión iniciada, desde CompletarPerfilJugadorModal.
-    // Guardamos el consentimiento (fecha + versión) en la metadata del usuario.
-    const data = await api("/auth/v1/signup", {
-      method: "POST",
-      body: JSON.stringify({
-        email: form.email,
-        password: form.password,
-        data: { acepto_terminos_at: new Date().toISOString(), version_terminos: LEGAL_VERSION },
-      }),
-    });
-    setLoading(false);
-    if (data.user || data.id) {
-      const token = data.session?.access_token || data.access_token;
-      // Con confirmación de correo activa no hay token → "revisa tu correo".
-      // Sin confirmación hay sesión → solo le pedimos iniciar sesión.
-      setSuccess(token ? "created" : "pending_confirmation");
-    } else {
-      setError(data.msg || data.error_description || "Error al registrarse");
-    }
-  };
-
-  if (success === "pending_confirmation") return (
-    <div className="ifutbol-overlay" onClick={onClose}>
-      <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:380,textAlign:"center" }}>
-        <div style={{ fontSize:52,marginBottom:14 }}>📧</div>
-        <h3 style={{ fontSize:22,fontWeight:800,marginBottom:8 }}>Revisa tu correo</h3>
-        <p style={{ color:"var(--text-sub)",marginBottom:16,lineHeight:1.5 }}>
-          Te enviamos un enlace de confirmación a <b>{form.email}</b>.
-        </p>
-        <p style={{ fontSize:13,color:"var(--text-sub)",marginBottom:22,lineHeight:1.45 }}>
-          Confírmalo, inicia sesión y completa tu perfil para obtener tu <b>número de afiliado</b>.
-        </p>
-        <button className="btn btn-premium" style={{ width:"100%" }} onClick={onLogin}>Ir a iniciar sesión →</button>
-      </div>
-    </div>
-  );
-
-  if (success) return (
-    <div className="ifutbol-overlay" onClick={onClose}>
-      <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:380,textAlign:"center" }}>
-        <div style={{ fontSize:52,marginBottom:14 }}>✅</div>
-        <h3 style={{ fontSize:22,fontWeight:800,marginBottom:8 }}>¡Cuenta creada!</h3>
-        <p style={{ color:"var(--text-sub)",marginBottom:22,lineHeight:1.5 }}>
-          Inicia sesión y completa tu perfil para obtener tu <b>número de afiliado</b>.
-        </p>
-        <button className="btn btn-premium" style={{ width:"100%" }} onClick={onLogin}>Ir a iniciar sesión →</button>
-      </div>
-    </div>
-  );
-
+  const [error, setError] = useState("");
+  // El alta de jugador es SOLO con Google: un toque, sin contraseñas ni correo de
+  // confirmación (así abaratamos el mantenimiento y quitamos fricción). El perfil
+  // y el número de afiliado se crean DESPUÉS, ya con sesión iniciada, desde
+  // CompletarPerfilJugadorModal, que también registra el consentimiento en la
+  // metadata. Aquí solo pedimos aceptar los Términos antes de arrancar el OAuth.
   return (
     <div className="ifutbol-overlay" onClick={onClose}>
-      <div className="ifutbol-modal" onClick={e=>e.stopPropagation()}>
-        <ModalHeader title="Crear cuenta de jugador" subtitle="Tu número de afiliado se genera automáticamente" onClose={onClose}/>
+      <div className="ifutbol-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth:400 }}>
+        <ModalHeader title="Crear cuenta de jugador" subtitle="Regístrate con tu cuenta de Google" onClose={onClose}/>
         {error&&<div style={m.err}>⚠️ {error}</div>}
-        <BotonGoogle label="Registrarse con Google" dividerPos="bottom" disabled={!acepto}
-          onBlocked={()=>setError("Primero acepta los Términos y el Aviso de Privacidad")}/>
-        <div style={{ marginBottom:14 }}><Field label="Correo electrónico *"><input className="form-input" type="email" placeholder="tu@correo.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></Field></div>
-        <div style={{ display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:"0 14px" }}>
-          <div style={{ marginBottom:20,minWidth:0 }}><Field label="Contraseña *"><input className="form-input" type="password" placeholder="Mín. 8, con mayús, minús y número" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></Field></div>
-          <div style={{ marginBottom:20,minWidth:0 }}><Field label="Confirmar contraseña *"><input className="form-input" type="password" placeholder="Repite tu contraseña" value={form.confirm} onChange={e=>setForm({...form,confirm:e.target.value})}/></Field></div>
-        </div>
+        <p style={{ fontSize:13.5,color:"var(--text-sub)",lineHeight:1.5,marginBottom:18 }}>
+          Crea tu cuenta con Google en un solo toque. Después completas tus datos y obtienes tu <b>número de afiliado</b> automáticamente.
+        </p>
         <AceptoTerminos checked={acepto} onChange={setAcepto}/>
-        <button className="btn btn-premium" style={{ width:"100%",marginBottom:14 }} onClick={handle} disabled={loading||!acepto}>{loading?"Creando cuenta...":"Crear cuenta de jugador →"}</button>
+        <BotonGoogle label="Registrarse con Google" dividerPos="none" disabled={!acepto}
+          onBlocked={()=>setError("Primero acepta los Términos y el Aviso de Privacidad")}/>
         <p style={{ textAlign:"center",fontSize:13,color:"var(--text-muted)" }}>¿Ya tienes cuenta? <span style={m.link} onClick={onLogin}>Inicia sesión</span></p>
       </div>
     </div>
