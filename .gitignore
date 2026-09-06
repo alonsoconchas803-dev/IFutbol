@@ -29,6 +29,7 @@ dist-ssr
 .agents/
 .claude/skills/pdf/
 skills-lock.json
+.claude/settings.local.json
 
 # Documentos privados de contratos con unidades deportivas
 contratos/
